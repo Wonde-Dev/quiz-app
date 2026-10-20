@@ -36,22 +36,17 @@ class _StudentManagementScreenState
   bool get _isAdmin => ref.read(authStateProvider).user?.role == AppRoles.admin;
 
   Future<List<Map<String, dynamic>>> _loadAccounts() async {
-    final client = Supabase.instance.client;
-    var query = client
-        .from('users')
-        .select('id, username, full_name, role, requested_role');
-    if (_isAdmin && _filterRole == 'all') {
-      query = query.inFilter('role', ['student', 'teacher', 'admin']);
-    } else {
-      query = query.eq('role', _isAdmin ? _filterRole : AppRoles.student);
+    final response = await Supabase.instance.client.functions.invoke(
+      'manage-account',
+      body: {'action': 'list', if (_isAdmin) 'role': _filterRole},
+    );
+    final data = response.data;
+    if (data is! Map<String, dynamic> || data['accounts'] is! List) {
+      throw const FormatException('Account service returned an invalid list');
     }
-    final currentUserId = client.auth.currentUser?.id;
-    if (currentUserId != null) query = query.neq('id', currentUserId);
-    if (!_isAdmin) {
-      query = query.or('requested_role.eq.student,requested_role.is.null');
-    }
-    final response = await query.order('full_name');
-    return List<Map<String, dynamic>>.from(response);
+    return (data['accounts'] as List)
+        .map((account) => Map<String, dynamic>.from(account as Map))
+        .toList();
   }
 
   Future<void> _reset(List<String> studentIds) async {
@@ -77,6 +72,87 @@ class _StudentManagementScreenState
     } finally {
       if (mounted) setState(() => _isResetting = false);
     }
+  }
+
+  Future<void> _resetVisibleAccounts() async {
+    late final List<Map<String, dynamic>> accounts;
+    try {
+      accounts = await _studentsFuture;
+    } catch (error) {
+      if (mounted) setState(() => _error = 'Could not load accounts: $error');
+      return;
+    }
+    if (!mounted || accounts.isEmpty) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Reset all visible passwords?'),
+        content: Text(
+          'This will reset ${accounts.length} passwords in the current account filter. '
+          'Each account holder will need to change their password after signing in.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Reset passwords'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    setState(() {
+      _isResetting = true;
+      _error = null;
+    });
+    final results = <PasswordResetResult>[];
+    final failures = <PasswordResetFailure>[];
+    final warnings = <String>[];
+    Object? batchError;
+    try {
+      final ids = accounts.map((account) => account['id'] as String).toList();
+      for (var start = 0; start < ids.length; start += 100) {
+        final end = (start + 100).clamp(0, ids.length);
+        final batch = await _resetService.resetAccounts(
+          ids.sublist(start, end),
+        );
+        results.addAll(batch.results);
+        failures.addAll(batch.failures);
+        warnings.addAll(batch.activityWarnings);
+      }
+    } catch (error) {
+      batchError = error;
+    } finally {
+      if (mounted) setState(() => _isResetting = false);
+    }
+    if (!mounted) return;
+    if (batchError != null) {
+      setState(
+        () => _error =
+            'Password reset stopped after a partial result: $batchError',
+      );
+    }
+    if (results.isEmpty) {
+      setState(() {
+        _error ??= failures.isEmpty
+            ? 'No passwords were reset.'
+            : failures
+                  .map((failure) => '${failure.accountId}: ${failure.message}')
+                  .join('\n');
+      });
+      return;
+    }
+    await _showCredentials(
+      PasswordResetBatchResult(
+        results: results,
+        failures: failures,
+        activityWarnings: warnings,
+      ),
+    );
   }
 
   Future<void> _createAccount() async {
@@ -135,15 +211,15 @@ class _StudentManagementScreenState
     final emailController = TextEditingController();
     final usernameController = TextEditingController();
     final passwordController = TextEditingController();
-    var role = _isAdmin && _filterRole != 'all'
-        ? _filterRole
+    final subjectController = TextEditingController();
+    var role = _isAdmin && _filterRole == AppRoles.teacher
+        ? AppRoles.teacher
         : AppRoles.student;
     String? schoolId = _isAdmin
         ? (schools.isEmpty ? null : schools.first['id'] as String)
         : ref.read(authStateProvider).user?.schoolId;
     String? sectionId;
-    Future<List<Map<String, dynamic>>> sectionsFuture =
-        role == AppRoles.student && schoolId != null
+    Future<List<Map<String, dynamic>>> sectionsFuture = schoolId != null
         ? _loadSectionsForSchool(schoolId)
         : Future.value([]);
     final formKey = GlobalKey<FormState>();
@@ -173,10 +249,6 @@ class _StudentManagementScreenState
                             value: AppRoles.teacher,
                             child: Text('Teacher'),
                           ),
-                          DropdownMenuItem(
-                            value: AppRoles.admin,
-                            child: Text('Administrator'),
-                          ),
                         ],
                         onChanged: (value) {
                           if (value == null) return;
@@ -186,14 +258,9 @@ class _StudentManagementScreenState
                               nameController.text,
                               role,
                             );
-                            if (role != AppRoles.admin && schoolId == null) {
+                            if (role != AppRoles.admin && schoolId == null && schools.isNotEmpty) {
                               schoolId = schools.first['id'] as String;
                             }
-                            sectionId = null;
-                            sectionsFuture =
-                                role == AppRoles.student && schoolId != null
-                                ? _loadSectionsForSchool(schoolId!)
-                                : Future.value([]);
                           });
                         },
                       ),
@@ -201,10 +268,8 @@ class _StudentManagementScreenState
                       controller: nameController,
                       decoration: const InputDecoration(labelText: 'Full name'),
                       textCapitalization: TextCapitalization.words,
-                      onChanged: (value) => setDialogState(
-                        () =>
-                            usernameController.text = _usernameFor(value, role),
-                      ),
+                      onChanged: (value) =>
+                          usernameController.text = _usernameFor(value, role),
                       validator: (value) =>
                           value == null ||
                               value.trim().split(RegExp(r'\s+')).length < 2
@@ -242,6 +307,17 @@ class _StudentManagementScreenState
                           ? 'Use at least 8 characters'
                           : null,
                     ),
+                    TextFormField(
+                      controller: subjectController,
+                      decoration: const InputDecoration(
+                        labelText: 'Main subject / teaching subject',
+                      ),
+                      textCapitalization: TextCapitalization.words,
+                      validator: (value) =>
+                          value == null || value.trim().isEmpty
+                          ? 'Enter a subject'
+                          : null,
+                    ),
                     if (_isAdmin && role != AppRoles.admin)
                       schools.isEmpty
                           ? const Padding(
@@ -267,13 +343,12 @@ class _StudentManagementScreenState
                               onChanged: (value) => setDialogState(() {
                                 schoolId = value;
                                 sectionId = null;
-                                sectionsFuture =
-                                    role == AppRoles.student && value != null
+                                sectionsFuture = value != null
                                     ? _loadSectionsForSchool(value)
                                     : Future.value([]);
                               }),
                             ),
-                    if (role == AppRoles.student)
+                    if (schoolId != null)
                       FutureBuilder<List<Map<String, dynamic>>>(
                         future: sectionsFuture,
                         builder: (context, snapshot) {
@@ -304,10 +379,10 @@ class _StudentManagementScreenState
                             );
                           }
                           return DropdownButtonFormField<String>(
-                            key: ValueKey('$schoolId-$role'),
+                            key: ValueKey(schoolId),
                             initialValue: sectionId,
                             decoration: const InputDecoration(
-                              labelText: 'Student grade and section',
+                              labelText: 'Grade and class or section',
                             ),
                             items: [
                               for (final section in sections)
@@ -321,7 +396,7 @@ class _StudentManagementScreenState
                             onChanged: (value) =>
                                 setDialogState(() => sectionId = value),
                             validator: (value) => value == null
-                                ? 'Choose the student’s grade and section'
+                                ? 'Choose a grade and class or section'
                                 : null,
                           );
                         },
@@ -339,7 +414,8 @@ class _StudentManagementScreenState
             FilledButton(
               onPressed:
                   (_isAdmin && role != AppRoles.admin && schoolId == null) ||
-                      (role == AppRoles.student && sectionId == null)
+                      (role == AppRoles.student && sectionId == null) ||
+                      (role == AppRoles.teacher && sectionId == null)
                   ? null
                   : () {
                       if (!formKey.currentState!.validate()) return;
@@ -349,11 +425,14 @@ class _StudentManagementScreenState
                         'username': usernameController.text.trim(),
                         'email': emailController.text.trim(),
                         'password': passwordController.text,
+                        'subject': subjectController.text.trim(),
                         if (role != AppRoles.admin)
                           'schoolId': _isAdmin
                               ? schoolId
                               : ref.read(authStateProvider).user?.schoolId,
-                        if (role == AppRoles.student) 'sectionId': sectionId,
+                        if (role == AppRoles.student ||
+                            role == AppRoles.teacher)
+                          'sectionId': sectionId,
                       });
                     },
               child: const Text('Create'),
@@ -366,6 +445,7 @@ class _StudentManagementScreenState
     emailController.dispose();
     usernameController.dispose();
     passwordController.dispose();
+    subjectController.dispose();
     return result;
   }
 
@@ -376,6 +456,21 @@ class _StudentManagementScreenState
   Future<List<Map<String, dynamic>>> _loadSectionsForSchool(
     String schoolId,
   ) async {
+    if (!_isAdmin) {
+      final response = await Supabase.instance.client.functions.invoke(
+        'manage-account',
+        body: {'action': 'classes'},
+      );
+      final data = response.data;
+      if (data is! Map<String, dynamic> || data['sections'] is! List) {
+        throw const FormatException(
+          'Account service returned invalid assigned classes',
+        );
+      }
+      return (data['sections'] as List)
+          .map((section) => Map<String, dynamic>.from(section as Map))
+          .toList();
+    }
     final rows = await Supabase.instance.client
         .from('sections')
         .select('id, name, school_grades!inner(name)')
@@ -514,7 +609,7 @@ class _StudentManagementScreenState
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text(_isAdmin ? 'Manage accounts' : 'Students'),
+        title: Text(_isAdmin ? 'Manage users' : 'Students'),
         actions: [
           if (_isAdmin)
             DropdownButton<String>(
@@ -535,11 +630,6 @@ class _StudentManagementScreenState
                 DropdownMenuItem(value: 'admin', child: Text('Admins')),
               ],
             ),
-          IconButton(
-            tooltip: _isAdmin ? 'Create account' : 'Register student',
-            onPressed: _isResetting ? null : _createAccount,
-            icon: const Icon(Icons.person_add_alt_1),
-          ),
           if (_selectedIds.isNotEmpty)
             TextButton.icon(
               onPressed: _isResetting
@@ -547,6 +637,12 @@ class _StudentManagementScreenState
                   : () => _reset(_selectedIds.toList()),
               icon: const Icon(Icons.key),
               label: Text('Reset selected (${_selectedIds.length})'),
+            ),
+          if (_isAdmin)
+            IconButton(
+              tooltip: 'Reset all visible account passwords',
+              onPressed: _isResetting ? null : _resetVisibleAccounts,
+              icon: const Icon(Icons.key),
             ),
         ],
       ),
@@ -578,6 +674,15 @@ class _StudentManagementScreenState
           return Column(
             children: [
               if (_isResetting) const LinearProgressIndicator(),
+              if (!_isAdmin)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+                  child: Text(
+                    'Tap the key beside a student to reset their password. '
+                    'They will change it after signing in.',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                ),
               if (_error != null)
                 MaterialBanner(
                   content: Text(_error!),
@@ -592,6 +697,7 @@ class _StudentManagementScreenState
                 child: students.isEmpty
                     ? const Center(child: Text('No students found.'))
                     : ListView.builder(
+                        padding: const EdgeInsets.only(bottom: 88),
                         itemCount: students.length,
                         itemBuilder: (context, index) {
                           final student = students[index];
@@ -617,7 +723,15 @@ class _StudentManagementScreenState
                             title: Text(
                               name?.isNotEmpty == true ? name! : username,
                             ),
-                            subtitle: Text(username),
+                            subtitle: Text(
+                              [
+                                username,
+                                if (student['class_labels'] is List &&
+                                    (student['class_labels'] as List)
+                                        .isNotEmpty)
+                                  (student['class_labels'] as List).join(', '),
+                              ].join('\n'),
+                            ),
                             trailing: Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [
@@ -629,13 +743,14 @@ class _StudentManagementScreenState
                                         : () => _reset([id]),
                                     icon: const Icon(Icons.lock_reset),
                                   ),
-                                IconButton(
-                                  tooltip: 'Delete account',
-                                  onPressed: _isResetting || _deletingId == id
-                                      ? null
-                                      : () => _deleteAccount(student),
-                                  icon: const Icon(Icons.delete_outline),
-                                ),
+                                if (_isAdmin)
+                                  IconButton(
+                                    tooltip: 'Delete account',
+                                    onPressed: _isResetting || _deletingId == id
+                                        ? null
+                                        : () => _deleteAccount(student),
+                                    icon: const Icon(Icons.delete_outline),
+                                  ),
                               ],
                             ),
                           );
@@ -645,6 +760,11 @@ class _StudentManagementScreenState
             ],
           );
         },
+      ),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: _isResetting ? null : _createAccount,
+        icon: const Icon(Icons.person_add_alt_1),
+        label: Text(_isAdmin ? 'Register user' : 'Register student'),
       ),
     );
   }

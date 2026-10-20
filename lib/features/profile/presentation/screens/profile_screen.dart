@@ -233,94 +233,90 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                           authState.isLoading ? 'Saving…' : 'Save profile',
                         ),
                       ),
-                      if (user.isAdmin || user.isTeacher) ...[
-                        const Divider(height: 40),
-                        Text(
-                          'Account security',
-                          style: Theme.of(context).textTheme.titleLarge,
-                        ),
-                        const SizedBox(height: 6),
-                        Text(
-                          'Change your password. We’ll verify your current password first.',
-                          style: Theme.of(context).textTheme.bodyMedium,
-                        ),
-                        const SizedBox(height: 16),
-                        Form(
-                          key: _passwordFormKey,
-                          child: Column(
-                            children: [
-                              TextFormField(
-                                controller: _currentPasswordController,
-                                obscureText: true,
-                                decoration: const InputDecoration(
-                                  labelText: 'Current password',
-                                  prefixIcon: Icon(Icons.lock_outline),
-                                ),
-                                validator: (value) =>
-                                    value == null || value.isEmpty
-                                    ? 'Enter your current password'
-                                    : null,
+                      const Divider(height: 40),
+                      Text(
+                        'Account security',
+                        style: Theme.of(context).textTheme.titleLarge,
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        'Change your password. We’ll verify your current password first.',
+                        style: Theme.of(context).textTheme.bodyMedium,
+                      ),
+                      const SizedBox(height: 16),
+                      Form(
+                        key: _passwordFormKey,
+                        child: Column(
+                          children: [
+                            TextFormField(
+                              controller: _currentPasswordController,
+                              obscureText: true,
+                              decoration: const InputDecoration(
+                                labelText: 'Current password',
+                                prefixIcon: Icon(Icons.lock_outline),
                               ),
-                              const SizedBox(height: 12),
-                              TextFormField(
-                                controller: _newPasswordController,
-                                obscureText: true,
-                                decoration: const InputDecoration(
-                                  labelText: 'New password',
-                                  prefixIcon: Icon(Icons.lock_reset_outlined),
-                                ),
-                                validator: (value) =>
-                                    value == null || value.length < 8
-                                    ? 'Use at least 8 characters'
-                                    : null,
-                              ),
-                              const SizedBox(height: 12),
-                              TextFormField(
-                                controller: _confirmPasswordController,
-                                obscureText: true,
-                                decoration: const InputDecoration(
-                                  labelText: 'Confirm new password',
-                                  prefixIcon: Icon(
-                                    Icons.verified_user_outlined,
-                                  ),
-                                ),
-                                validator: (value) =>
-                                    value != _newPasswordController.text
-                                    ? 'Passwords do not match'
-                                    : null,
-                              ),
-                            ],
-                          ),
-                        ),
-                        if (_passwordFeedback != null) ...[
-                          const SizedBox(height: 12),
-                          Text(
-                            _passwordFeedback!,
-                            style: TextStyle(
-                              color: _passwordSaved
-                                  ? Theme.of(context).colorScheme.primary
-                                  : Theme.of(context).colorScheme.error,
+                              validator: (value) =>
+                                  value == null || value.isEmpty
+                                  ? 'Enter your current password'
+                                  : null,
                             ),
-                          ),
-                        ],
-                        const SizedBox(height: 16),
-                        OutlinedButton.icon(
-                          onPressed: _savingPassword ? null : _changePassword,
-                          icon: _savingPassword
-                              ? const SizedBox.square(
-                                  dimension: 18,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2,
-                                  ),
-                                )
-                              : const Icon(Icons.password_outlined),
-                          label: Text(
-                            _savingPassword
-                                ? 'Changing password…'
-                                : 'Change password',
+                            const SizedBox(height: 12),
+                            TextFormField(
+                              controller: _newPasswordController,
+                              obscureText: true,
+                              decoration: const InputDecoration(
+                                labelText: 'New password',
+                                prefixIcon: Icon(Icons.lock_reset_outlined),
+                              ),
+                              validator: (value) =>
+                                  value == null || value.length < 8
+                                  ? 'Use at least 8 characters'
+                                  : null,
+                            ),
+                            const SizedBox(height: 12),
+                            TextFormField(
+                              controller: _confirmPasswordController,
+                              obscureText: true,
+                              decoration: const InputDecoration(
+                                labelText: 'Confirm new password',
+                                prefixIcon: Icon(Icons.verified_user_outlined),
+                              ),
+                              validator: (value) =>
+                                  value != _newPasswordController.text
+                                  ? 'Passwords do not match'
+                                  : null,
+                            ),
+                          ],
+                        ),
+                      ),
+                      if (_passwordFeedback != null) ...[
+                        const SizedBox(height: 12),
+                        Text(
+                          _passwordFeedback!,
+                          style: TextStyle(
+                            color: _passwordSaved
+                                ? Theme.of(context).colorScheme.primary
+                                : Theme.of(context).colorScheme.error,
                           ),
                         ),
                       ],
+                      const SizedBox(height: 16),
+                      OutlinedButton.icon(
+                        onPressed: _savingPassword ? null : _changePassword,
+                        icon: _savingPassword
+                            ? const SizedBox.square(
+                                dimension: 18,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
+                              )
+                            : const Icon(Icons.password_outlined),
+                        label: Text(
+                          _savingPassword
+                              ? 'Changing password…'
+                              : 'Change password',
+                        ),
+                      ),
                     ],
                   ),
                 ),

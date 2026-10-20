@@ -10,7 +10,7 @@ class Validators {
   static String? email(String? value) {
     if (value == null || value.trim().isEmpty) return 'Email is required';
     final regex = RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$');
-    if (!regex.hasMatch(value)) return 'Enter a valid email';
+    if (!regex.hasMatch(value.trim())) return 'Enter a valid email';
     return null;
   }
 
@@ -22,7 +22,9 @@ class Validators {
 
   static String? username(String? value) {
     if (value == null || value.trim().isEmpty) return 'Username is required';
-    if (value.trim().length < 3) return 'Username must be at least 3 characters';
+    if (value.trim().length < 3) {
+      return 'Username must be at least 3 characters';
+    }
     return null;
   }
 

@@ -23,7 +23,9 @@ class _AccountApprovalsScreenState extends State<AccountApprovalsScreen> {
   Future<List<Map<String, dynamic>>> _load() async {
     final rows = await Supabase.instance.client
         .from('users')
-        .select('id, username, email, full_name, requested_role, created_at')
+        .select(
+          'id, username, email, full_name, requested_role, requested_grade, requested_class, requested_subject, created_at',
+        )
         .eq('approval_status', 'pending')
         .order('created_at');
     return List<Map<String, dynamic>>.from(rows);
@@ -200,9 +202,15 @@ class _AccountApprovalsScreenState extends State<AccountApprovalsScreen> {
                             ),
                             subtitle: Text(
                               '${request['email'] ?? ''}\n'
-                              'Requested: ${request['requested_role']}',
+                              'Requested: ${request['requested_role']}'
+                              '${request['requested_grade'] == null ? '' : '\nGrade: ${request['requested_grade']}'}'
+                              '${request['requested_class'] == null ? '' : '\nClass: ${request['requested_class']}'}'
+                              '${request['requested_subject'] == null ? '' : '\nSubject: ${request['requested_subject']}'}',
                             ),
-                            isThreeLine: true,
+                            isThreeLine:
+                                request['requested_grade'] != null ||
+                                request['requested_class'] != null ||
+                                request['requested_subject'] != null,
                           ),
                           Wrap(
                             alignment: WrapAlignment.end,

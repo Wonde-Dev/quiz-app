@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:quiz_app/features/auth/presentation/providers/auth_provider.dart';
+import 'package:quiz_app/shared/widgets/dashboard_welcome_banner.dart';
 import 'package:quiz_app/shared/widgets/dashboard_shell.dart';
 
 class StudentDashboardScreen extends ConsumerWidget {
@@ -111,6 +112,10 @@ class _StudentQuizListState extends State<_StudentQuizList> {
               return ListView(
                 padding: const EdgeInsets.all(16),
                 children: [
+                  const DashboardWelcomeBanner(
+                    subtitle: 'Pick up where you left off and discover your next quiz.',
+                  ),
+                  const SizedBox(height: 24),
                   Text(
                     'My results',
                     style: Theme.of(context).textTheme.titleLarge,

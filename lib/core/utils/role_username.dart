@@ -6,24 +6,39 @@ String roleUsername(String fullName, String role) {
       .toList();
   if (words.length < 2) return '';
 
-  final name =
-      '${words.first[0].toUpperCase()}'
-      '${words.first.substring(1).toLowerCase()}'
-      '${words.skip(1).map((word) => word.toLowerCase()).join()}';
-  final suffix = switch (role) {
-    'admin' => 'A',
-    'teacher' => 'T',
-    _ => 'S',
+  final name = words
+      .map(
+        (word) => '${word[0].toUpperCase()}${word.substring(1).toLowerCase()}',
+      )
+      .join();
+  final roleName = switch (role) {
+    'admin' => 'Admin',
+    'teacher' => 'Teacher',
+    _ => 'Student',
   };
-  return '${name.length > 50 ? name.substring(0, 50) : name}@$suffix.edu';
+  return '${name.length > 50 ? name.substring(0, 50) : name}@$roleName.edu';
 }
 
 bool isRoleUsername(String username, String role) {
-  final suffix = switch (role) {
-    'admin' => 'A',
-    'teacher' => 'T',
-    _ => 'S',
+  final roleName = switch (role) {
+    'admin' => 'Admin',
+    'teacher' => 'Teacher',
+    _ => 'Student',
   };
-  return RegExp(r'^[A-Z][a-z]{1,49}@[ATS]\.edu$').hasMatch(username) &&
-      username.endsWith('@$suffix.edu');
+  return RegExp(r'^[A-Z][a-z]*([A-Z][a-z]*)+@(Admin|Teacher|Student)\.edu$')
+          .hasMatch(username) &&
+      username.endsWith('@$roleName.edu');
+}
+
+String? roleFromUsername(String username) {
+  if (!RegExp(r'^[A-Z][a-z]*([A-Z][a-z]*)+@(Admin|Teacher|Student)\.edu$')
+      .hasMatch(username)) {
+    return null;
+  }
+  return switch (username.split('@').last) {
+    'Admin.edu' => 'admin',
+    'Teacher.edu' => 'teacher',
+    'Student.edu' => 'student',
+    _ => null,
+  };
 }

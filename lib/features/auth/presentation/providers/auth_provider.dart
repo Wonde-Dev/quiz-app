@@ -94,6 +94,7 @@ class AuthNotifier extends Notifier<AuthState> {
   Future<void> signIn({
     required String emailOrUsername,
     required String password,
+    String? expectedRole,
   }) async {
     state = const AuthState(isLoading: true);
     try {
@@ -128,6 +129,15 @@ class AuthNotifier extends Notifier<AuthState> {
         state = const AuthState(error: 'This account has an unsupported role.');
         return;
       }
+      if (expectedRole != null && !appUser.canSignInWithRole(expectedRole)) {
+        await _authService.signOut();
+        state = AuthState(
+          error: appUser.isPendingApproval
+              ? 'This account is waiting for ${appUser.requestedRole} access approval and can use its current student access while pending.'
+              : 'This account is registered as a ${appUser.role}. Check that your username matches your assigned role.',
+        );
+        return;
+      }
       state = AuthState(
         user: appUser,
         needsPasswordChange: appUser.mustChangePassword,
@@ -156,6 +166,9 @@ class AuthNotifier extends Notifier<AuthState> {
     required String requestedRole,
     String? schoolId,
     String? sectionId,
+    String? requestedGrade,
+    String? requestedClass,
+    String? requestedSubject,
   }) async {
     state = const AuthState(isLoading: true);
     try {
@@ -167,14 +180,29 @@ class AuthNotifier extends Notifier<AuthState> {
         requestedRole: requestedRole,
         schoolId: schoolId,
         sectionId: sectionId,
+        requestedGrade: requestedGrade,
+        requestedClass: requestedClass,
+        requestedSubject: requestedSubject,
       );
       if (response.user == null) {
         throw StateError('The registration did not return a user account.');
       }
+      if (response.session != null) {
+        final appUser = await _authService.getAppUser(response.user!.id);
+        if (appUser == null) {
+          await _authService.signOut();
+          throw StateError('Your account was created but could not be loaded.');
+        }
+        state = AuthState(
+          user: appUser,
+          needsPasswordChange: appUser.mustChangePassword,
+        );
+        return;
+      }
       state = AuthState(
         successMessage: requestedRole == AppRoles.student
-            ? 'Check your email for a confirmation link. Once confirmed, sign in with your email.'
-            : 'Check your email for a confirmation link. After confirming, you can sign in with student access while your ${requestedRole == AppRoles.admin ? 'administrator' : 'teacher'} request is reviewed.',
+            ? 'Account created. Check your email to verify it, then sign in with $username.'
+            : 'Account created. Check your email to verify it, then sign in with $username while your ${requestedRole == AppRoles.admin ? 'administrator' : 'teacher'} access request is reviewed.',
       );
     } catch (error) {
       state = AuthState(
@@ -196,7 +224,17 @@ class AuthNotifier extends Notifier<AuthState> {
     final rows = await ref
         .read(supabaseProvider)
         .from('sections')
-        .select('id, name, school_grades!inner(name)')
+        .select('id, grade_id, name, school_grades!inner(name)')
+        .eq('school_id', schoolId)
+        .order('name');
+    return List<Map<String, dynamic>>.from(rows);
+  }
+
+  Future<List<Map<String, dynamic>>> loadGrades(String schoolId) async {
+    final rows = await ref
+        .read(supabaseProvider)
+        .from('school_grades')
+        .select('id, name')
         .eq('school_id', schoolId)
         .order('name');
     return List<Map<String, dynamic>>.from(rows);

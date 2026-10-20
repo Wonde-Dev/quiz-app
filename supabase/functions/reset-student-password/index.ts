@@ -107,6 +107,23 @@ Deno.serve(async (request) => {
     });
   }
 
+  let teacherSectionIds: string[] | null = null;
+  if (actor.role === "teacher") {
+    const { data: courses, error: coursesError } = await adminClient
+      .from("courses")
+      .select("section_id")
+      .eq("teacher_id", authData.user.id);
+    if (coursesError) {
+      return new Response(JSON.stringify({ error: "Could not load assigned classes" }), {
+        status: 500,
+        headers,
+      });
+    }
+    teacherSectionIds = [...new Set((courses ?? [])
+      .map((course) => course.section_id)
+      .filter((sectionId): sectionId is string => typeof sectionId === "string"))];
+  }
+
   const distinctIds = [...new Set(accountIds as string[])];
   const results: Array<{ accountId: string; username: string; temporaryPassword: string }> = [];
   const failures: Array<{ accountId: string; error: string }> = [];
@@ -130,7 +147,8 @@ Deno.serve(async (request) => {
         (student.role !== "student" ||
           (student.requested_role != null && student.requested_role !== "student") ||
           !actor.school_id ||
-          student.school_id !== actor.school_id))
+          student.school_id !== actor.school_id ||
+          !teacherSectionIds?.length))
     ) {
       failures.push({
         accountId,
@@ -139,6 +157,22 @@ Deno.serve(async (request) => {
           : "Account not found",
       });
       continue;
+    }
+    if (actor.role === "teacher") {
+      const { data: enrollment, error: enrollmentError } = await adminClient
+        .from("student_sections")
+        .select("student_id")
+        .eq("student_id", accountId)
+        .in("section_id", teacherSectionIds ?? [])
+        .limit(1)
+        .maybeSingle();
+      if (enrollmentError || !enrollment) {
+        failures.push({
+          accountId,
+          error: "Student is not enrolled in one of your assigned classes",
+        });
+        continue;
+      }
     }
 
     const password = temporaryPassword();

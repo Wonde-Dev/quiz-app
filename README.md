@@ -33,12 +33,11 @@ using Supabase Auth and the `users`, `quizzes`, `questions`, and `grades` tables
    Supabase provides the project URL and service-role secret to deployed
    functions. Never put a service-role key in the Flutter app.
 
-New accounts requesting teacher or administrator access can use their student
-profile immediately; an administrator must approve role elevation. A teacher
-approval also requires the administrator to assign a school ID. The first
-administrator is promoted by the schema/migration only if both the Supabase
-Auth UID and email match the configured values. No password is created or
-changed by the SQL.
+New accounts requesting teacher access use their student profile until an
+administrator approves the request and assigns a school. The
+`20261019050000_admin_invite_only.sql` migration promotes the existing Supabase
+Auth account for `wondedev369@gmail.com` without changing its password. Sign in
+with that email and the account's existing password.
 
 `schema.sql` creates the Auth signup trigger and alias validation. The CLI
 migration keeps that behavior aligned when applying incremental deployments.
@@ -61,26 +60,36 @@ activity involving their own account. Database triggers record profile,
 account, quiz, and result changes; sign-ins and quiz starts are recorded by the
 app, and account password resets are recorded by the reset function.
 
-The sign-in screen accepts registered email addresses and usernames. New
-accounts enter first and last name; usernames are generated without spaces as
-`Firstnamelastname@A.edu` for administrators, `Firstnamelastname@T.edu` for
-teachers, and `Firstnamelastname@S.edu` for students (for example,
-`Wondeassegid@A.edu`). Aliases are unique, and the first letter is capitalized
-while the remaining letters are lowercase. Existing legacy
+The single sign-in screen accepts registered email addresses and usernames;
+the `@Admin.edu`, `@Teacher.edu`, or `@Student.edu` suffix identifies the
+username's role without a role-selection screen. New accounts enter their full
+details on the separate registration page. Usernames are generated without
+spaces as
+`FirstnameLastname@Admin.edu`, `FirstnameLastname@Teacher.edu`, or
+`FirstnameLastname@Student.edu` (for example, `WondeAssegid@Student.edu`).
+Each name starts with a capital letter, and the username is unique. Existing legacy
 `username@school.local`, `Name@T.edu`, and `Name@S.edu` accounts remain
 supported. New profiles include a full name, unique username, email, school,
-and requested role. Apply `20261018000000_role_username_format.sql` before
-deploying this username format. Public teacher/admin registrations remain
-approval-gated and do not grant elevated access until an administrator approves
-them. Enable email confirmations in Supabase Auth. Users can
+and requested role. Apply all migrations through `admin_only_invite.sql` before
+deploying the current username format, registration preferences, and
+administrator profile repair. Public registration is for students and teachers;
+the administrator account is invite-only and allowlisted to
+`wondedev369@gmail.com`. The admin username is
+`WondeDev@Admin.edu`; sign in with
+`wondedev369@gmail.com` and that Auth account's existing password. Teacher
+registrations are approval-gated and do not grant elevated access until an
+administrator approves them. Enable email confirmations in Supabase Auth. Users can
 edit their name from their profile,
 upload a JPG, PNG, or WebP profile photo (up to 5 MB), cycle between light,
 dark, and system themes, and review their recent actions under **Activity** in
 the navigation menu.
 
-Students may self-register. Teachers can register and delete students in their
-own school; administrators can create student, teacher, and administrator
-accounts and delete student or teacher accounts. These operations use the
+Students may self-register with a school, grade/section, and main subject.
+Teacher requests include a school, preferred grade and class/section, and subject; an
+administrator reviews the request and assigns the teacher. Teachers can
+register and delete students in their
+own school; administrators can create student and teacher accounts and delete
+student or teacher accounts. Admin accounts are invite-only. These operations use the
 `manage-account` Edge Function, which checks the authenticated caller's role
 and school before using the Supabase service role. Do not grant app clients
 direct access to Supabase Auth administration.
@@ -104,8 +113,8 @@ results have no incorrect-answer count.
 After applying this migration, redeploy `quiz-attempt` so new results include
 the incorrect-answer count.
 
-Administrators and teachers can change their own password from **My profile**.
-The app verifies the current password before saving the new one; administrators
+All users can change their own password from **My profile**. The app verifies
+the current password before saving the new one; administrators and teachers
 can also reset other users' passwords from account management.
 
 The `profile-photos` public bucket stores public profile images. Uploads are

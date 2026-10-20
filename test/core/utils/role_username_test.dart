@@ -3,10 +3,16 @@ import 'package:quiz_app/core/utils/role_username.dart';
 
 void main() {
   group('roleUsername', () {
-    test('joins first and last name and uses the role letter', () {
-      expect(roleUsername('Wonde Assegid', 'admin'), 'Wondeassegid@A.edu');
-      expect(roleUsername('Wonde Assegid', 'teacher'), 'Wondeassegid@T.edu');
-      expect(roleUsername('Wonde Assegid', 'student'), 'Wondeassegid@S.edu');
+    test('joins first and last name and uses the full role suffix', () {
+      expect(roleUsername('Wonde Assegid', 'admin'), 'WondeAssegid@Admin.edu');
+      expect(
+        roleUsername('Wonde Assegid', 'teacher'),
+        'WondeAssegid@Teacher.edu',
+      );
+      expect(
+        roleUsername('Wonde Assegid', 'student'),
+        'WondeAssegid@Student.edu',
+      );
     });
 
     test('rejects names without both first and last name', () {
@@ -16,10 +22,25 @@ void main() {
 
   group('isRoleUsername', () {
     test('only accepts the matching role suffix and required casing', () {
-      expect(isRoleUsername('Wondeassegid@A.edu', 'admin'), isTrue);
-      expect(isRoleUsername('Wondeassegid@A.edu', 'student'), isFalse);
-      expect(isRoleUsername('WondeAssegid@S.edu', 'student'), isFalse);
-      expect(isRoleUsername('Wondeassegid@S.edu', 'student'), isTrue);
+      expect(isRoleUsername('WondeAssegid@Admin.edu', 'admin'), isTrue);
+      expect(isRoleUsername('WondeAssegid@Teacher.edu', 'teacher'), isTrue);
+      expect(isRoleUsername('WondeAssegid@Student.edu', 'student'), isTrue);
+      expect(isRoleUsername('WondeAssegid@Admin.edu', 'student'), isFalse);
+      expect(isRoleUsername('Wondeassegid@Student.edu', 'student'), isFalse);
+    });
+  });
+
+  group('roleFromUsername', () {
+    test('detects the role suffix without a role picker', () {
+      expect(roleFromUsername('WondeAssegid@Admin.edu'), 'admin');
+      expect(roleFromUsername('WondeAssegid@Teacher.edu'), 'teacher');
+      expect(roleFromUsername('WondeAssegid@Student.edu'), 'student');
+    });
+
+    test('rejects usernames that do not follow the required format', () {
+      expect(roleFromUsername('wondeAssegid@Student.edu'), isNull);
+      expect(roleFromUsername('WondeAssegid@teacher.edu'), isNull);
+      expect(roleFromUsername('wonde@example.edu'), isNull);
     });
   });
 }

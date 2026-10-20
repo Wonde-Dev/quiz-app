@@ -49,6 +49,9 @@ class AuthService {
     required String requestedRole,
     String? schoolId,
     String? sectionId,
+    String? requestedGrade,
+    String? requestedClass,
+    String? requestedSubject,
   }) async {
     return _supabase.auth.signUp(
       email: email.trim().toLowerCase(),
@@ -59,6 +62,9 @@ class AuthService {
         'requested_role': requestedRole,
         'school_id': schoolId,
         'section_id': sectionId,
+        'requested_grade': requestedGrade,
+        'requested_class': requestedClass,
+        'requested_subject': requestedSubject,
       },
     );
   }

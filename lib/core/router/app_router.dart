@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:quiz_app/core/constants/app_roles.dart';
@@ -18,15 +19,25 @@ import 'package:quiz_app/features/teacher/presentation/screens/quiz_builder_scre
 import 'package:quiz_app/features/teacher/presentation/screens/quiz_results_screen.dart';
 
 final routerProvider = Provider<GoRouter>((ref) {
-  final authState = ref.watch(authStateProvider);
+  final authRefresh = ValueNotifier<int>(0);
+  ref.listen(authStateProvider, (previous, next) {
+    authRefresh.value++;
+  });
   final router = GoRouter(
     initialLocation: '/login',
+    refreshListenable: authRefresh,
     redirect: (context, state) {
+      final authState = ref.read(authStateProvider);
       final user = authState.user;
       final location = state.matchedLocation;
 
       if (user == null) {
-        return location == '/login' ? null : '/login';
+        return location == '/login' ||
+                location.startsWith('/login/') ||
+                location == '/register' ||
+                location.startsWith('/register/')
+            ? null
+            : '/login';
       }
       if (authState.needsPasswordChange) {
         return location == '/change-password' ? null : '/change-password';
@@ -39,7 +50,11 @@ final routerProvider = Provider<GoRouter>((ref) {
           _ => '/login',
         };
       }
-      if (location == '/login' || location == '/change-password') {
+      if (location == '/login' ||
+          location.startsWith('/login/') ||
+          location == '/register' ||
+          location.startsWith('/register/') ||
+          location == '/change-password') {
         return switch (user.role) {
           AppRoles.admin => '/admin/dashboard',
           AppRoles.teacher => '/teacher/dashboard',
@@ -62,6 +77,20 @@ final routerProvider = Provider<GoRouter>((ref) {
     },
     routes: [
       GoRoute(path: '/login', builder: (context, state) => const LoginScreen()),
+      GoRoute(
+        path: '/register',
+        builder: (context, state) => const LoginScreen(registrationPage: true),
+      ),
+      GoRoute(
+        path: '/register/:role',
+        redirect: (context, state) => '/register',
+        builder: (context, state) => const LoginScreen(registrationPage: true),
+      ),
+      GoRoute(
+        path: '/login/:role',
+        redirect: (context, state) => '/login',
+        builder: (context, state) => const LoginScreen(),
+      ),
       GoRoute(
         path: '/change-password',
         builder: (context, state) => const ForceChangePasswordScreen(),
@@ -117,6 +146,9 @@ final routerProvider = Provider<GoRouter>((ref) {
       ),
     ],
   );
-  ref.onDispose(router.dispose);
+  ref.onDispose(() {
+    router.dispose();
+    authRefresh.dispose();
+  });
   return router;
 });

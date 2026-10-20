@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:quiz_app/shared/widgets/dashboard_action_grid.dart';
+import 'package:quiz_app/shared/widgets/dashboard_welcome_banner.dart';
 import 'package:quiz_app/shared/widgets/dashboard_shell.dart';
 
 class TeacherDashboardScreen extends StatelessWidget {
@@ -12,39 +14,32 @@ class TeacherDashboardScreen extends StatelessWidget {
       body: ListView(
         padding: const EdgeInsets.all(20),
         children: [
-          Text(
-            'Create quizzes and manage student passwords.',
-            style: Theme.of(context).textTheme.titleMedium,
+          const DashboardWelcomeBanner(
+            subtitle:
+                'Create engaging quizzes and help every student make progress.',
           ),
-          const SizedBox(height: 20),
-          Card(
-            child: ListTile(
-              leading: const Icon(Icons.add_circle_outline),
-              title: const Text('Create a quiz'),
-              subtitle: const Text('Write questions and publish an exam'),
-              trailing: const Icon(Icons.chevron_right),
-              onTap: () => context.push('/teacher/quizzes/new'),
-            ),
-          ),
-          Card(
-            child: ListTile(
-              leading: const Icon(Icons.fact_check_outlined),
-              title: const Text('Review quiz results'),
-              subtitle: const Text('See students’ submitted scores'),
-              trailing: const Icon(Icons.chevron_right),
-              onTap: () => context.push('/teacher/results'),
-            ),
-          ),
-          Card(
-            child: ListTile(
-              leading: const Icon(Icons.people_outline),
-              title: const Text('Manage students'),
-              subtitle: const Text(
-                'Register students, remove accounts, and reset passwords',
+          const SizedBox(height: 24),
+          DashboardActionGrid(
+            items: [
+              DashboardActionItem(
+                icon: Icons.add_circle_outline,
+                title: 'Prepare a quiz',
+                subtitle: 'Write questions and publish an exam',
+                onTap: () => context.push('/teacher/quizzes/new'),
               ),
-              trailing: const Icon(Icons.chevron_right),
-              onTap: () => context.push('/teacher/students'),
-            ),
+              DashboardActionItem(
+                icon: Icons.person_add_alt_1_rounded,
+                title: 'Register students',
+                subtitle: 'Add students and reset forgotten passwords',
+                onTap: () => context.push('/teacher/students'),
+              ),
+              DashboardActionItem(
+                icon: Icons.fact_check_outlined,
+                title: 'Quiz results',
+                subtitle: 'Review student submissions',
+                onTap: () => context.push('/teacher/results'),
+              ),
+            ],
           ),
         ],
       ),

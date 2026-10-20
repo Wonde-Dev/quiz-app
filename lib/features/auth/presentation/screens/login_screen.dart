@@ -1,12 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:quiz_app/core/theme/theme_mode_provider.dart';
 import 'package:quiz_app/core/utils/validators.dart';
 import 'package:quiz_app/core/utils/role_username.dart';
 import 'package:quiz_app/features/auth/presentation/providers/auth_provider.dart';
 
 class LoginScreen extends ConsumerStatefulWidget {
-  const LoginScreen({super.key});
+  const LoginScreen({this.registrationPage = false, this.role, super.key});
+
+  final bool registrationPage;
+  final String? role;
 
   @override
   ConsumerState<LoginScreen> createState() => _LoginScreenState();
@@ -19,20 +23,26 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   final _confirmController = TextEditingController();
+  final _subjectController = TextEditingController();
   late Future<List<Map<String, dynamic>>> _schoolsFuture;
   Future<List<Map<String, dynamic>>> _sectionsFuture = Future.value([]);
   String? _selectedSchoolId;
   String? _selectedSectionId;
+  String? _selectedSectionGradeName;
+  String? _selectedTeacherClassName;
   bool _schoolsReady = false;
-  bool _isRegistering = false;
   bool _obscurePassword = true;
   bool _obscureConfirmation = true;
   String _requestedRole = 'student';
+  bool get _isRegistering => widget.registrationPage;
 
   @override
   void initState() {
     super.initState();
-    _schoolsFuture = _loadSchools();
+    _requestedRole = widget.role == 'teacher' ? 'teacher' : 'student';
+    _schoolsFuture = widget.registrationPage
+        ? _loadSchools()
+        : Future.value([]);
   }
 
   @override
@@ -42,6 +52,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     _emailController.dispose();
     _passwordController.dispose();
     _confirmController.dispose();
+    _subjectController.dispose();
     super.dispose();
   }
 
@@ -49,48 +60,60 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     if (!_formKey.currentState!.validate()) return;
     final notifier = ref.read(authStateProvider.notifier);
     if (_isRegistering) {
+      final username = _usernameController.text.trim();
+      if (!isRoleUsername(username, _requestedRole)) {
+        ref
+            .read(authStateProvider.notifier)
+            .setMessage(
+              error:
+                  'Use the suggested username ending in @${_requestedRole == 'teacher' ? 'Teacher' : 'Student'}.edu.',
+            );
+        return;
+      }
       await notifier.register(
         fullName: _nameController.text.trim(),
-        username: _usernameController.text.trim(),
+        username: username,
         email: _emailController.text.trim(),
         password: _passwordController.text,
         requestedRole: _requestedRole,
-        schoolId: _requestedRole == 'admin' ? null : _selectedSchoolId,
+        schoolId: _selectedSchoolId,
         sectionId: _requestedRole == 'student' ? _selectedSectionId : null,
+        requestedGrade: _selectedSectionGradeName,
+        requestedClass: _requestedRole == 'teacher'
+            ? _selectedTeacherClassName
+            : null,
+        requestedSubject: _requestedRole == 'teacher'
+            ? _subjectController.text.trim()
+            : null,
       );
-      if (ref.read(authStateProvider).successMessage != null && mounted) {
-        setState(() {
-          _isRegistering = false;
-          _usernameController.text = _emailController.text.trim();
-          _passwordController.clear();
-          _confirmController.clear();
-        });
-      }
     } else {
       await notifier.signIn(
         emailOrUsername: _usernameController.text.trim(),
         password: _passwordController.text,
+        expectedRole: roleFromUsername(_usernameController.text.trim()),
       );
     }
   }
 
-  void _setRegistering(bool value) {
-    setState(() {
-      _isRegistering = value;
-      _formKey.currentState?.reset();
-    });
+  void _navigateToAuthRoute(String path) {
     ref.read(authStateProvider.notifier).clearMessages();
+    context.go(path);
   }
 
   @override
   Widget build(BuildContext context) {
     final authState = ref.watch(authStateProvider);
     final theme = Theme.of(context);
-    final wide = MediaQuery.sizeOf(context).width >= 900;
-
     return Scaffold(
       appBar: AppBar(
         backgroundColor: Colors.transparent,
+        leading: widget.registrationPage
+            ? IconButton(
+                tooltip: 'Back to sign in',
+                onPressed: () => _navigateToAuthRoute('/login'),
+                icon: const Icon(Icons.arrow_back),
+              )
+            : null,
         actions: [
           IconButton(
             tooltip: 'Switch theme',
@@ -111,25 +134,17 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
             constraints: const BoxConstraints(maxWidth: 1240),
             child: Padding(
               padding: const EdgeInsets.fromLTRB(24, 0, 24, 28),
-              child: wide
-                  ? Row(
-                      children: [
-                        const Expanded(child: _AnimatedWelcomePanel()),
-                        const SizedBox(width: 48),
-                        Expanded(child: _formPanel(authState, theme)),
-                      ],
-                    )
-                  : SingleChildScrollView(
-                      child: Column(
-                        children: [
-                          const _CompactBrand(),
-                          const SizedBox(height: 14),
-                          const _AnimatedWelcomePanel(compact: true),
-                          const SizedBox(height: 20),
-                          _formPanel(authState, theme),
-                        ],
-                      ),
-                    ),
+              child: SingleChildScrollView(
+                child: Column(
+                  children: [
+                    const _CompactBrand(),
+                    const SizedBox(height: 20),
+                    const _AnimatedWelcomePanel(compact: true),
+                    const SizedBox(height: 20),
+                    _formPanel(authState, theme),
+                  ],
+                ),
+              ),
             ),
           ),
         ),
@@ -151,234 +166,247 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Text(
-                    _isRegistering ? 'Create your account' : 'Welcome back',
+                    widget.registrationPage ? 'Create your account' : 'Sign in',
                     style: theme.textTheme.headlineSmall?.copyWith(
                       fontWeight: FontWeight.w800,
                     ),
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    _isRegistering
-                        ? 'Set up your profile to get started.'
-                        : 'Sign in to continue to your learning space.',
+                    widget.registrationPage
+                        ? 'Choose a student or teacher account and add your details.'
+                        : 'Enter your username and password.',
                     style: theme.textTheme.bodyMedium?.copyWith(
                       color: theme.colorScheme.onSurfaceVariant,
                     ),
                   ),
                   const SizedBox(height: 24),
-                  SegmentedButton<bool>(
-                    segments: const [
-                      ButtonSegment(
-                        value: false,
-                        label: Text('Sign in'),
-                        icon: Icon(Icons.login),
-                      ),
-                      ButtonSegment(
-                        value: true,
-                        label: Text('Create account'),
-                        icon: Icon(Icons.person_add_alt_1),
-                      ),
-                    ],
-                    selected: {_isRegistering},
-                    onSelectionChanged: (value) => _setRegistering(value.first),
-                    showSelectedIcon: false,
-                  ),
-                  const SizedBox(height: 24),
-                  AnimatedSwitcher(
-                    duration: const Duration(milliseconds: 220),
-                    child: Column(
-                      key: ValueKey(_isRegistering),
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        if (_isRegistering) ...[
-                          TextFormField(
-                            controller: _nameController,
-                            onChanged: (_) => _updateGeneratedUsername(),
-                            textCapitalization: TextCapitalization.words,
-                            autofillHints: const [AutofillHints.name],
-                            decoration: const InputDecoration(
-                              labelText: 'Full name',
-                              prefixIcon: Icon(Icons.badge_outlined),
-                            ),
-                            validator: (value) {
-                              if (!_isRegistering) return null;
-                              if (value == null ||
-                                  value.trim().split(RegExp(r'\s+')).length <
-                                      2) {
-                                return 'Enter your first and last name';
-                              }
-                              return null;
-                            },
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      if (_isRegistering) ...[
+                        Text(
+                          'Your information',
+                          style: theme.textTheme.titleSmall?.copyWith(
+                            fontWeight: FontWeight.w700,
                           ),
-                          const SizedBox(height: 14),
-                        ],
+                        ),
+                        const SizedBox(height: 10),
+                        Wrap(
+                          spacing: 10,
+                          runSpacing: 8,
+                          children: [
+                            for (final option in const [
+                              (role: 'student', label: 'Student'),
+                              (role: 'teacher', label: 'Teacher'),
+                            ])
+                              ChoiceChip(
+                                avatar: Icon(
+                                  option.role == 'student'
+                                      ? Icons.school_outlined
+                                      : Icons.co_present_outlined,
+                                  size: 18,
+                                ),
+                                label: Text(option.label),
+                                selected: _requestedRole == option.role,
+                                onSelected: (selected) {
+                                  if (!selected) return;
+                                  setState(() => _requestedRole = option.role);
+                                  _updateGeneratedUsername();
+                                  ref
+                                      .read(authStateProvider.notifier)
+                                      .clearMessages();
+                                },
+                              ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          _requestedRole == 'teacher'
+                              ? 'Teacher access is reviewed by a school administrator.'
+                              : 'Student accounts are ready after email verification.',
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: theme.colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                        const SizedBox(height: 16),
                         TextFormField(
-                          controller: _usernameController,
-                          readOnly: _isRegistering,
-                          autofillHints: _isRegistering
-                              ? const [AutofillHints.newUsername]
-                              : const [AutofillHints.username],
-                          decoration: InputDecoration(
-                            labelText: _isRegistering
-                                ? 'Username'
-                                : 'Email or username',
-                            helperText: _isRegistering
-                                ? 'First and last name, joined together (e.g. Wondeassegid@S.edu)'
-                                : null,
-                            prefixIcon: const Icon(Icons.person_outline),
+                          controller: _nameController,
+                          onChanged: (_) => _updateGeneratedUsername(),
+                          textCapitalization: TextCapitalization.words,
+                          autofillHints: const [AutofillHints.name],
+                          decoration: const InputDecoration(
+                            labelText: 'Full name',
+                            prefixIcon: Icon(Icons.badge_outlined),
                           ),
-                          textInputAction: TextInputAction.next,
                           validator: (value) {
-                            if (_isRegistering) {
-                              if (value == null ||
-                                  !isRoleUsername(
-                                    value.trim(),
-                                    _requestedRole,
-                                  )) {
-                                return 'Use the generated username for your role';
-                              }
-                              return null;
+                            if (!_isRegistering) return null;
+                            if (value == null ||
+                                value.trim().split(RegExp(r'\s+')).length < 2) {
+                              return 'Enter your first and last name';
                             }
-                            return Validators.username(value);
+                            return null;
                           },
                         ),
-                        if (_isRegistering) ...[
-                          const SizedBox(height: 14),
-                          TextFormField(
-                            controller: _emailController,
-                            keyboardType: TextInputType.emailAddress,
-                            autofillHints: const [AutofillHints.email],
-                            decoration: const InputDecoration(
-                              labelText: 'Email address',
-                              prefixIcon: Icon(Icons.mail_outline),
-                            ),
-                            validator: (value) =>
-                                _isRegistering ? Validators.email(value) : null,
-                          ),
-                          const SizedBox(height: 14),
-                          DropdownButtonFormField<String>(
-                            key: ValueKey(_requestedRole),
-                            initialValue: _requestedRole,
-                            decoration: const InputDecoration(
-                              labelText: 'I’m joining as',
-                              prefixIcon: Icon(
-                                Icons.workspace_premium_outlined,
-                              ),
-                            ),
-                            items: const [
-                              DropdownMenuItem(
-                                value: 'student',
-                                child: Text('Student'),
-                              ),
-                              DropdownMenuItem(
-                                value: 'teacher',
-                                child: Text('Teacher · approval required'),
-                              ),
-                              DropdownMenuItem(
-                                value: 'admin',
-                                child: Text(
-                                  'Administrator · approval required',
-                                ),
-                              ),
-                            ],
-                            onChanged: (value) {
-                              if (value != null) {
-                                setState(() {
-                                  _requestedRole = value;
-                                  _updateGeneratedUsername();
-                                });
-                              }
-                            },
-                          ),
-                          if (_requestedRole != 'student') ...[
-                            const SizedBox(height: 10),
-                            _ApprovalNote(requestedRole: _requestedRole),
-                          ],
-                          if (_requestedRole != 'admin') ...[
-                            const SizedBox(height: 14),
-                            _schoolSelector(),
-                          ],
-                          if (_requestedRole == 'student') ...[
-                            const SizedBox(height: 14),
-                            _sectionSelector(),
-                          ],
-                        ],
+                        const SizedBox(height: 14),
+                      ],
+                      TextFormField(
+                        controller: _usernameController,
+                        autofillHints: _isRegistering
+                            ? const [AutofillHints.newUsername]
+                            : const [AutofillHints.username],
+                        decoration: InputDecoration(
+                          labelText: _isRegistering
+                              ? 'Suggested username'
+                              : 'Username or email',
+                          helperText: _isRegistering
+                              ? 'Generated from your name. If it is taken, add another name.'
+                              : null,
+                          prefixIcon: const Icon(Icons.person_outline),
+                        ),
+                        textInputAction: TextInputAction.next,
+                        validator: (value) {
+                          if (_isRegistering) {
+                            if (value == null ||
+                                !isRoleUsername(value.trim(), _requestedRole)) {
+                              final suffix = _requestedRole == 'teacher'
+                                  ? 'Teacher'
+                                  : 'Student';
+                              return 'Use a name ending in @$suffix.edu';
+                            }
+                            return null;
+                          }
+                          return Validators.username(value);
+                        },
+                      ),
+                      if (_isRegistering) ...[
                         const SizedBox(height: 14),
                         TextFormField(
-                          controller: _passwordController,
-                          autofillHints: _isRegistering
-                              ? const [AutofillHints.newPassword]
-                              : const [AutofillHints.password],
+                          controller: _emailController,
+                          keyboardType: TextInputType.emailAddress,
+                          autofillHints: const [AutofillHints.email],
+                          decoration: const InputDecoration(
+                            labelText: 'Email address',
+                            prefixIcon: Icon(Icons.mail_outline),
+                          ),
+                          validator: (value) =>
+                              _isRegistering ? Validators.email(value) : null,
+                        ),
+                        const SizedBox(height: 14),
+                        const SizedBox(height: 18),
+                        Text(
+                          'School and class information',
+                          style: theme.textTheme.titleSmall?.copyWith(
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                        _schoolSelector(),
+                        const SizedBox(height: 14),
+                        _sectionSelector(),
+                        const SizedBox(height: 14),
+                        if (_requestedRole == 'teacher') ...[
+                          TextFormField(
+                            controller: _subjectController,
+                            textCapitalization: TextCapitalization.words,
+                            decoration: const InputDecoration(
+                              labelText: 'Main subject you teach',
+                              prefixIcon: Icon(Icons.menu_book_outlined),
+                            ),
+                            validator: (value) =>
+                                _isRegistering &&
+                                    _requestedRole == 'teacher' &&
+                                    (value == null || value.trim().isEmpty)
+                                ? 'Enter your subject'
+                                : null,
+                          ),
+                        ],
+                      ],
+                      if (_isRegistering) ...[
+                        const SizedBox(height: 18),
+                        Text(
+                          'Set your password',
+                          style: theme.textTheme.titleSmall?.copyWith(
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                      ],
+                      const SizedBox(height: 14),
+                      TextFormField(
+                        controller: _passwordController,
+                        autofillHints: _isRegistering
+                            ? const [AutofillHints.newPassword]
+                            : const [AutofillHints.password],
+                        decoration: InputDecoration(
+                          labelText: 'Password',
+                          prefixIcon: const Icon(Icons.lock_outline),
+                          suffixIcon: IconButton(
+                            tooltip: _obscurePassword
+                                ? 'Show password'
+                                : 'Hide password',
+                            onPressed: () => setState(
+                              () => _obscurePassword = !_obscurePassword,
+                            ),
+                            icon: Icon(
+                              _obscurePassword
+                                  ? Icons.visibility_outlined
+                                  : Icons.visibility_off_outlined,
+                            ),
+                          ),
+                        ),
+                        obscureText: _obscurePassword,
+                        validator: (value) {
+                          if (!_isRegistering) {
+                            return Validators.password(value);
+                          }
+                          if (value == null || value.length < 8) {
+                            return 'Use at least 8 characters';
+                          }
+                          return null;
+                        },
+                      ),
+                      if (_isRegistering) ...[
+                        const SizedBox(height: 14),
+                        TextFormField(
+                          controller: _confirmController,
+                          obscureText: _obscureConfirmation,
                           decoration: InputDecoration(
-                            labelText: 'Password',
-                            prefixIcon: const Icon(Icons.lock_outline),
+                            labelText: 'Confirm password',
+                            prefixIcon: const Icon(Icons.lock_reset_outlined),
                             suffixIcon: IconButton(
-                              tooltip: _obscurePassword
+                              tooltip: _obscureConfirmation
                                   ? 'Show password'
                                   : 'Hide password',
                               onPressed: () => setState(
-                                () => _obscurePassword = !_obscurePassword,
+                                () => _obscureConfirmation =
+                                    !_obscureConfirmation,
                               ),
                               icon: Icon(
-                                _obscurePassword
+                                _obscureConfirmation
                                     ? Icons.visibility_outlined
                                     : Icons.visibility_off_outlined,
                               ),
                             ),
                           ),
-                          obscureText: _obscurePassword,
                           validator: (value) {
-                            if (!_isRegistering) {
-                              return Validators.password(value);
-                            }
-                            if (value == null || value.length < 8) {
-                              return 'Use at least 8 characters';
+                            if (_isRegistering &&
+                                value != _passwordController.text) {
+                              return 'Passwords do not match';
                             }
                             return null;
                           },
                         ),
-                        if (_isRegistering) ...[
-                          const SizedBox(height: 14),
-                          TextFormField(
-                            controller: _confirmController,
-                            obscureText: _obscureConfirmation,
-                            decoration: InputDecoration(
-                              labelText: 'Confirm password',
-                              prefixIcon: const Icon(Icons.lock_reset_outlined),
-                              suffixIcon: IconButton(
-                                tooltip: _obscureConfirmation
-                                    ? 'Show password'
-                                    : 'Hide password',
-                                onPressed: () => setState(
-                                  () => _obscureConfirmation =
-                                      !_obscureConfirmation,
-                                ),
-                                icon: Icon(
-                                  _obscureConfirmation
-                                      ? Icons.visibility_outlined
-                                      : Icons.visibility_off_outlined,
-                                ),
-                              ),
-                            ),
-                            validator: (value) {
-                              if (_isRegistering &&
-                                  value != _passwordController.text) {
-                                return 'Passwords do not match';
-                              }
-                              return null;
-                            },
-                          ),
-                        ],
-                        if (!_isRegistering)
-                          Align(
-                            alignment: Alignment.centerRight,
-                            child: TextButton(
-                              onPressed: _sendReset,
-                              child: const Text('Forgot password?'),
-                            ),
-                          ),
                       ],
-                    ),
+                      if (!_isRegistering)
+                        Align(
+                          alignment: Alignment.centerRight,
+                          child: TextButton(
+                            onPressed: _sendReset,
+                            child: const Text('Forgot password?'),
+                          ),
+                        ),
+                    ],
                   ),
                   if (authState.error != null) ...[
                     const SizedBox(height: 14),
@@ -388,13 +416,22 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                     const SizedBox(height: 14),
                     _MessageBanner(message: authState.successMessage!),
                   ],
+                  if (widget.registrationPage &&
+                      authState.successMessage != null) ...[
+                    const SizedBox(height: 12),
+                    TextButton(
+                      onPressed: () => _navigateToAuthRoute('/login'),
+                      child: const Text('Go to sign in'),
+                    ),
+                  ],
                   const SizedBox(height: 20),
                   FilledButton.icon(
                     onPressed:
                         authState.isLoading ||
+                            (widget.registrationPage &&
+                                authState.successMessage != null) ||
                             (_isRegistering &&
-                                _requestedRole != 'admin' &&
-                                !_schoolsReady)
+                                (!_schoolsReady || _selectedSectionId == null))
                         ? null
                         : _submit,
                     icon: authState.isLoading
@@ -417,12 +454,15 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                     ),
                   ),
                   const SizedBox(height: 14),
-                  Text(
-                    'By continuing, you agree to use your account responsibly.',
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: theme.colorScheme.onSurfaceVariant,
+                  TextButton(
+                    onPressed: () => _navigateToAuthRoute(
+                      widget.registrationPage ? '/login' : '/register',
                     ),
-                    textAlign: TextAlign.center,
+                    child: Text(
+                      widget.registrationPage
+                          ? 'Already have an account? Sign in'
+                          : 'Create an account',
+                    ),
                   ),
                 ],
               ),
@@ -505,6 +545,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
             setState(() {
               _selectedSchoolId = schoolId;
               _selectedSectionId = null;
+              _selectedSectionGradeName = null;
+              _selectedTeacherClassName = null;
               _sectionsFuture = schoolId == null
                   ? Future.value([])
                   : _loadSections(schoolId);
@@ -552,7 +594,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
           key: ValueKey(_selectedSchoolId),
           initialValue: _selectedSectionId,
           decoration: const InputDecoration(
-            labelText: 'Grade and section',
+            labelText: 'Grade and class or section',
             prefixIcon: Icon(Icons.class_outlined),
           ),
           items: [
@@ -564,8 +606,18 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                 ),
               ),
           ],
-          onChanged: (sectionId) =>
-              setState(() => _selectedSectionId = sectionId),
+          onChanged: (sectionId) {
+            final section = sections
+                .where((item) => item['id'] == sectionId)
+                .firstOrNull;
+            final schoolGrade =
+                section?['school_grades'] as Map<String, dynamic>?;
+            setState(() {
+              _selectedSectionId = sectionId;
+              _selectedSectionGradeName = schoolGrade?['name'] as String?;
+              _selectedTeacherClassName = section?['name'] as String?;
+            });
+          },
           validator: (sectionId) =>
               sectionId == null ? 'Choose your grade and section' : null,
         );
@@ -612,10 +664,10 @@ class _AnimatedWelcomePanelState extends State<_AnimatedWelcomePanel>
     with SingleTickerProviderStateMixin {
   late final AnimationController _animationController;
   static const _colors = [
-    Color(0xFF3D4FE0),
-    Color(0xFF812FD4),
-    Color(0xFF087EA4),
-    Color(0xFF3D4FE0),
+    Color(0xFF164B83),
+    Color(0xFF087E8B),
+    Color(0xFF12345A),
+    Color(0xFF164B83),
   ];
 
   @override
@@ -709,16 +761,17 @@ class _AnimatedWelcomePanelState extends State<_AnimatedWelcomePanel>
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'Learn with confidence',
+                  'HIGH SCHOOL\nQUIZ APP',
                   style: theme.textTheme.titleLarge?.copyWith(
                     color: Colors.white,
                     fontWeight: FontWeight.w800,
-                    height: 1.12,
+                    height: 1.04,
+                    letterSpacing: 0.3,
                   ),
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  'Quizzes, teaching, and progress in one place.',
+                  'Learn, teach, and grow together.',
                   style: theme.textTheme.bodySmall?.copyWith(
                     color: Colors.white.withValues(alpha: 0.82),
                     height: 1.35,
@@ -762,7 +815,7 @@ class _AnimatedWelcomePanelState extends State<_AnimatedWelcomePanel>
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          'A better way\nto learn together.',
+                          'HIGH SCHOOL\nQUIZ APP',
                           style:
                               (compactText
                                       ? theme.textTheme.headlineMedium
@@ -771,12 +824,12 @@ class _AnimatedWelcomePanelState extends State<_AnimatedWelcomePanel>
                                     color: Colors.white,
                                     fontWeight: FontWeight.w900,
                                     height: 1.05,
-                                    letterSpacing: -1.2,
+                                    letterSpacing: -0.6,
                                   ),
                         ),
                         const SizedBox(height: 16),
                         Text(
-                          'One welcoming space for thoughtful quizzes, confident teaching, and progress you can actually see.',
+                          'A welcoming space for quizzes, confident teaching, and progress you can see.',
                           style: theme.textTheme.titleMedium?.copyWith(
                             color: Colors.white.withValues(alpha: 0.82),
                             height: 1.5,
@@ -1033,11 +1086,12 @@ class _BrandMark extends StatelessWidget {
         ),
         const SizedBox(width: 12),
         Text(
-          'quizly',
-          style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+          'HIGH SCHOOL\nQUIZ APP',
+          style: Theme.of(context).textTheme.titleMedium?.copyWith(
             color: inverse ? Colors.white : null,
             fontWeight: FontWeight.w900,
-            letterSpacing: -0.7,
+            height: 1.05,
+            letterSpacing: 0.2,
           ),
         ),
       ],
@@ -1083,42 +1137,6 @@ class _BenefitTile extends StatelessWidget {
           ],
         ),
       ],
-    );
-  }
-}
-
-class _ApprovalNote extends StatelessWidget {
-  const _ApprovalNote({required this.requestedRole});
-
-  final String requestedRole;
-
-  @override
-  Widget build(BuildContext context) {
-    final role = requestedRole == 'admin' ? 'administrator' : 'teacher';
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.secondaryContainer,
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(
-            Icons.verified_user_outlined,
-            size: 19,
-            color: Theme.of(context).colorScheme.onSecondaryContainer,
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Text(
-              'You can use your student account right away. $role access '
-              'will be enabled only after an administrator approves it.',
-              style: Theme.of(context).textTheme.bodySmall,
-            ),
-          ),
-        ],
-      ),
     );
   }
 }

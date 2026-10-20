@@ -13,36 +13,36 @@ class MyApp extends ConsumerWidget {
     final themeMode = ref.watch(themeModeProvider);
     return ScreenProtectionGate(
       child: MaterialApp.router(
-        title: 'Quizly',
+        title: 'High School Quiz App',
         theme: ThemeData(
           colorScheme: ColorScheme.fromSeed(
-            seedColor: const Color(0xFF5847D8),
+            seedColor: const Color(0xFF173F73),
             brightness: Brightness.light,
           ),
-          scaffoldBackgroundColor: const Color(0xFFF7F7FC),
+          scaffoldBackgroundColor: const Color(0xFFF4F7FB),
           cardTheme: CardThemeData(
             color: Colors.white,
             elevation: 0,
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(20),
-              side: const BorderSide(color: Color(0xFFE9E8F2)),
+              side: const BorderSide(color: Color(0xFFE1E9F2)),
             ),
           ),
           inputDecorationTheme: InputDecorationTheme(
             filled: true,
-            fillColor: const Color(0xFFF8F8FC),
+            fillColor: const Color(0xFFF6F8FB),
             border: OutlineInputBorder(
               borderRadius: BorderRadius.circular(14),
-              borderSide: const BorderSide(color: Color(0xFFE1E0EB)),
+              borderSide: const BorderSide(color: Color(0xFFDCE5EF)),
             ),
             enabledBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(14),
-              borderSide: const BorderSide(color: Color(0xFFE1E0EB)),
+              borderSide: const BorderSide(color: Color(0xFFDCE5EF)),
             ),
             focusedBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(14),
               borderSide: const BorderSide(
-                color: Color(0xFF5847D8),
+                color: Color(0xFF173F73),
                 width: 1.5,
               ),
             ),
@@ -59,7 +59,7 @@ class MyApp extends ConsumerWidget {
         ),
         darkTheme: ThemeData(
           colorScheme: ColorScheme.fromSeed(
-            seedColor: const Color(0xFFAA9DFF),
+            seedColor: const Color(0xFF78B9F2),
             brightness: Brightness.dark,
           ),
           useMaterial3: true,

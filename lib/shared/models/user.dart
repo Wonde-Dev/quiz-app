@@ -107,4 +107,12 @@ class AppUser {
   bool get isStudent => role == 'student';
   bool get isPendingApproval => approvalStatus == 'pending';
   bool get isRejected => approvalStatus == 'rejected';
+
+  bool canSignInWithRole(String selectedRole) {
+    if (role == selectedRole) return true;
+    return selectedRole == 'teacher' &&
+        role == 'student' &&
+        requestedRole == 'teacher' &&
+        isPendingApproval;
+  }
 }
