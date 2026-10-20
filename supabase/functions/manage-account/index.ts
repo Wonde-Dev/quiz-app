@@ -15,6 +15,50 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+function generateDefaultPassword(
+  username?: string | null,
+  fullName?: string | null,
+  role?: string | null,
+  defaultOrder: number = 1,
+): string {
+  let baseName = "";
+  let order = defaultOrder;
+
+  if (username && username.includes("@")) {
+    const namePart = username.split("@")[0];
+    const match = namePart.match(/^(.*?)(\d+)$/);
+    if (match) {
+      baseName = match[1] || namePart;
+      order = parseInt(match[2], 10) || defaultOrder;
+    } else {
+      baseName = namePart;
+    }
+  } else if (fullName) {
+    baseName = fullName
+      .trim()
+      .split(/[^a-zA-Z0-9]+/)
+      .filter((w) => w.length > 0)
+      .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+      .join("");
+  }
+
+  if (!baseName) {
+    baseName = "User";
+  }
+
+  const effectiveRole = (role ?? "").toLowerCase();
+  let domain = "@S.edu";
+  if (effectiveRole === "admin" || (username && /@admin\.edu$/i.test(username))) {
+    domain = "@A.edu";
+  } else if (effectiveRole === "teacher" || (username && /@teacher\.edu$/i.test(username))) {
+    domain = "@T.edu";
+  } else {
+    domain = "@S.edu";
+  }
+
+  return `${baseName}${order}${domain}`;
+}
+
 Deno.serve(async (request) => {
   if (request.method === "OPTIONS") return new Response("ok", { headers });
   if (request.method !== "POST") return json({ error: "Method not allowed" }, 405);
@@ -167,18 +211,16 @@ Deno.serve(async (request) => {
   if (body.action === "create") {
     const fullName = typeof body.fullName === "string" ? body.fullName.trim() : "";
     const email = typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
-    const password = typeof body.password === "string" ? body.password : "";
+    let password = typeof body.password === "string" ? body.password : "";
     const username = typeof body.username === "string" ? body.username.trim() : "";
     const requestedRole = typeof body.role === "string" ? body.role : "";
     if (
       !["admin", "teacher", "student"].includes(requestedRole) ||
-      requestedRole === "admin" ||
+      (actor.role !== "admin" && requestedRole === "admin") ||
       (actor.role === "teacher" && requestedRole !== "student")
     ) {
       return json({
-        error: requestedRole === "admin"
-          ? "Administrator accounts are invite-only and cannot be created here"
-          : "You cannot create an account with that role",
+        error: "You cannot create an account with that role",
       }, 403);
     }
     if (
@@ -190,6 +232,9 @@ Deno.serve(async (request) => {
     }
     if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
       return json({ error: "Enter a valid email address" }, 400);
+    }
+    if (!password) {
+      password = generateDefaultPassword(username, fullName, requestedRole);
     }
     if (password.length < 8 || password.length > 128) {
       return json({ error: "Password must be between 8 and 128 characters" }, 400);
@@ -220,7 +265,7 @@ Deno.serve(async (request) => {
     let schoolId: string | null = null;
     let sectionId: string | null = null;
     const subject = typeof body.subject === "string" ? body.subject.trim() : "";
-    if (!subject || subject.length > 80) {
+    if (requestedRole === "teacher" && (!subject || subject.length > 80)) {
       return json({ error: "Enter a subject (up to 80 characters)" }, 400);
     }
     if (requestedRole !== "admin") {
@@ -347,7 +392,7 @@ Deno.serve(async (request) => {
       .eq("id", userId)
       .maybeSingle();
     if (targetError) return json({ error: "Could not load the account" }, 500);
-    if (!target || !["student", "teacher"].includes(target.role)) {
+    if (!target || (actor.role !== "admin" && !["student", "teacher"].includes(target.role))) {
       return json({ error: "Only student or teacher accounts can be deleted" }, 403);
     }
     if (

@@ -324,11 +324,31 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                       ],
                       if (_isRegistering) ...[
                         const SizedBox(height: 18),
-                        Text(
-                          'Set your password',
-                          style: theme.textTheme.titleSmall?.copyWith(
-                            fontWeight: FontWeight.w700,
-                          ),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text(
+                              'Set your password',
+                              style: theme.textTheme.titleSmall?.copyWith(
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            if (_usernameController.text.isNotEmpty)
+                              TextButton.icon(
+                                icon: const Icon(Icons.auto_fix_high_rounded, size: 16),
+                                label: const Text('Use default pattern', style: TextStyle(fontSize: 12)),
+                                onPressed: () {
+                                  final pw = defaultRolePassword(
+                                    usernameOrFullName: _usernameController.text,
+                                    role: _requestedRole,
+                                  );
+                                  setState(() {
+                                    _passwordController.text = pw;
+                                    _confirmController.text = pw;
+                                  });
+                                },
+                              ),
+                          ],
                         ),
                         const SizedBox(height: 10),
                       ],
@@ -340,6 +360,9 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                             : const [AutofillHints.password],
                         decoration: InputDecoration(
                           labelText: 'Password',
+                          helperText: _isRegistering
+                              ? 'Format: Name1@${roleLetter(_requestedRole)}.edu'
+                              : null,
                           prefixIcon: const Icon(Icons.lock_outline),
                           suffixIcon: IconButton(
                             tooltip: _obscurePassword
@@ -644,10 +667,19 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   }
 
   void _updateGeneratedUsername() {
-    _usernameController.text = roleUsername(
+    final uname = roleUsername(
       _nameController.text,
       _requestedRole,
     );
+    _usernameController.text = uname;
+    if (_isRegistering && uname.isNotEmpty && _passwordController.text.isEmpty) {
+      final defaultPw = defaultRolePassword(
+        usernameOrFullName: uname,
+        role: _requestedRole,
+      );
+      _passwordController.text = defaultPw;
+      _confirmController.text = defaultPw;
+    }
   }
 }
 

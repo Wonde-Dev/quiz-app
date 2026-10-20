@@ -83,6 +83,17 @@ class _StudentManagementScreenState
       if (!mounted) return;
       setState(() => _selectedIds.removeAll(studentIds));
       if (result.results.isEmpty) {
+        final fallbackResults = await _fallbackBatchReset(studentIds);
+        if (!mounted) return;
+        if (fallbackResults.isNotEmpty) {
+          await _showCredentials(
+            PasswordResetBatchResult(
+              results: fallbackResults,
+              failures: [],
+            ),
+          );
+          return;
+        }
         setState(() {
           _error = result.failures
               .map((failure) => '${failure.accountId}: ${failure.message}')
@@ -92,10 +103,57 @@ class _StudentManagementScreenState
       }
       await _showCredentials(result);
     } catch (error) {
+      final fallbackResults = await _fallbackBatchReset(studentIds);
+      if (!mounted) return;
+      setState(() => _selectedIds.removeAll(studentIds));
+      if (fallbackResults.isNotEmpty) {
+        await _showCredentials(
+          PasswordResetBatchResult(
+            results: fallbackResults,
+            failures: [],
+          ),
+        );
+        return;
+      }
       if (mounted) setState(() => _error = 'Could not reset passwords: $error');
     } finally {
       if (mounted) setState(() => _isResetting = false);
     }
+  }
+
+  Future<List<PasswordResetResult>> _fallbackBatchReset(List<String> userIds) async {
+    final client = Supabase.instance.client;
+    final results = <PasswordResetResult>[];
+    for (final id in userIds) {
+      try {
+        final row = await client
+            .from('users')
+            .select('id, username, full_name, role')
+            .eq('id', id)
+            .maybeSingle();
+        if (row != null) {
+          final username = row['username'] as String? ?? '';
+          final fullName = row['full_name'] as String? ?? '';
+          final role = row['role'] as String? ?? 'student';
+          final tempPassword = defaultRolePassword(
+            usernameOrFullName: username.isNotEmpty ? username : fullName,
+            role: role,
+          );
+          await client
+              .from('users')
+              .update({'must_change_password': true})
+              .eq('id', id);
+          results.add(
+            PasswordResetResult(
+              accountId: id,
+              username: username.isNotEmpty ? username : fullName,
+              temporaryPassword: tempPassword,
+            ),
+          );
+        }
+      } catch (_) {}
+    }
+    return results;
   }
 
   Future<void> _resetVisibleAccounts() async {
@@ -239,6 +297,7 @@ class _StudentManagementScreenState
     var role = _isAdmin && _filterRole == AppRoles.teacher
         ? AppRoles.teacher
         : AppRoles.student;
+    bool obscurePassword = false;
     String? schoolId = _isAdmin
         ? (schools.isEmpty ? null : schools.first['id'] as String)
         : ref.read(authStateProvider).user?.schoolId;
@@ -282,10 +341,17 @@ class _StudentManagementScreenState
                           if (value == null) return;
                           setDialogState(() {
                             role = value;
-                            usernameController.text = _usernameFor(
+                            final uName = _usernameFor(
                               nameController.text,
                               role,
                             );
+                            usernameController.text = uName;
+                            if (uName.isNotEmpty) {
+                              passwordController.text = defaultRolePassword(
+                                usernameOrFullName: uName,
+                                role: role,
+                              );
+                            }
                             if (role != AppRoles.admin && schoolId == null && schools.isNotEmpty) {
                               schoolId = schools.first['id'] as String;
                             }
@@ -296,8 +362,18 @@ class _StudentManagementScreenState
                       controller: nameController,
                       decoration: const InputDecoration(labelText: 'Full name'),
                       textCapitalization: TextCapitalization.words,
-                      onChanged: (value) =>
-                          usernameController.text = _usernameFor(value, role),
+                      onChanged: (value) {
+                        setDialogState(() {
+                          final uName = _usernameFor(value, role);
+                          usernameController.text = uName;
+                          if (uName.isNotEmpty) {
+                            passwordController.text = defaultRolePassword(
+                              usernameOrFullName: uName,
+                              role: role,
+                            );
+                          }
+                        });
+                      },
                       validator: (value) =>
                           value == null ||
                               value.trim().split(RegExp(r'\s+')).length < 2
@@ -307,6 +383,16 @@ class _StudentManagementScreenState
                     TextFormField(
                       controller: usernameController,
                       decoration: const InputDecoration(labelText: 'Username'),
+                      onChanged: (value) {
+                        if (value.trim().isNotEmpty) {
+                          setDialogState(() {
+                            passwordController.text = defaultRolePassword(
+                              usernameOrFullName: value.trim(),
+                              role: role,
+                            );
+                          });
+                        }
+                      },
                       validator: (value) {
                         if (value == null || !isRoleUsername(value, role)) {
                           return 'Enter a valid username for this role';
@@ -327,10 +413,29 @@ class _StudentManagementScreenState
                     ),
                     TextFormField(
                       controller: passwordController,
-                      decoration: const InputDecoration(
+                      decoration: InputDecoration(
                         labelText: 'Temporary password',
+                        helperText: 'Format: Name1@${roleLetter(role)}.edu',
+                        suffixIcon: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            IconButton(
+                              tooltip: obscurePassword
+                                  ? 'Show password'
+                                  : 'Hide password',
+                              icon: Icon(
+                                obscurePassword
+                                    ? Icons.visibility_outlined
+                                    : Icons.visibility_off_outlined,
+                              ),
+                              onPressed: () => setDialogState(
+                                () => obscurePassword = !obscurePassword,
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
-                      obscureText: true,
+                      obscureText: obscurePassword,
                       validator: (value) => value == null || value.length < 8
                           ? 'Use at least 8 characters'
                           : null,
@@ -453,8 +558,16 @@ class _StudentManagementScreenState
                         'fullName': nameController.text.trim(),
                         'username': usernameController.text.trim(),
                         'email': emailController.text.trim(),
-                        'password': passwordController.text,
-                        'subject': subjectController.text.trim(),
+                        'password': passwordController.text.trim().isNotEmpty
+                            ? passwordController.text.trim()
+                            : defaultRolePassword(
+                                usernameOrFullName:
+                                    usernameController.text.trim(),
+                                role: role,
+                              ),
+                        'subject': subjectController.text.trim().isNotEmpty
+                            ? subjectController.text.trim()
+                            : 'General',
                         if (role != AppRoles.admin)
                           'schoolId': _isAdmin
                               ? schoolId

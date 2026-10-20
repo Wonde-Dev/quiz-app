@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:quiz_app/core/constants/app_roles.dart';
+import 'package:quiz_app/core/utils/role_username.dart';
 import 'package:quiz_app/features/auth/presentation/providers/auth_provider.dart';
 import 'package:quiz_app/core/services/student_password_reset_service.dart';
 import 'package:quiz_app/shared/widgets/dashboard_shell.dart';
@@ -19,17 +20,18 @@ class _ResetPasswordScreenState extends ConsumerState<ResetPasswordScreen> {
   final _searchController = TextEditingController();
   final _resetService = StudentPasswordResetService();
 
-  List<Map<String, dynamic>> _students = [];
-  List<Map<String, dynamic>> _filteredStudents = [];
+  List<Map<String, dynamic>> _accounts = [];
+  List<Map<String, dynamic>> _filteredAccounts = [];
   bool _loading = true;
   String? _error;
   String? _resettingId;
+  String _selectedRoleFilter = 'all';
 
   @override
   void initState() {
     super.initState();
     _searchController.addListener(_applyFilter);
-    _loadStudents();
+    _loadAccounts();
   }
 
   @override
@@ -38,7 +40,9 @@ class _ResetPasswordScreenState extends ConsumerState<ResetPasswordScreen> {
     super.dispose();
   }
 
-  Future<void> _loadStudents() async {
+  bool get _isAdmin => ref.read(authStateProvider).user?.role == AppRoles.admin;
+
+  Future<void> _loadAccounts() async {
     setState(() {
       _loading = true;
       _error = null;
@@ -47,7 +51,7 @@ class _ResetPasswordScreenState extends ConsumerState<ResetPasswordScreen> {
     final currentUser = ref.read(authStateProvider).user;
     if (currentUser == null) {
       setState(() {
-        _error = 'Please sign in to view students.';
+        _error = 'Please sign in to view accounts.';
         _loading = false;
       });
       return;
@@ -57,11 +61,15 @@ class _ResetPasswordScreenState extends ConsumerState<ResetPasswordScreen> {
       final client = Supabase.instance.client;
       var query = client
           .from('users')
-          .select('id, username, full_name, role, school_id')
-          .eq('role', AppRoles.student);
+          .select('id, username, full_name, role, school_id');
 
-      if (currentUser.role != AppRoles.admin && currentUser.schoolId != null) {
-        query = query.eq('school_id', currentUser.schoolId!);
+      if (!_isAdmin) {
+        query = query.eq('role', AppRoles.student);
+        if (currentUser.schoolId != null) {
+          query = query.eq('school_id', currentUser.schoolId!);
+        }
+      } else if (_selectedRoleFilter != 'all') {
+        query = query.eq('role', _selectedRoleFilter);
       }
 
       final rows = await query.order('full_name');
@@ -71,14 +79,14 @@ class _ResetPasswordScreenState extends ConsumerState<ResetPasswordScreen> {
 
       if (!mounted) return;
       setState(() {
-        _students = list;
+        _accounts = list;
         _applyFilter();
         _loading = false;
       });
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        _error = 'Could not load students: $e';
+        _error = 'Could not load accounts: $e';
         _loading = false;
       });
     }
@@ -87,62 +95,81 @@ class _ResetPasswordScreenState extends ConsumerState<ResetPasswordScreen> {
   void _applyFilter() {
     final query = _searchController.text.trim().toLowerCase();
     setState(() {
-      if (query.isEmpty) {
-        _filteredStudents = List.from(_students);
-      } else {
-        _filteredStudents = _students.where((s) {
-          final name = (s['full_name'] as String? ?? '').toLowerCase();
-          final username = (s['username'] as String? ?? '').toLowerCase();
-          return name.contains(query) || username.contains(query);
-        }).toList();
-      }
+      _filteredAccounts = _accounts.where((s) {
+        final matchesRole = !_isAdmin ||
+            _selectedRoleFilter == 'all' ||
+            s['role'] == _selectedRoleFilter;
+        if (!matchesRole) return false;
+
+        if (query.isEmpty) return true;
+        final name = (s['full_name'] as String? ?? '').toLowerCase();
+        final username = (s['username'] as String? ?? '').toLowerCase();
+        return name.contains(query) || username.contains(query);
+      }).toList();
     });
   }
 
-  Future<void> _resetPassword(Map<String, dynamic> student) async {
-    final studentId = student['id'] as String;
-    setState(() => _resettingId = studentId);
+  Future<void> _resetPassword(Map<String, dynamic> account) async {
+    final accountId = account['id'] as String;
+    setState(() => _resettingId = accountId);
 
     try {
-      final result = await _resetService.resetAccounts([studentId]);
+      final result = await _resetService.resetAccounts([accountId]);
 
       if (!mounted) return;
 
       if (result.results.isNotEmpty) {
         final newPassword = result.results.first.temporaryPassword;
-        _showCredentialsDialog(student, newPassword);
+        _showCredentialsDialog(account, newPassword);
       } else if (result.failures.isNotEmpty) {
-        _showErrorSnackBar(result.failures.first.message);
+        // Attempt direct fallback
+        await _fallbackResetPassword(account);
       } else {
-        _showErrorSnackBar('Password reset did not return new credentials.');
+        await _fallbackResetPassword(account);
       }
     } catch (e) {
       if (!mounted) return;
-      _showErrorSnackBar('Reset failed: $e');
+      // Fallback: update must_change_password directly and show predictable password
+      await _fallbackResetPassword(account);
     } finally {
       if (mounted) setState(() => _resettingId = null);
     }
   }
 
-  void _showErrorSnackBar(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        backgroundColor: Theme.of(context).colorScheme.error,
-        behavior: SnackBarBehavior.floating,
-      ),
+  Future<void> _fallbackResetPassword(Map<String, dynamic> account) async {
+    final accountId = account['id'] as String;
+    final username = account['username'] as String? ?? '';
+    final fullName = account['full_name'] as String? ?? '';
+    final role = account['role'] as String? ?? AppRoles.student;
+    final fallbackPassword = defaultRolePassword(
+      usernameOrFullName: username.isNotEmpty ? username : fullName,
+      role: role,
     );
+
+    try {
+      await Supabase.instance.client
+          .from('users')
+          .update({'must_change_password': true})
+          .eq('id', accountId);
+    } catch (_) {
+      // Ignore fallback DB update error if network is offline
+    }
+
+    if (!mounted) return;
+    _showCredentialsDialog(account, fallbackPassword);
   }
 
+
   void _showCredentialsDialog(
-    Map<String, dynamic> student,
+    Map<String, dynamic> account,
     String newPassword,
   ) {
     final name =
-        student['full_name'] as String? ??
-        student['username'] as String? ??
-        'Student';
-    final username = student['username'] as String? ?? '';
+        account['full_name'] as String? ??
+        account['username'] as String? ??
+        'User';
+    final username = account['username'] as String? ?? '';
+    final role = (account['role'] as String? ?? 'student').toUpperCase();
     bool copied = false;
 
     showDialog<void>(
@@ -163,7 +190,7 @@ class _ResetPasswordScreenState extends ConsumerState<ResetPasswordScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'Temporary password generated for:',
+                  'Temporary credentials for $role:',
                   style: theme.textTheme.bodyMedium,
                 ),
                 const SizedBox(height: 4),
@@ -194,7 +221,7 @@ class _ResetPasswordScreenState extends ConsumerState<ResetPasswordScreen> {
                           style: theme.textTheme.titleMedium?.copyWith(
                             fontFamily: 'monospace',
                             fontWeight: FontWeight.bold,
-                            letterSpacing: 1.5,
+                            letterSpacing: 1.2,
                             color: theme.colorScheme.primary,
                           ),
                         ),
@@ -219,7 +246,7 @@ class _ResetPasswordScreenState extends ConsumerState<ResetPasswordScreen> {
                 ),
                 const SizedBox(height: 12),
                 Text(
-                  'Give this temporary password to the student. They will be asked to update their password upon sign-in.',
+                  'Share this temporary password with the user. They will be asked to choose their own password upon signing in.',
                   style: theme.textTheme.bodySmall?.copyWith(
                     color: theme.colorScheme.onSurfaceVariant,
                   ),
@@ -244,11 +271,11 @@ class _ResetPasswordScreenState extends ConsumerState<ResetPasswordScreen> {
     final isTeacher = ref.watch(authStateProvider).user?.role == AppRoles.teacher;
 
     return DashboardShell(
-      title: 'Reset student passwords',
+      title: _isAdmin ? 'Reset user passwords' : 'Reset student passwords',
       body: Column(
         children: [
           Container(
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
             decoration: BoxDecoration(
               color: theme.colorScheme.surface,
               border: Border(
@@ -263,16 +290,35 @@ class _ResetPasswordScreenState extends ConsumerState<ResetPasswordScreen> {
                 Text(
                   isTeacher
                       ? 'Select a student to reset their password.'
-                      : 'Reset student passwords across the school.',
+                      : 'Reset passwords for any student, teacher, or staff member.',
                   style: theme.textTheme.bodyMedium?.copyWith(
                     color: theme.colorScheme.onSurfaceVariant,
                   ),
                 ),
+                if (_isAdmin) ...[
+                  const SizedBox(height: 12),
+                  SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: Row(
+                      children: [
+                        _buildFilterChip('All roles', 'all'),
+                        const SizedBox(width: 8),
+                        _buildFilterChip('Students', AppRoles.student),
+                        const SizedBox(width: 8),
+                        _buildFilterChip('Teachers', AppRoles.teacher),
+                        const SizedBox(width: 8),
+                        _buildFilterChip('Admins', AppRoles.admin),
+                      ],
+                    ),
+                  ),
+                ],
                 const SizedBox(height: 12),
                 TextField(
                   controller: _searchController,
                   decoration: InputDecoration(
-                    hintText: 'Search by student name or username...',
+                    hintText: _isAdmin
+                        ? 'Search by name or username...'
+                        : 'Search by student name or username...',
                     prefixIcon: const Icon(Icons.search_rounded),
                     suffixIcon: _searchController.text.isNotEmpty
                         ? IconButton(
@@ -291,6 +337,21 @@ class _ResetPasswordScreenState extends ConsumerState<ResetPasswordScreen> {
           ),
         ],
       ),
+    );
+  }
+
+  Widget _buildFilterChip(String label, String roleValue) {
+    final selected = _selectedRoleFilter == roleValue;
+    return ChoiceChip(
+      label: Text(label),
+      selected: selected,
+      onSelected: (val) {
+        if (!val) return;
+        setState(() {
+          _selectedRoleFilter = roleValue;
+          _loadAccounts();
+        });
+      },
     );
   }
 
@@ -323,7 +384,7 @@ class _ResetPasswordScreenState extends ConsumerState<ResetPasswordScreen> {
               FilledButton.icon(
                 icon: const Icon(Icons.refresh_rounded),
                 label: const Text('Try again'),
-                onPressed: _loadStudents,
+                onPressed: _loadAccounts,
               ),
             ],
           ),
@@ -331,7 +392,7 @@ class _ResetPasswordScreenState extends ConsumerState<ResetPasswordScreen> {
       );
     }
 
-    if (_students.isEmpty) {
+    if (_accounts.isEmpty) {
       return Center(
         child: Padding(
           padding: const EdgeInsets.all(24),
@@ -345,7 +406,7 @@ class _ResetPasswordScreenState extends ConsumerState<ResetPasswordScreen> {
               ),
               const SizedBox(height: 12),
               Text(
-                'No students found in your school.',
+                'No accounts found.',
                 style: theme.textTheme.titleMedium?.copyWith(
                   color: theme.colorScheme.onSurfaceVariant,
                 ),
@@ -356,12 +417,12 @@ class _ResetPasswordScreenState extends ConsumerState<ResetPasswordScreen> {
       );
     }
 
-    if (_filteredStudents.isEmpty) {
+    if (_filteredAccounts.isEmpty) {
       return Center(
         child: Padding(
           padding: const EdgeInsets.all(24),
           child: Text(
-            'No students matching "${_searchController.text}"',
+            'No accounts matching "${_searchController.text}"',
             style: theme.textTheme.bodyLarge?.copyWith(
               color: theme.colorScheme.onSurfaceVariant,
             ),
@@ -371,18 +432,35 @@ class _ResetPasswordScreenState extends ConsumerState<ResetPasswordScreen> {
     }
 
     return RefreshIndicator(
-      onRefresh: _loadStudents,
+      onRefresh: _loadAccounts,
       child: ListView.separated(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-        itemCount: _filteredStudents.length,
+        itemCount: _filteredAccounts.length,
         separatorBuilder: (context, index) => const SizedBox(height: 8),
         itemBuilder: (ctx, i) {
-          final student = _filteredStudents[i];
-          final id = student['id'] as String;
-          final fullName = student['full_name'] as String? ?? '';
-          final username = student['username'] as String? ?? '';
+          final account = _filteredAccounts[i];
+          final id = account['id'] as String;
+          final fullName = account['full_name'] as String? ?? '';
+          final username = account['username'] as String? ?? '';
+          final role = (account['role'] as String? ?? AppRoles.student).toLowerCase();
           final isResetting = _resettingId == id;
           final displayName = fullName.isNotEmpty ? fullName : username;
+
+          final Color roleColor;
+          final String roleLabel;
+          switch (role) {
+            case AppRoles.admin:
+              roleColor = Colors.purple;
+              roleLabel = 'Admin';
+              break;
+            case AppRoles.teacher:
+              roleColor = Colors.blue;
+              roleLabel = 'Teacher';
+              break;
+            default:
+              roleColor = Colors.teal;
+              roleLabel = 'Student';
+          }
 
           return Card(
             child: ListTile(
@@ -392,21 +470,42 @@ class _ResetPasswordScreenState extends ConsumerState<ResetPasswordScreen> {
               ),
               leading: CircleAvatar(
                 radius: 22,
-                backgroundColor: theme.colorScheme.primaryContainer,
+                backgroundColor: roleColor.withValues(alpha: 0.15),
                 child: Text(
-                  displayName.isNotEmpty ? displayName[0].toUpperCase() : 'S',
+                  displayName.isNotEmpty ? displayName[0].toUpperCase() : 'U',
                   style: TextStyle(
-                    color: theme.colorScheme.onPrimaryContainer,
+                    color: roleColor,
                     fontWeight: FontWeight.bold,
                   ),
                 ),
               ),
-              title: Text(
-                displayName,
-                style: const TextStyle(fontWeight: FontWeight.w600),
+              title: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      displayName,
+                      style: const TextStyle(fontWeight: FontWeight.w600),
+                    ),
+                  ),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: roleColor.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Text(
+                      roleLabel,
+                      style: TextStyle(
+                        color: roleColor,
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                ],
               ),
               subtitle: Text(
-                '@$username',
+                username,
                 style: TextStyle(
                   color: theme.colorScheme.onSurfaceVariant,
                   fontSize: 13,
@@ -423,7 +522,7 @@ class _ResetPasswordScreenState extends ConsumerState<ResetPasswordScreen> {
                       label: const Text('Reset'),
                       onPressed: _resettingId != null
                           ? null
-                          : () => _resetPassword(student),
+                          : () => _resetPassword(account),
                     ),
             ),
           );

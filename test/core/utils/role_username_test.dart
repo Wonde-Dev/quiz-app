@@ -43,4 +43,34 @@ void main() {
       expect(roleFromUsername('wonde@example.edu'), isNull);
     });
   });
+
+  group('defaultRolePassword', () {
+    test('generates expected default password matching user requirements', () {
+      // User's exact prompt example:
+      // "like for admin his username is WondeAdmin@Admin.edu so the password is gonna be WondeAdmin1@A.edu"
+      expect(
+        defaultRolePassword(usernameOrFullName: 'WondeAdmin@Admin.edu'),
+        'WondeAdmin1@A.edu',
+      );
+      expect(
+        defaultRolePassword(usernameOrFullName: 'WondeAdmin2@Admin.edu'),
+        'WondeAdmin2@A.edu',
+      );
+      expect(
+        defaultRolePassword(usernameOrFullName: 'JohnDoe@Student.edu'),
+        'JohnDoe1@S.edu',
+      );
+      expect(
+        defaultRolePassword(usernameOrFullName: 'JaneSmith@Teacher.edu'),
+        'JaneSmith1@T.edu',
+      );
+      expect(
+        defaultRolePassword(
+          usernameOrFullName: 'Abebe Kebede',
+          role: 'student',
+        ),
+        'AbebeKebede1@S.edu',
+      );
+    });
+  });
 }

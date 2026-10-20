@@ -340,9 +340,8 @@ class AuthNotifier extends Notifier<AuthState> {
     required String newPassword,
   }) async {
     final existing = state.user;
-    if (existing == null ||
-        ![AppRoles.admin, AppRoles.teacher].contains(existing.role)) {
-      throw StateError('Only administrators and teachers can use this action.');
+    if (existing == null) {
+      throw StateError('Please sign in to change your password.');
     }
     state = AuthState(
       user: existing,

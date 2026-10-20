@@ -7,19 +7,48 @@ const headers = {
   "Content-Type": "application/json",
 };
 
-function temporaryPassword(): string {
-  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@$%";
-  const cutoff = 256 - (256 % alphabet.length);
-  let password = "";
-  while (password.length < 20) {
-    const bytes = crypto.getRandomValues(new Uint8Array(32));
-    for (const byte of bytes) {
-      if (byte >= cutoff) continue;
-      password += alphabet[byte % alphabet.length];
-      if (password.length === 20) break;
+function generateDefaultPassword(
+  username?: string | null,
+  fullName?: string | null,
+  role?: string | null,
+  defaultOrder: number = 1,
+): string {
+  let baseName = "";
+  let order = defaultOrder;
+
+  if (username && username.includes("@")) {
+    const namePart = username.split("@")[0];
+    const match = namePart.match(/^(.*?)(\d+)$/);
+    if (match) {
+      baseName = match[1] || namePart;
+      order = parseInt(match[2], 10) || defaultOrder;
+    } else {
+      baseName = namePart;
     }
+  } else if (fullName) {
+    baseName = fullName
+      .trim()
+      .split(/[^a-zA-Z0-9]+/)
+      .filter((w) => w.length > 0)
+      .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+      .join("");
   }
-  return password;
+
+  if (!baseName) {
+    baseName = "User";
+  }
+
+  const effectiveRole = (role ?? "").toLowerCase();
+  let domain = "@S.edu";
+  if (effectiveRole === "admin" || (username && /@admin\.edu$/i.test(username))) {
+    domain = "@A.edu";
+  } else if (effectiveRole === "teacher" || (username && /@teacher\.edu$/i.test(username))) {
+    domain = "@T.edu";
+  } else {
+    domain = "@S.edu";
+  }
+
+  return `${baseName}${order}${domain}`;
 }
 
 Deno.serve(async (request) => {
@@ -175,7 +204,7 @@ Deno.serve(async (request) => {
       }
     }
 
-    const password = temporaryPassword();
+    const password = generateDefaultPassword(student.username, student.full_name, student.role);
     const { error: flagError } = await adminClient
       .from("users")
       .update({ must_change_password: true })
