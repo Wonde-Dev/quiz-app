@@ -672,13 +672,19 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       _requestedRole,
     );
     _usernameController.text = uname;
-    if (_isRegistering && uname.isNotEmpty && _passwordController.text.isEmpty) {
-      final defaultPw = defaultRolePassword(
-        usernameOrFullName: uname,
-        role: _requestedRole,
-      );
-      _passwordController.text = defaultPw;
-      _confirmController.text = defaultPw;
+    if (_isRegistering && uname.isNotEmpty) {
+      final currentPw = _passwordController.text;
+      final shouldUpdatePw = currentPw.isEmpty ||
+          currentPw.endsWith('@S.edu') ||
+          currentPw.endsWith('@T.edu');
+      if (shouldUpdatePw) {
+        final defaultPw = defaultRolePassword(
+          usernameOrFullName: uname,
+          role: _requestedRole,
+        );
+        _passwordController.text = defaultPw;
+        _confirmController.text = defaultPw;
+      }
     }
   }
 }

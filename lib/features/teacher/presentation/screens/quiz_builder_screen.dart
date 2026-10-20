@@ -166,13 +166,10 @@ class _QuizBuilderScreenState extends ConsumerState<QuizBuilderScreen> {
     final questionText = _questionController.text.trim();
     final hasMissingChoice = _questionType == 'multiple_choice' &&
         _optionControllers.any((c) => c.text.trim().isEmpty);
-    final hasMissingAnswer = _questionType == 'short_answer' &&
-        _correctAnswerController.text.trim().isEmpty;
 
-    if (questionText.isEmpty || hasMissingChoice || hasMissingAnswer) {
+    if (questionText.isEmpty || hasMissingChoice) {
       setState(() {
         _error = switch (_questionType) {
-          'short_answer' => 'Enter a question and its correct answer.',
           'true_false' => 'Enter a true-or-false question statement.',
           _ => 'Enter a question and all four answer choices.',
         };
@@ -185,6 +182,11 @@ class _QuizBuilderScreenState extends ConsumerState<QuizBuilderScreen> {
     final optionTexts = _questionType == 'true_false'
         ? const ['True', 'False']
         : _optionControllers.map((c) => c.text.trim()).toList();
+
+    final expectedAnswer = _correctAnswerController.text.trim();
+    final effectiveCorrectAnswer = _questionType == 'short_answer'
+        ? (expectedAnswer.isNotEmpty ? expectedAnswer : 'Teacher manual evaluation')
+        : null;
 
     setState(() {
       _error = null;
@@ -203,9 +205,7 @@ class _QuizBuilderScreenState extends ConsumerState<QuizBuilderScreen> {
                 },
               )
             : <Map<String, dynamic>>[],
-        'correct_answer': _questionType == 'short_answer'
-            ? _correctAnswerController.text.trim()
-            : null,
+        'correct_answer': effectiveCorrectAnswer,
         'explanation': _explanationController.text.trim().isEmpty
             ? null
             : _explanationController.text.trim(),
@@ -754,7 +754,7 @@ class _QuizBuilderScreenState extends ConsumerState<QuizBuilderScreen> {
                                   ),
                                   DropdownMenuItem(
                                     value: 'short_answer',
-                                    child: Text('Fill in the blank / Short Answer'),
+                                    child: Text('Descriptive / Short Answer (allows text & image)'),
                                   ),
                                 ],
                                 onChanged: _questionsSaved
@@ -774,8 +774,9 @@ class _QuizBuilderScreenState extends ConsumerState<QuizBuilderScreen> {
                                 TextFormField(
                                   controller: _correctAnswerController,
                                   decoration: const InputDecoration(
-                                    labelText: 'Correct Answer',
-                                    hintText: 'Enter the answer students should input',
+                                    labelText: 'Expected Answer / Model solution (optional)',
+                                    hintText: 'Enter sample answer or leave blank for manual grading',
+                                    helperText: 'Students will be able to type written explanations and attach photos/diagrams.',
                                     prefixIcon: Icon(Icons.check_circle_outline),
                                   ),
                                   readOnly: _questionsSaved,
@@ -928,7 +929,7 @@ class _QuizBuilderScreenState extends ConsumerState<QuizBuilderScreen> {
 
   String _questionTypeLabel(String type) => switch (type) {
         'true_false' => 'True or false',
-        'short_answer' => 'Fill in the blank',
+        'short_answer' => 'Description / Short answer',
         _ => 'Multiple choice',
       };
 }

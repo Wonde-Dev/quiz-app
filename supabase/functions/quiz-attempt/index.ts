@@ -170,7 +170,24 @@ Deno.serve(async (request) => {
       );
       correct = correctOption != null && answer === correctOption.id;
     } else if (question.type === "short_answer" && question.correct_answer != null) {
-      correct = String(answer ?? "").trim().toLowerCase() ===
+      let textVal = "";
+      if (typeof answer === "string") {
+        try {
+          const parsed = JSON.parse(answer);
+          if (parsed && typeof parsed === "object" && "text" in parsed) {
+            textVal = String(parsed.text ?? "");
+          } else {
+            textVal = answer;
+          }
+        } catch {
+          textVal = answer;
+        }
+      } else if (answer && typeof answer === "object" && "text" in answer) {
+        textVal = String((answer as Record<string, unknown>).text ?? "");
+      } else {
+        textVal = String(answer ?? "");
+      }
+      correct = textVal.trim().toLowerCase() ===
         String(question.correct_answer).trim().toLowerCase();
     }
     if (correct) {
@@ -202,6 +219,40 @@ Deno.serve(async (request) => {
     .select()
     .single();
   if (gradeError) return response({ error: "Could not save quiz result" }, 500);
+
+  // Also record quiz attempt and individual answers for teacher evaluation
+  try {
+    const { data: attemptRecord } = await serviceClient
+      .from("quiz_attempts")
+      .upsert({
+        quiz_id: body.quizId,
+        student_id: authData.user.id,
+        submitted_at: new Date().toISOString(),
+        score,
+      }, { onConflict: "quiz_id,student_id" })
+      .select("id")
+      .maybeSingle();
+
+    const attemptId = attemptRecord?.id;
+    if (attemptId) {
+      const answersToInsert = questions.map((question) => {
+        const rawAns = answers[question.id];
+        const answerText = typeof rawAns === "object" && rawAns !== null
+          ? JSON.stringify(rawAns)
+          : String(rawAns ?? "");
+        const isCorrect = feedback.find((f) => f.question === question.text)?.isCorrect ?? false;
+        return {
+          attempt_id: attemptId,
+          question_id: question.id,
+          answer_text: answerText,
+          is_correct: isCorrect,
+        };
+      });
+      await serviceClient.from("answers").insert(answersToInsert);
+    }
+  } catch (attemptErr) {
+    console.error("Could not record attempt breakdown:", attemptErr);
+  }
 
   return response({ grade, feedback });
 });

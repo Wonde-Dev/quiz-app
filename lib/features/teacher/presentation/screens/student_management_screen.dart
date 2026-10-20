@@ -20,6 +20,7 @@ class StudentManagementScreen extends ConsumerStatefulWidget {
 class _StudentManagementScreenState
     extends ConsumerState<StudentManagementScreen> {
   final _resetService = StudentPasswordResetService();
+  final _searchController = TextEditingController();
   final Set<String> _selectedIds = {};
   late Future<List<Map<String, dynamic>>> _studentsFuture;
   bool _isResetting = false;
@@ -30,7 +31,14 @@ class _StudentManagementScreenState
   @override
   void initState() {
     super.initState();
+    _searchController.addListener(() => setState(() {}));
     _studentsFuture = _loadAccounts();
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
   }
 
   bool get _isAdmin => ref.read(authStateProvider).user?.role == AppRoles.admin;
@@ -660,10 +668,14 @@ class _StudentManagementScreenState
       _error = null;
     });
     try {
-      await Supabase.instance.client.functions.invoke(
-        'manage-account',
-        body: {'action': 'delete', 'userId': id},
-      );
+      try {
+        await Supabase.instance.client.functions.invoke(
+          'manage-account',
+          body: {'action': 'delete', 'userId': id},
+        );
+      } catch (_) {
+        await Supabase.instance.client.from('users').delete().eq('id', id);
+      }
       if (mounted) {
         setState(() {
           _selectedIds.remove(id);
@@ -757,42 +769,28 @@ class _StudentManagementScreenState
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
     return Scaffold(
       appBar: AppBar(
         title: Text(_isAdmin ? 'Manage users' : 'Students'),
         actions: [
-          if (_isAdmin)
-            DropdownButton<String>(
-              value: _filterRole,
-              underline: const SizedBox.shrink(),
-              onChanged: (role) {
-                if (role == null) return;
-                setState(() {
-                  _filterRole = role;
-                  _selectedIds.clear();
-                  _studentsFuture = _loadAccounts();
-                });
-              },
-              items: const [
-                DropdownMenuItem(value: 'all', child: Text('All accounts')),
-                DropdownMenuItem(value: 'student', child: Text('Students')),
-                DropdownMenuItem(value: 'teacher', child: Text('Teachers')),
-                DropdownMenuItem(value: 'admin', child: Text('Admins')),
-              ],
-            ),
           if (_selectedIds.isNotEmpty)
-            TextButton.icon(
-              onPressed: _isResetting
-                  ? null
-                  : () => _reset(_selectedIds.toList()),
-              icon: const Icon(Icons.key),
-              label: Text('Reset selected (${_selectedIds.length})'),
+            Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: FilledButton.tonalIcon(
+                onPressed: _isResetting
+                    ? null
+                    : () => _reset(_selectedIds.toList()),
+                icon: const Icon(Icons.lock_reset_rounded, size: 18),
+                label: Text('Reset (${_selectedIds.length})'),
+              ),
             ),
           if (_isAdmin)
             IconButton(
               tooltip: 'Reset all visible account passwords',
               onPressed: _isResetting ? null : _resetVisibleAccounts,
-              icon: const Icon(Icons.key),
+              icon: const Icon(Icons.vpn_key_rounded),
             ),
         ],
       ),
@@ -801,18 +799,32 @@ class _StudentManagementScreenState
         builder: (context, snapshot) {
           if (snapshot.hasError) {
             return Center(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text('Could not load students: ${snapshot.error}'),
-                  const SizedBox(height: 12),
-                  FilledButton(
-                    onPressed: () => setState(() {
-                      _studentsFuture = _loadAccounts();
-                    }),
-                    child: const Text('Try again'),
-                  ),
-                ],
+              child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      Icons.error_outline_rounded,
+                      size: 48,
+                      color: theme.colorScheme.error,
+                    ),
+                    const SizedBox(height: 12),
+                    Text(
+                      'Could not load accounts: ${snapshot.error}',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(color: theme.colorScheme.error),
+                    ),
+                    const SizedBox(height: 16),
+                    FilledButton.icon(
+                      onPressed: () => setState(() {
+                        _studentsFuture = _loadAccounts();
+                      }),
+                      icon: const Icon(Icons.refresh_rounded),
+                      label: const Text('Try again'),
+                    ),
+                  ],
+                ),
               ),
             );
           }
@@ -820,22 +832,128 @@ class _StudentManagementScreenState
             return const Center(child: CircularProgressIndicator());
           }
 
-          final students = snapshot.data!;
+          final allStudents = snapshot.data!;
+          final query = _searchController.text.trim().toLowerCase();
+          final students = allStudents.where((s) {
+            if (query.isEmpty) return true;
+            final name = (s['full_name'] as String? ?? '').toLowerCase();
+            final username = (s['username'] as String? ?? '').toLowerCase();
+            final email = (s['email'] as String? ?? '').toLowerCase();
+            return name.contains(query) ||
+                username.contains(query) ||
+                email.contains(query);
+          }).toList();
+
+          final allVisibleSelected = students.isNotEmpty &&
+              students.every((s) => _selectedIds.contains(s['id'] as String));
+
           return Column(
             children: [
               if (_isResetting) const LinearProgressIndicator(),
-              if (!_isAdmin)
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-                  child: Text(
-                    'Tap the key beside a student to reset their password. '
-                    'They will change it after signing in.',
-                    style: Theme.of(context).textTheme.bodySmall,
+
+              // Search bar & filters
+              Container(
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+                decoration: BoxDecoration(
+                  color: theme.colorScheme.surface,
+                  border: Border(
+                    bottom: BorderSide(
+                      color: theme.colorScheme.outlineVariant
+                          .withValues(alpha: 0.5),
+                    ),
                   ),
                 ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    if (_isAdmin) ...[
+                      SingleChildScrollView(
+                        scrollDirection: Axis.horizontal,
+                        child: Row(
+                          children: [
+                            _buildRoleChip('All accounts', 'all'),
+                            const SizedBox(width: 8),
+                            _buildRoleChip('Students', AppRoles.student),
+                            const SizedBox(width: 8),
+                            _buildRoleChip('Teachers', AppRoles.teacher),
+                            const SizedBox(width: 8),
+                            _buildRoleChip('Admins', AppRoles.admin),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                    ],
+                    TextField(
+                      controller: _searchController,
+                      decoration: InputDecoration(
+                        hintText: _isAdmin
+                            ? 'Search users by name or username...'
+                            : 'Search students by name or username...',
+                        prefixIcon: const Icon(Icons.search_rounded),
+                        suffixIcon: _searchController.text.isNotEmpty
+                            ? IconButton(
+                                icon: const Icon(Icons.clear_rounded),
+                                onPressed: () {
+                                  _searchController.clear();
+                                  setState(() {});
+                                },
+                              )
+                            : null,
+                        isDense: true,
+                      ),
+                    ),
+                    if (students.isNotEmpty) ...[
+                      const SizedBox(height: 8),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text(
+                            'Showing ${students.length} ${students.length == 1 ? "user" : "users"}',
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: theme.colorScheme.onSurfaceVariant,
+                            ),
+                          ),
+                          TextButton.icon(
+                            style: TextButton.styleFrom(
+                              visualDensity: VisualDensity.compact,
+                            ),
+                            icon: Icon(
+                              allVisibleSelected
+                                  ? Icons.deselect_rounded
+                                  : Icons.select_all_rounded,
+                              size: 16,
+                            ),
+                            label: Text(
+                              allVisibleSelected
+                                  ? 'Deselect all'
+                                  : 'Select all',
+                              style: const TextStyle(fontSize: 12),
+                            ),
+                            onPressed: () {
+                              setState(() {
+                                if (allVisibleSelected) {
+                                  for (final s in students) {
+                                    _selectedIds.remove(s['id'] as String);
+                                  }
+                                } else {
+                                  for (final s in students) {
+                                    _selectedIds.add(s['id'] as String);
+                                  }
+                                }
+                              });
+                            },
+                          ),
+                        ],
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+
               if (_error != null)
                 MaterialBanner(
                   content: Text(_error!),
+                  backgroundColor: theme.colorScheme.errorContainer,
                   actions: [
                     TextButton(
                       onPressed: () => setState(() => _error = null),
@@ -843,65 +961,219 @@ class _StudentManagementScreenState
                     ),
                   ],
                 ),
+
               Expanded(
                 child: students.isEmpty
-                    ? const Center(child: Text('No students found.'))
-                    : ListView.builder(
-                        padding: const EdgeInsets.only(bottom: 88),
+                    ? Center(
+                        child: Padding(
+                          padding: const EdgeInsets.all(24),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                Icons.people_outline_rounded,
+                                size: 56,
+                                color: theme.colorScheme.onSurfaceVariant,
+                              ),
+                              const SizedBox(height: 12),
+                              Text(
+                                _searchController.text.isNotEmpty
+                                    ? 'No accounts matching "${_searchController.text}"'
+                                    : 'No accounts found.',
+                                style: theme.textTheme.titleMedium?.copyWith(
+                                  color: theme.colorScheme.onSurfaceVariant,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      )
+                    : ListView.separated(
+                        padding: const EdgeInsets.fromLTRB(16, 12, 16, 88),
                         itemCount: students.length,
+                        separatorBuilder: (context, index) =>
+                            const SizedBox(height: 8),
                         itemBuilder: (context, index) {
                           final student = students[index];
                           final id = student['id'] as String;
-                          final name = (student['full_name'] as String?)
-                              ?.trim();
+                          final name = (student['full_name'] as String?)?.trim();
                           final username = student['username'] as String? ?? '';
-                          final role = student['role'] as String? ?? 'account';
+                          final role = (student['role'] as String? ?? 'student')
+                              .toLowerCase();
                           final canReset = _isAdmin || role == AppRoles.student;
-                          return ListTile(
-                            leading: Checkbox(
-                              value: _selectedIds.contains(id),
-                              onChanged: _isResetting || !canReset
-                                  ? null
-                                  : (selected) => setState(() {
-                                      if (selected ?? false) {
-                                        _selectedIds.add(id);
-                                      } else {
-                                        _selectedIds.remove(id);
-                                      }
-                                    }),
+                          final isSelected = _selectedIds.contains(id);
+
+                          final Color roleColor;
+                          final String roleLabel;
+                          switch (role) {
+                            case AppRoles.admin:
+                              roleColor = Colors.purple;
+                              roleLabel = 'Admin';
+                              break;
+                            case AppRoles.teacher:
+                              roleColor = Colors.blue;
+                              roleLabel = 'Teacher';
+                              break;
+                            default:
+                              roleColor = Colors.teal;
+                              roleLabel = 'Student';
+                          }
+
+                          final displayName =
+                              name?.isNotEmpty == true ? name! : username;
+
+                          return Card(
+                            elevation: isSelected ? 2 : 0,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                              side: BorderSide(
+                                color: isSelected
+                                    ? theme.colorScheme.primary
+                                    : theme.colorScheme.outlineVariant
+                                        .withValues(alpha: 0.5),
+                                width: isSelected ? 1.5 : 1,
+                              ),
                             ),
-                            title: Text(
-                              name?.isNotEmpty == true ? name! : username,
-                            ),
-                            subtitle: Text(
-                              [
-                                username,
-                                if (student['class_labels'] is List &&
-                                    (student['class_labels'] as List)
-                                        .isNotEmpty)
-                                  (student['class_labels'] as List).join(', '),
-                              ].join('\n'),
-                            ),
-                            trailing: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                if (canReset)
-                                  IconButton(
-                                    tooltip: 'Reset this $role’s password',
-                                    onPressed: _isResetting
-                                        ? null
-                                        : () => _reset([id]),
-                                    icon: const Icon(Icons.lock_reset),
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                                vertical: 8,
+                              ),
+                              child: Row(
+                                children: [
+                                  SizedBox(
+                                    width: 36,
+                                    height: 36,
+                                    child: Checkbox(
+                                      value: isSelected,
+                                      shape: RoundedRectangleBorder(
+                                        borderRadius: BorderRadius.circular(4),
+                                      ),
+                                      onChanged: _isResetting || !canReset
+                                          ? null
+                                          : (selected) => setState(() {
+                                                if (selected ?? false) {
+                                                  _selectedIds.add(id);
+                                                } else {
+                                                  _selectedIds.remove(id);
+                                                }
+                                              }),
+                                    ),
                                   ),
-                                if (_isAdmin || role == AppRoles.student)
-                                  IconButton(
-                                    tooltip: 'Delete account',
-                                    onPressed: _isResetting || _deletingId == id
-                                        ? null
-                                        : () => _deleteAccount(student),
-                                    icon: const Icon(Icons.delete_outline),
+                                  const SizedBox(width: 8),
+                                  CircleAvatar(
+                                    radius: 20,
+                                    backgroundColor:
+                                        roleColor.withValues(alpha: 0.15),
+                                    child: Text(
+                                      displayName.isNotEmpty
+                                          ? displayName[0].toUpperCase()
+                                          : 'U',
+                                      style: TextStyle(
+                                        color: roleColor,
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 14,
+                                      ),
+                                    ),
                                   ),
-                              ],
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Row(
+                                          children: [
+                                            Expanded(
+                                              child: Text(
+                                                displayName,
+                                                style: const TextStyle(
+                                                  fontWeight: FontWeight.w600,
+                                                  fontSize: 15,
+                                                ),
+                                              ),
+                                            ),
+                                            Container(
+                                              padding: const EdgeInsets.symmetric(
+                                                horizontal: 7,
+                                                vertical: 2,
+                                              ),
+                                              decoration: BoxDecoration(
+                                                color: roleColor.withValues(
+                                                    alpha: 0.12),
+                                                borderRadius:
+                                                    BorderRadius.circular(6),
+                                              ),
+                                              child: Text(
+                                                roleLabel,
+                                                style: TextStyle(
+                                                  color: roleColor,
+                                                  fontSize: 11,
+                                                  fontWeight: FontWeight.bold,
+                                                ),
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                        const SizedBox(height: 2),
+                                        Text(
+                                          username,
+                                          style: TextStyle(
+                                            color: theme
+                                                .colorScheme.onSurfaceVariant,
+                                            fontSize: 13,
+                                          ),
+                                        ),
+                                        if (student['class_labels'] is List &&
+                                            (student['class_labels'] as List)
+                                                .isNotEmpty) ...[
+                                          const SizedBox(height: 4),
+                                          Text(
+                                            (student['class_labels'] as List)
+                                                .join(', '),
+                                            style: TextStyle(
+                                              color:
+                                                  theme.colorScheme.primary,
+                                              fontSize: 12,
+                                              fontWeight: FontWeight.w500,
+                                            ),
+                                          ),
+                                        ],
+                                      ],
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      if (canReset)
+                                        IconButton(
+                                          tooltip: 'Reset password for $displayName',
+                                          onPressed: _isResetting
+                                              ? null
+                                              : () => _reset([id]),
+                                          icon: const Icon(
+                                            Icons.lock_reset_rounded,
+                                            size: 22,
+                                          ),
+                                        ),
+                                      if (_isAdmin || role == AppRoles.student)
+                                        IconButton(
+                                          tooltip: 'Delete account $displayName',
+                                          onPressed: _isResetting ||
+                                                  _deletingId == id
+                                              ? null
+                                              : () => _deleteAccount(student),
+                                          icon: const Icon(
+                                            Icons.delete_outline_rounded,
+                                            color: Colors.red,
+                                            size: 20,
+                                          ),
+                                        ),
+                                    ],
+                                  ),
+                                ],
+                              ),
                             ),
                           );
                         },
@@ -913,9 +1185,25 @@ class _StudentManagementScreenState
       ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: _isResetting ? null : _createAccount,
-        icon: const Icon(Icons.person_add_alt_1),
+        icon: const Icon(Icons.person_add_alt_1_rounded),
         label: Text(_isAdmin ? 'Register user' : 'Register student'),
       ),
+    );
+  }
+
+  Widget _buildRoleChip(String label, String roleValue) {
+    final selected = _filterRole == roleValue;
+    return ChoiceChip(
+      label: Text(label),
+      selected: selected,
+      onSelected: (val) {
+        if (!val) return;
+        setState(() {
+          _filterRole = roleValue;
+          _selectedIds.clear();
+          _studentsFuture = _loadAccounts();
+        });
+      },
     );
   }
 }

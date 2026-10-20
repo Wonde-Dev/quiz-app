@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -805,8 +806,30 @@ class _EvaluationDetailsSheetState extends State<_EvaluationDetailsSheet> {
                               final qType = question?['type'] as String? ??
                                   item['question_type'] as String? ??
                                   'multiple_choice';
-                              final sAnswer = item['answer_text'] as String? ??
-                                  '(no answer provided)';
+                              final sAnswerRaw = item['answer_text'] as String? ?? '';
+                              String studentText = sAnswerRaw;
+                              String? studentImageUrl;
+
+                              if (sAnswerRaw.trim().startsWith('{') &&
+                                  sAnswerRaw.trim().endsWith('}')) {
+                                try {
+                                  final parsed = jsonDecode(sAnswerRaw)
+                                      as Map<String, dynamic>;
+                                  studentText =
+                                      parsed['text'] as String? ?? '';
+                                  studentImageUrl =
+                                      parsed['image_url'] as String? ??
+                                          parsed['imageUrl'] as String?;
+                                } catch (_) {
+                                  studentText = sAnswerRaw;
+                                }
+                              } else if (sAnswerRaw.trim().startsWith('http://') ||
+                                  sAnswerRaw.trim().startsWith('https://') ||
+                                  sAnswerRaw.trim().startsWith('data:image/')) {
+                                studentImageUrl = sAnswerRaw.trim();
+                                studentText = '';
+                              }
+
                               final isCorrect = item['is_correct'] == true;
                               final cAnswer = question?['correct_answer'] as String? ??
                                   item['correct_answer'] as String? ??
@@ -857,7 +880,7 @@ class _EvaluationDetailsSheetState extends State<_EvaluationDetailsSheet> {
                                                 const SizedBox(height: 2),
                                                 Text(
                                                   qType == 'short_answer'
-                                                      ? 'Short answer / Fill in the blank'
+                                                      ? 'Short answer / Description'
                                                       : qType == 'true_false'
                                                           ? 'True / False'
                                                           : 'Multiple choice',
@@ -885,7 +908,11 @@ class _EvaluationDetailsSheetState extends State<_EvaluationDetailsSheet> {
                                               CrossAxisAlignment.start,
                                           children: [
                                             Text(
-                                              'Student Answer: $sAnswer',
+                                              studentText.isNotEmpty
+                                                  ? 'Student Answer: $studentText'
+                                                  : (studentImageUrl != null
+                                                      ? 'Student Answer: (Image attachment)'
+                                                      : 'Student Answer: (no answer provided)'),
                                               style: TextStyle(
                                                 fontWeight: FontWeight.w600,
                                                 color: isCorrect
@@ -893,10 +920,75 @@ class _EvaluationDetailsSheetState extends State<_EvaluationDetailsSheet> {
                                                     : Colors.red.shade900,
                                               ),
                                             ),
+                                            if (studentImageUrl != null &&
+                                                studentImageUrl.isNotEmpty) ...[
+                                              const SizedBox(height: 10),
+                                              InkWell(
+                                                onTap: () =>
+                                                    _showImageModal(context, studentImageUrl!),
+                                                borderRadius:
+                                                    BorderRadius.circular(8),
+                                                child: Container(
+                                                  decoration: BoxDecoration(
+                                                    color: Colors.black.withValues(alpha: 0.04),
+                                                    borderRadius:
+                                                        BorderRadius.circular(8),
+                                                    border: Border.all(
+                                                      color: theme.colorScheme.outlineVariant,
+                                                    ),
+                                                  ),
+                                                  padding: const EdgeInsets.all(8),
+                                                  child: Row(
+                                                    children: [
+                                                      ClipRRect(
+                                                        borderRadius:
+                                                            BorderRadius.circular(6),
+                                                        child: SizedBox(
+                                                          width: 80,
+                                                          height: 60,
+                                                          child: _renderAnswerThumbnail(studentImageUrl),
+                                                        ),
+                                                      ),
+                                                      const SizedBox(width: 12),
+                                                      Expanded(
+                                                        child: Column(
+                                                          crossAxisAlignment:
+                                                              CrossAxisAlignment.start,
+                                                          children: [
+                                                            const Row(
+                                                              children: [
+                                                                Icon(Icons.photo_outlined, size: 16),
+                                                                SizedBox(width: 4),
+                                                                Text(
+                                                                  'Student Work / Diagram',
+                                                                  style: TextStyle(
+                                                                    fontWeight: FontWeight.bold,
+                                                                    fontSize: 13,
+                                                                  ),
+                                                                ),
+                                                              ],
+                                                            ),
+                                                            const SizedBox(height: 2),
+                                                            Text(
+                                                              'Tap to view and inspect full image',
+                                                              style: TextStyle(
+                                                                fontSize: 11,
+                                                                color: theme.colorScheme.onSurfaceVariant,
+                                                              ),
+                                                            ),
+                                                          ],
+                                                        ),
+                                                      ),
+                                                      const Icon(Icons.fullscreen_rounded, size: 22),
+                                                    ],
+                                                  ),
+                                                ),
+                                              ),
+                                            ],
                                             if (cAnswer.isNotEmpty && !isCorrect) ...[
-                                              const SizedBox(height: 4),
+                                              const SizedBox(height: 6),
                                               Text(
-                                                'Correct Answer: $cAnswer',
+                                                'Correct / Expected Answer: $cAnswer',
                                                 style: TextStyle(
                                                   color: Colors.green.shade800,
                                                   fontWeight: FontWeight.w500,
@@ -979,6 +1071,67 @@ class _EvaluationDetailsSheetState extends State<_EvaluationDetailsSheet> {
                           ),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _renderAnswerThumbnail(String? url) {
+    if (url == null || url.isEmpty) {
+      return const Center(child: Icon(Icons.image_not_supported_outlined));
+    }
+    if (url.startsWith('data:image')) {
+      final parts = url.split(',');
+      if (parts.length > 1) {
+        try {
+          return Image.memory(base64Decode(parts[1]), fit: BoxFit.cover);
+        } catch (_) {}
+      }
+    }
+    return Image.network(
+      url,
+      fit: BoxFit.cover,
+      errorBuilder: (context, error, stackTrace) => const Center(
+        child: Icon(Icons.broken_image_outlined, size: 20),
+      ),
+    );
+  }
+
+  void _showImageModal(BuildContext context, String url) {
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => Dialog(
+        insetPadding: const EdgeInsets.all(16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            AppBar(
+              title: const Text('Student Attached Work / Diagram'),
+              leading: IconButton(
+                icon: const Icon(Icons.close),
+                onPressed: () => Navigator.of(ctx).pop(),
+              ),
+            ),
+            Flexible(
+              child: SingleChildScrollView(
+                child: InteractiveViewer(
+                  maxScale: 4.0,
+                  child: url.startsWith('data:image')
+                      ? Image.memory(base64Decode(url.split(',')[1]))
+                      : Image.network(
+                          url,
+                          fit: BoxFit.contain,
+                          errorBuilder: (context, error, stackTrace) =>
+                              const Padding(
+                            padding: EdgeInsets.all(32),
+                            child: Center(child: Text('Could not load image.')),
+                          ),
+                        ),
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
