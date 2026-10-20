@@ -17,6 +17,7 @@ import 'package:quiz_app/features/teacher/presentation/screens/teacher_dashboard
 import 'package:quiz_app/features/teacher/presentation/screens/student_management_screen.dart';
 import 'package:quiz_app/features/teacher/presentation/screens/quiz_builder_screen.dart';
 import 'package:quiz_app/features/teacher/presentation/screens/quiz_results_screen.dart';
+import 'package:quiz_app/features/teacher/presentation/screens/reset_password_screen.dart';
 
 final routerProvider = Provider<GoRouter>((ref) {
   final authRefresh = ValueNotifier<int>(0);
@@ -118,6 +119,10 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/teacher/students',
         builder: (context, state) => const StudentManagementScreen(),
+      ),
+      GoRoute(
+        path: '/teacher/reset-passwords',
+        builder: (context, state) => const ResetPasswordScreen(),
       ),
       GoRoute(
         path: '/teacher/quizzes/new',

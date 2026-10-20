@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:quiz_app/core/constants/app_roles.dart';
 import 'package:quiz_app/features/auth/presentation/providers/auth_provider.dart';
+import 'package:quiz_app/shared/widgets/dashboard_shell.dart';
 
 class QuizBuilderScreen extends ConsumerStatefulWidget {
   const QuizBuilderScreen({super.key});
@@ -15,19 +16,26 @@ class _QuizBuilderScreenState extends ConsumerState<QuizBuilderScreen> {
   final _formKey = GlobalKey<FormState>();
   final _titleController = TextEditingController();
   final _descriptionController = TextEditingController();
+  final _subjectController = TextEditingController(text: 'General');
+  final _timeLimitController = TextEditingController(text: '30');
   final _questionController = TextEditingController();
   final _correctAnswerController = TextEditingController();
   final _explanationController = TextEditingController();
+  final _customSectionController = TextEditingController();
   final _optionControllers = List.generate(4, (_) => TextEditingController());
+
   final List<Map<String, dynamic>> _questions = [];
   List<Map<String, dynamic>> _schools = [];
-  List<Map<String, dynamic>> _sections = [];
+  List<Map<String, dynamic>> _existingGrades = [];
+  List<Map<String, dynamic>> _existingSections = [];
   List<Map<String, dynamic>> _assignedCourses = [];
+
   String _role = AppRoles.teacher;
   String? _selectedSchoolId;
-  String? _selectedGradeId;
-  String? _selectedSectionId;
-  String? _selectedCourseId;
+  String _selectedGradeName = 'Grade 9';
+  String _selectedSectionName = 'Section A';
+  bool _useCustomSection = false;
+
   bool _loadingTargets = true;
   int _correctOption = 0;
   String _questionType = 'multiple_choice';
@@ -35,6 +43,16 @@ class _QuizBuilderScreenState extends ConsumerState<QuizBuilderScreen> {
   String? _savedQuizId;
   bool _questionsSaved = false;
   String? _error;
+
+  static const _standardGrades = ['Grade 9', 'Grade 10', 'Grade 11', 'Grade 12'];
+  static const _standardSections = [
+    'Section A',
+    'Section B',
+    'Section C',
+    'Section D',
+    'Section E',
+    'Other / Custom',
+  ];
 
   @override
   void initState() {
@@ -46,40 +64,128 @@ class _QuizBuilderScreenState extends ConsumerState<QuizBuilderScreen> {
   void dispose() {
     _titleController.dispose();
     _descriptionController.dispose();
+    _subjectController.dispose();
+    _timeLimitController.dispose();
     _questionController.dispose();
     _correctAnswerController.dispose();
     _explanationController.dispose();
+    _customSectionController.dispose();
     for (final controller in _optionControllers) {
       controller.dispose();
     }
     super.dispose();
   }
 
+  Future<void> _loadTargets() async {
+    setState(() {
+      _loadingTargets = true;
+      _error = null;
+    });
+
+    try {
+      final user = ref.read(authStateProvider).user;
+      if (user == null) throw StateError('Sign in again to create a quiz.');
+      _role = user.role;
+
+      final client = Supabase.instance.client;
+
+      if (_role == AppRoles.admin) {
+        final rows = await client
+            .from('schools')
+            .select('id, name')
+            .order('name');
+        _schools = List<Map<String, dynamic>>.from(rows);
+        if (_schools.isNotEmpty) {
+          _selectedSchoolId = _schools.first['id'] as String;
+          await _loadSchoolMetadata(_selectedSchoolId!);
+        }
+      } else {
+        _selectedSchoolId = user.schoolId;
+        if (_selectedSchoolId != null) {
+          await _loadSchoolMetadata(_selectedSchoolId!);
+        }
+        await _loadTeacherCourses(user.id);
+      }
+    } catch (error) {
+      if (mounted) {
+        setState(() => _error = 'Could not load classes: $error');
+      }
+    } finally {
+      if (mounted) setState(() => _loadingTargets = false);
+    }
+  }
+
+  Future<void> _loadSchoolMetadata(String schoolId) async {
+    final client = Supabase.instance.client;
+    try {
+      final results = await Future.wait([
+        client
+            .from('school_grades')
+            .select('id, name')
+            .eq('school_id', schoolId)
+            .order('name'),
+        client
+            .from('sections')
+            .select('id, name, grade_id, school_grades(name)')
+            .eq('school_id', schoolId)
+            .order('name'),
+      ]);
+
+      if (!mounted) return;
+      setState(() {
+        _existingGrades = List<Map<String, dynamic>>.from(results[0]);
+        _existingSections = List<Map<String, dynamic>>.from(results[1]);
+      });
+    } catch (e) {
+      debugPrint('Metadata loading note: $e');
+    }
+  }
+
+  Future<void> _loadTeacherCourses(String teacherId) async {
+    final client = Supabase.instance.client;
+    try {
+      final rows = await client
+          .from('courses')
+          .select('id, name, subject, section_id')
+          .eq('teacher_id', teacherId);
+      if (mounted) {
+        _assignedCourses = List<Map<String, dynamic>>.from(rows);
+        if (_assignedCourses.isNotEmpty) {
+          final firstSubject = _assignedCourses.first['subject'] as String?;
+          if (firstSubject != null && firstSubject.isNotEmpty) {
+            _subjectController.text = firstSubject;
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint('Course loading note: $e');
+    }
+  }
+
   void _addQuestion() {
     final questionText = _questionController.text.trim();
-    final hasMissingChoice =
-        _questionType == 'multiple_choice' &&
-        _optionControllers.any((controller) => controller.text.trim().isEmpty);
-    final hasMissingAnswer =
-        _questionType == 'short_answer' &&
+    final hasMissingChoice = _questionType == 'multiple_choice' &&
+        _optionControllers.any((c) => c.text.trim().isEmpty);
+    final hasMissingAnswer = _questionType == 'short_answer' &&
         _correctAnswerController.text.trim().isEmpty;
+
     if (questionText.isEmpty || hasMissingChoice || hasMissingAnswer) {
       setState(() {
         _error = switch (_questionType) {
           'short_answer' => 'Enter a question and its correct answer.',
-          'true_false' => 'Enter a true-or-false question.',
-          _ => 'Enter a question and all four answer options.',
+          'true_false' => 'Enter a true-or-false question statement.',
+          _ => 'Enter a question and all four answer choices.',
         };
       });
       return;
     }
+
     final isChoiceQuestion =
         _questionType == 'multiple_choice' || _questionType == 'true_false';
     final optionTexts = _questionType == 'true_false'
         ? const ['True', 'False']
-        : _optionControllers
-              .map((controller) => controller.text.trim())
-              .toList();
+        : _optionControllers.map((c) => c.text.trim()).toList();
+
     setState(() {
       _error = null;
       _questions.add({
@@ -104,6 +210,7 @@ class _QuizBuilderScreenState extends ConsumerState<QuizBuilderScreen> {
             ? null
             : _explanationController.text.trim(),
       });
+
       _questionController.clear();
       _correctAnswerController.clear();
       _explanationController.clear();
@@ -117,17 +224,7 @@ class _QuizBuilderScreenState extends ConsumerState<QuizBuilderScreen> {
 
   Future<void> _saveQuiz() async {
     if (!_formKey.currentState!.validate()) return;
-    final assignedCourse = _assignedCourses
-        .where((course) => course['id'] == _selectedCourseId)
-        .firstOrNull;
-    if (_role == AppRoles.teacher && assignedCourse == null) {
-      setState(() => _error = 'Choose one of your assigned subjects.');
-      return;
-    }
-    if (_role == AppRoles.admin && _selectedSectionId == null) {
-      setState(() => _error = 'Choose a grade and section for this quiz.');
-      return;
-    }
+
     if (_questions.isEmpty) {
       setState(() => _error = 'Add at least one question before publishing.');
       return;
@@ -137,19 +234,129 @@ class _QuizBuilderScreenState extends ConsumerState<QuizBuilderScreen> {
       _error = null;
       _isSaving = true;
     });
+
     try {
       final client = Supabase.instance.client;
+      final user = client.auth.currentUser;
+      if (user == null) throw StateError('Please sign in again to publish.');
+
+      final effectiveSectionName = _useCustomSection
+          ? _customSectionController.text.trim()
+          : _selectedSectionName;
+
+      if (effectiveSectionName.isEmpty) {
+        throw StateError('Please choose or enter a section name.');
+      }
+
+      final schoolId = _selectedSchoolId;
+      String? gradeId;
+      String? sectionId;
+      String? courseId;
+
+      if (schoolId != null) {
+        // 1. Resolve Grade
+        final matchingGrade = _existingGrades.firstWhere(
+          (g) =>
+              (g['name'] as String).toLowerCase() ==
+              _selectedGradeName.toLowerCase(),
+          orElse: () => {},
+        );
+
+        if (matchingGrade.isNotEmpty && matchingGrade['id'] != null) {
+          gradeId = matchingGrade['id'] as String;
+        } else {
+          try {
+            final newGrade = await client
+                .from('school_grades')
+                .upsert(
+                  {'school_id': schoolId, 'name': _selectedGradeName},
+                  onConflict: 'school_id, name',
+                )
+                .select('id')
+                .single();
+            gradeId = newGrade['id'] as String;
+          } catch (e) {
+            debugPrint('Grade resolution note: $e');
+          }
+        }
+
+        // 2. Resolve Section
+        final matchingSection = _existingSections.firstWhere(
+          (s) =>
+              (s['name'] as String).toLowerCase() ==
+              effectiveSectionName.toLowerCase(),
+          orElse: () => {},
+        );
+
+        if (matchingSection.isNotEmpty && matchingSection['id'] != null) {
+          sectionId = matchingSection['id'] as String;
+        } else {
+          try {
+            final newSection = await client
+                .from('sections')
+                .insert({
+                  'school_id': schoolId,
+                  'grade_id': gradeId,
+                  'name': effectiveSectionName,
+                  'grade': _selectedGradeName.replaceAll(RegExp(r'[^0-9]'), ''),
+                })
+                .select('id')
+                .single();
+            sectionId = newSection['id'] as String;
+          } catch (e) {
+            debugPrint('Section resolution note: $e');
+            // Try matching section again
+            if (_existingSections.isNotEmpty) {
+              sectionId = _existingSections.first['id'] as String;
+            }
+          }
+        }
+
+        // 3. Resolve Course for teacher
+        final matchingCourse = _assignedCourses.firstWhere(
+          (c) => c['section_id'] == sectionId,
+          orElse: () => {},
+        );
+
+        if (matchingCourse.isNotEmpty && matchingCourse['id'] != null) {
+          courseId = matchingCourse['id'] as String;
+        } else {
+          try {
+            final newCourse = await client
+                .from('courses')
+                .insert({
+                  'school_id': schoolId,
+                  'teacher_id': user.id,
+                  'section_id': sectionId,
+                  'name':
+                      '${_subjectController.text.trim()} · $_selectedGradeName $effectiveSectionName',
+                  'subject': _subjectController.text.trim(),
+                })
+                .select('id')
+                .single();
+            courseId = newCourse['id'] as String;
+          } catch (e) {
+            debugPrint('Course auto-link note: $e');
+            if (_assignedCourses.isNotEmpty) {
+              courseId = _assignedCourses.first['id'] as String;
+            }
+          }
+        }
+      }
+
+      final timeLimit = int.tryParse(_timeLimitController.text.trim()) ?? 30;
+
+      // 4. Create Quiz
       if (_savedQuizId == null) {
-        final user = client.auth.currentUser;
-        if (user == null) throw StateError('Sign in again to create a quiz.');
         final quiz = await client
             .from('quizzes')
             .insert({
               'teacher_id': user.id,
-              'course_id': assignedCourse?['id'],
-              'section_id': assignedCourse?['section_id'] ?? _selectedSectionId,
+              'course_id': courseId,
+              'section_id': sectionId,
               'title': _titleController.text.trim(),
               'description': _descriptionController.text.trim(),
+              'time_limit_minutes': timeLimit,
               'total_points': _questions.length,
               'is_published': false,
             })
@@ -157,156 +364,47 @@ class _QuizBuilderScreenState extends ConsumerState<QuizBuilderScreen> {
             .single();
         _savedQuizId = quiz['id'] as String;
       }
-      if (!_questionsSaved) {
-        await client
-            .from('questions')
-            .insert(
+
+      // 5. Insert Questions
+      if (!_questionsSaved && _savedQuizId != null) {
+        await client.from('questions').insert(
               _questions
-                  .map((question) => {...question, 'quiz_id': _savedQuizId})
+                  .map((q) => {...q, 'quiz_id': _savedQuizId})
                   .toList(),
             );
         _questionsSaved = true;
       }
+
+      // 6. Publish Quiz
       await client
           .from('quizzes')
           .update({'is_published': true})
           .eq('id', _savedQuizId!);
+
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Quiz published for students')),
+        const SnackBar(
+          content: Text('Quiz published successfully! Students can now take it.'),
+          backgroundColor: Colors.green,
+          behavior: SnackBarBehavior.floating,
+        ),
       );
       Navigator.of(context).pop();
     } catch (error) {
       if (mounted) {
-        setState(() => _error = 'Quiz was not published: $error');
+        setState(() => _error = 'Could not publish quiz: $error');
       }
     } finally {
       if (mounted) setState(() => _isSaving = false);
     }
   }
 
-  Future<void> _loadTargets() async {
-    try {
-      final user = ref.read(authStateProvider).user;
-      if (user == null) throw StateError('Sign in again to create a quiz.');
-      _role = user.role;
-      if (_role == AppRoles.teacher) {
-        await _loadAssignedCourses(user.id);
-      } else if (_role == AppRoles.admin) {
-        final rows = await Supabase.instance.client
-            .from('schools')
-            .select('id, name')
-            .order('name');
-        _schools = List<Map<String, dynamic>>.from(rows);
-        final schoolId = _schools.isEmpty
-            ? null
-            : _schools.first['id'] as String;
-        _selectedSchoolId = schoolId;
-        if (schoolId == null) {
-          throw StateError('Add a school before creating a quiz.');
-        }
-        await _loadSections(schoolId);
-      } else {
-        throw StateError('Your account cannot create quizzes.');
-      }
-    } catch (error) {
-      if (mounted) {
-        setState(() => _error = 'Could not load class sections: $error');
-      }
-    } finally {
-      if (mounted) setState(() => _loadingTargets = false);
-    }
-  }
-
-  Future<void> _loadAssignedCourses(String teacherId) async {
-    final client = Supabase.instance.client;
-    final rows = await client
-        .from('courses')
-        .select('id, name, subject, section_id')
-        .eq('teacher_id', teacherId)
-        .not('section_id', 'is', null)
-        .order('subject');
-    final courses = List<Map<String, dynamic>>.from(rows);
-    if (courses.isEmpty) {
-      if (mounted) setState(() => _assignedCourses = []);
-      return;
-    }
-    final sectionIds = courses
-        .map((course) => course['section_id'] as String)
-        .toSet()
-        .toList();
-    final sectionRows = await client
-        .from('sections')
-        .select('id, name, grade_id, school_grades!inner(name)')
-        .inFilter('id', sectionIds);
-    final sectionsById = {
-      for (final section in List<Map<String, dynamic>>.from(sectionRows))
-        section['id'] as String: section,
-    };
-    final assignments = courses
-        .where((course) => sectionsById.containsKey(course['section_id']))
-        .map((course) {
-          final section =
-              sectionsById[course['section_id']] as Map<String, dynamic>;
-          final grade = section['school_grades'] as Map<String, dynamic>;
-          return {
-            ...course,
-            'class_label':
-                '${course['subject'] ?? course['name']} · '
-                '${grade['name']} ${section['name']}',
-          };
-        })
-        .toList();
-    if (!mounted) return;
-    setState(() {
-      _assignedCourses = assignments;
-      _selectedCourseId = assignments
-          .map((course) => course['id'] as String)
-          .firstOrNull;
-    });
-  }
-
-  Future<void> _loadSections(String schoolId) async {
-    final rows = await Supabase.instance.client
-        .from('sections')
-        .select('id, name, grade_id, school_grades!inner(id, name)')
-        .eq('school_id', schoolId)
-        .order('name');
-    final sections = List<Map<String, dynamic>>.from(rows);
-    final gradeIds = sections
-        .map((section) => section['grade_id'] as String)
-        .toSet();
-    if (!mounted) return;
-    setState(() {
-      _sections = sections;
-      _selectedGradeId = gradeIds.firstOrNull;
-      _selectedSectionId = sections
-          .where((section) => section['grade_id'] == _selectedGradeId)
-          .map((section) => section['id'] as String)
-          .firstOrNull;
-    });
-  }
-
-  List<Map<String, dynamic>> get _grades {
-    final byId = <String, Map<String, dynamic>>{};
-    for (final section in _sections) {
-      byId[section['grade_id'] as String] =
-          section['school_grades'] as Map<String, dynamic>;
-    }
-    return byId.entries
-        .map((entry) => {'id': entry.key, ...entry.value})
-        .toList()
-      ..sort((a, b) => (a['name'] as String).compareTo(b['name'] as String));
-  }
-
-  List<Map<String, dynamic>> get _sectionsForSelectedGrade => _sections
-      .where((section) => section['grade_id'] == _selectedGradeId)
-      .toList();
-
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Create a quiz')),
+    final theme = Theme.of(context);
+
+    return DashboardShell(
+      title: 'Prepare a quiz',
       body: _loadingTargets
           ? const Center(child: CircularProgressIndicator())
           : ListView(
@@ -317,309 +415,511 @@ class _QuizBuilderScreenState extends ConsumerState<QuizBuilderScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      TextFormField(
-                        controller: _titleController,
-                        decoration: const InputDecoration(
-                          labelText: 'Quiz title',
-                        ),
-                        readOnly: _questionsSaved,
-                        validator: (value) =>
-                            value == null || value.trim().isEmpty
-                            ? 'Enter a title'
-                            : null,
-                      ),
-                      const SizedBox(height: 12),
-                      TextFormField(
-                        controller: _descriptionController,
-                        decoration: const InputDecoration(
-                          labelText: 'Description',
-                        ),
-                        maxLines: 2,
-                        readOnly: _questionsSaved,
-                      ),
-                    ],
-                  ),
-                ),
-                if (_role == AppRoles.admin) ...[
-                  DropdownButtonFormField<String>(
-                    key: ValueKey(_selectedSchoolId),
-                    initialValue: _selectedSchoolId,
-                    decoration: const InputDecoration(labelText: 'School'),
-                    items: [
-                      for (final school in _schools)
-                        DropdownMenuItem(
-                          value: school['id'] as String,
-                          child: Text(school['name'] as String? ?? 'School'),
-                        ),
-                    ],
-                    onChanged: _isSaving
-                        ? null
-                        : (schoolId) async {
-                            if (schoolId == null) return;
-                            setState(() {
-                              _selectedSchoolId = schoolId;
-                              _sections = [];
-                              _selectedGradeId = null;
-                              _selectedSectionId = null;
-                              _loadingTargets = true;
-                              _error = null;
-                            });
-                            try {
-                              await _loadSections(schoolId);
-                            } catch (error) {
-                              if (mounted) {
-                                setState(
-                                  () => _error =
-                                      'Could not load class sections: $error',
-                                );
-                              }
-                            } finally {
-                              if (mounted) {
-                                setState(() => _loadingTargets = false);
-                              }
-                            }
-                          },
-                  ),
-                  const SizedBox(height: 12),
-                ],
-                if (_role == AppRoles.teacher) ...[
-                  if (_assignedCourses.isEmpty)
-                    Card(
-                      child: Padding(
-                        padding: const EdgeInsets.all(16),
-                        child: Text(
-                          'No subject or class is assigned to your account yet. Ask an administrator to assign your teaching subject and section.',
-                          style: TextStyle(
-                            color: Theme.of(context).colorScheme.error,
-                          ),
-                        ),
-                      ),
-                    )
-                  else
-                    DropdownButtonFormField<String>(
-                      key: ValueKey('course-$_selectedCourseId'),
-                      initialValue: _selectedCourseId,
-                      decoration: const InputDecoration(
-                        labelText: 'Assigned subject and class',
-                        prefixIcon: Icon(Icons.menu_book_outlined),
-                      ),
-                      items: [
-                        for (final course in _assignedCourses)
-                          DropdownMenuItem(
-                            value: course['id'] as String,
-                            child: Text(course['class_label'] as String),
-                          ),
-                      ],
-                      onChanged: _isSaving
-                          ? null
-                          : (courseId) =>
-                                setState(() => _selectedCourseId = courseId),
-                      validator: (value) => value == null
-                          ? 'Choose an assigned subject and class'
-                          : null,
-                    ),
-                ] else ...[
-                  DropdownButtonFormField<String>(
-                    key: ValueKey('grade-$_selectedGradeId'),
-                    initialValue: _selectedGradeId,
-                    decoration: const InputDecoration(labelText: 'Grade'),
-                    items: [
-                      for (final grade in _grades)
-                        DropdownMenuItem(
-                          value: grade['id'] as String,
-                          child: Text(grade['name'] as String),
-                        ),
-                    ],
-                    onChanged: _isSaving || _grades.isEmpty
-                        ? null
-                        : (gradeId) {
-                            if (gradeId == null) return;
-                            setState(() {
-                              _selectedGradeId = gradeId;
-                              _selectedSectionId = _sections
-                                  .where(
-                                    (section) => section['grade_id'] == gradeId,
-                                  )
-                                  .map((section) => section['id'] as String)
-                                  .firstOrNull;
-                            });
-                          },
-                    validator: (value) =>
-                        value == null ? 'Choose a grade' : null,
-                  ),
-                  const SizedBox(height: 12),
-                  DropdownButtonFormField<String>(
-                    key: ValueKey('section-$_selectedSectionId'),
-                    initialValue:
-                        _sectionsForSelectedGrade.any(
-                          (section) => section['id'] == _selectedSectionId,
-                        )
-                        ? _selectedSectionId
-                        : null,
-                    decoration: const InputDecoration(labelText: 'Section'),
-                    items: [
-                      for (final section in _sectionsForSelectedGrade)
-                        DropdownMenuItem(
-                          value: section['id'] as String,
-                          child: Text(section['name'] as String),
-                        ),
-                    ],
-                    onChanged: _isSaving
-                        ? null
-                        : (sectionId) =>
-                              setState(() => _selectedSectionId = sectionId),
-                    validator: (value) =>
-                        value == null ? 'Choose a section' : null,
-                  ),
-                ],
-                const SizedBox(height: 28),
-                Text(
-                  'Questions (${_questions.length})',
-                  style: Theme.of(context).textTheme.titleLarge,
-                ),
-                for (var index = 0; index < _questions.length; index++)
-                  ListTile(
-                    leading: CircleAvatar(child: Text('${index + 1}')),
-                    title: Text(_questions[index]['text'] as String),
-                    subtitle: Text(
-                      '${_questionTypeLabel(_questions[index]['type'] as String)} · 1 point'
-                      '${(_questions[index]['explanation'] as String?)?.isNotEmpty == true ? ' · explanation added' : ''}',
-                    ),
-                    trailing: IconButton(
-                      tooltip: 'Remove question',
-                      onPressed: _isSaving || _questionsSaved
-                          ? null
-                          : () => setState(() => _questions.removeAt(index)),
-                      icon: const Icon(Icons.delete_outline),
-                    ),
-                  ),
-                const Divider(height: 32),
-                if (_questionsSaved)
-                  const Padding(
-                    padding: EdgeInsets.only(bottom: 12),
-                    child: Text(
-                      'Questions are saved. Retry publishing to finish.',
-                    ),
-                  ),
-                TextField(
-                  controller: _questionController,
-                  decoration: const InputDecoration(labelText: 'Question'),
-                  textCapitalization: TextCapitalization.sentences,
-                  readOnly: _questionsSaved,
-                ),
-                const SizedBox(height: 12),
-                DropdownButtonFormField<String>(
-                  initialValue: _questionType,
-                  decoration: const InputDecoration(labelText: 'Question type'),
-                  items: const [
-                    DropdownMenuItem(
-                      value: 'multiple_choice',
-                      child: Text('Multiple choice'),
-                    ),
-                    DropdownMenuItem(
-                      value: 'true_false',
-                      child: Text('True or false'),
-                    ),
-                    DropdownMenuItem(
-                      value: 'short_answer',
-                      child: Text('Fill in the blank'),
-                    ),
-                  ],
-                  onChanged: _questionsSaved
-                      ? null
-                      : (value) {
-                          if (value != null) {
-                            setState(() {
-                              _questionType = value;
-                              _correctOption = 0;
-                            });
-                          }
-                        },
-                ),
-                if (_questionType == 'short_answer')
-                  TextField(
-                    controller: _correctAnswerController,
-                    decoration: const InputDecoration(
-                      labelText: 'Correct answer',
-                      hintText: 'The answer students should enter',
-                    ),
-                    readOnly: _questionsSaved,
-                  )
-                else
-                  RadioGroup<int>(
-                    groupValue: _correctOption,
-                    onChanged: (value) {
-                      if (value != null && !_questionsSaved) {
-                        setState(() => _correctOption = value);
-                      }
-                    },
-                    child: Column(
-                      children: [
-                        for (
-                          var index = 0;
-                          index <
-                              (_questionType == 'true_false'
-                                  ? 2
-                                  : _optionControllers.length);
-                          index++
-                        )
-                          Row(
+                      // Section 1: Quiz Details Card
+                      Card(
+                        child: Padding(
+                          padding: const EdgeInsets.all(20),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Radio<int>(value: index),
-                              Expanded(
-                                child: _questionType == 'true_false'
-                                    ? Text(index == 0 ? 'True' : 'False')
-                                    : TextField(
-                                        controller: _optionControllers[index],
-                                        readOnly: _questionsSaved,
-                                        decoration: InputDecoration(
-                                          labelText: 'Option ${index + 1}',
-                                        ),
+                              Text(
+                                'Quiz Details',
+                                style: theme.textTheme.titleMedium?.copyWith(
+                                  fontWeight: FontWeight.bold,
+                                  color: theme.colorScheme.primary,
+                                ),
+                              ),
+                              const SizedBox(height: 16),
+                              TextFormField(
+                                controller: _titleController,
+                                decoration: const InputDecoration(
+                                  labelText: 'Quiz Title',
+                                  prefixIcon: Icon(Icons.title_rounded),
+                                ),
+                                readOnly: _questionsSaved,
+                                validator: (value) =>
+                                    value == null || value.trim().isEmpty
+                                        ? 'Enter a title'
+                                        : null,
+                              ),
+                              const SizedBox(height: 12),
+                              TextFormField(
+                                controller: _descriptionController,
+                                decoration: const InputDecoration(
+                                  labelText: 'Description / Instructions',
+                                  prefixIcon: Icon(Icons.description_outlined),
+                                ),
+                                maxLines: 2,
+                                readOnly: _questionsSaved,
+                              ),
+                              const SizedBox(height: 12),
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: TextFormField(
+                                      controller: _subjectController,
+                                      decoration: const InputDecoration(
+                                        labelText: 'Subject',
+                                        prefixIcon: Icon(Icons.subject_rounded),
                                       ),
+                                      readOnly: _questionsSaved,
+                                      validator: (value) => value == null ||
+                                              value.trim().isEmpty
+                                          ? 'Enter subject'
+                                          : null,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: TextFormField(
+                                      controller: _timeLimitController,
+                                      decoration: const InputDecoration(
+                                        labelText: 'Time limit (min)',
+                                        prefixIcon: Icon(Icons.timer_outlined),
+                                      ),
+                                      keyboardType: TextInputType.number,
+                                      readOnly: _questionsSaved,
+                                    ),
+                                  ),
+                                ],
                               ),
                             ],
                           ),
-                      ],
-                    ),
-                  ),
-                TextField(
-                  controller: _explanationController,
-                  decoration: const InputDecoration(
-                    labelText: 'Answer explanation (optional)',
-                    hintText: 'Explain why the correct answer is right',
-                  ),
-                  maxLines: 2,
-                  readOnly: _questionsSaved,
-                ),
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: TextButton.icon(
-                    onPressed: _isSaving || _questionsSaved
-                        ? null
-                        : _addQuestion,
-                    icon: const Icon(Icons.add),
-                    label: const Text('Add question'),
-                  ),
-                ),
-                if (_error != null) ...[
-                  const SizedBox(height: 12),
-                  Text(
-                    _error!,
-                    style: TextStyle(
-                      color: Theme.of(context).colorScheme.error,
-                    ),
-                  ),
-                ],
-                const SizedBox(height: 12),
-                FilledButton(
-                  onPressed: _isSaving ? null : _saveQuiz,
-                  child: _isSaving
-                      ? const SizedBox(
-                          height: 20,
-                          width: 20,
-                          child: CircularProgressIndicator(strokeWidth: 2),
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+
+                      // Section 2: Target Audience Card (Grade 9-12 & Section A/B/C/etc.)
+                      Card(
+                        child: Padding(
+                          padding: const EdgeInsets.all(20),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Class Assignment (Grade & Section)',
+                                style: theme.textTheme.titleMedium?.copyWith(
+                                  fontWeight: FontWeight.bold,
+                                  color: theme.colorScheme.primary,
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                'Select the target grade from 9 to 12 and section for this quiz.',
+                                style: theme.textTheme.bodySmall?.copyWith(
+                                  color: theme.colorScheme.onSurfaceVariant,
+                                ),
+                              ),
+                              const SizedBox(height: 16),
+
+                              if (_role == AppRoles.admin && _schools.isNotEmpty) ...[
+                                DropdownButtonFormField<String>(
+                                  initialValue: _selectedSchoolId,
+                                  decoration: const InputDecoration(
+                                    labelText: 'School',
+                                    prefixIcon: Icon(Icons.school_outlined),
+                                  ),
+                                  items: [
+                                    for (final school in _schools)
+                                      DropdownMenuItem(
+                                        value: school['id'] as String,
+                                        child: Text(
+                                          school['name'] as String? ?? 'School',
+                                        ),
+                                      ),
+                                  ],
+                                  onChanged: _isSaving
+                                      ? null
+                                      : (schoolId) {
+                                          if (schoolId == null) return;
+                                          setState(() => _selectedSchoolId = schoolId);
+                                          _loadSchoolMetadata(schoolId);
+                                        },
+                                ),
+                                const SizedBox(height: 12),
+                              ],
+
+                              // Grade Picker
+                              DropdownButtonFormField<String>(
+                                initialValue: _selectedGradeName,
+                                decoration: const InputDecoration(
+                                  labelText: 'Choose Grade (Grade 9 - 12)',
+                                  prefixIcon: Icon(Icons.grade_outlined),
+                                ),
+                                items: [
+                                  for (final grade in _standardGrades)
+                                    DropdownMenuItem(
+                                      value: grade,
+                                      child: Text(grade),
+                                    ),
+                                  for (final g in _existingGrades)
+                                    if (!_standardGrades.contains(g['name']))
+                                      DropdownMenuItem(
+                                        value: g['name'] as String,
+                                        child: Text(g['name'] as String),
+                                      ),
+                                ],
+                                onChanged: _isSaving
+                                    ? null
+                                    : (grade) {
+                                        if (grade != null) {
+                                          setState(() => _selectedGradeName = grade);
+                                        }
+                                      },
+                              ),
+                              const SizedBox(height: 12),
+
+                              // Section Picker
+                              DropdownButtonFormField<String>(
+                                initialValue: _selectedSectionName,
+                                decoration: const InputDecoration(
+                                  labelText: 'Choose Section (A, B, C, etc.)',
+                                  prefixIcon: Icon(Icons.group_work_outlined),
+                                ),
+                                items: [
+                                  for (final section in _standardSections)
+                                    DropdownMenuItem(
+                                      value: section,
+                                      child: Text(section),
+                                    ),
+                                  for (final s in _existingSections)
+                                    if (!_standardSections.contains(s['name']))
+                                      DropdownMenuItem(
+                                        value: s['name'] as String,
+                                        child: Text(s['name'] as String),
+                                      ),
+                                ],
+                                onChanged: _isSaving
+                                    ? null
+                                    : (section) {
+                                        if (section == null) return;
+                                        setState(() {
+                                          _selectedSectionName = section;
+                                          _useCustomSection =
+                                              section == 'Other / Custom';
+                                        });
+                                      },
+                              ),
+
+                              if (_useCustomSection) ...[
+                                const SizedBox(height: 12),
+                                TextFormField(
+                                  controller: _customSectionController,
+                                  decoration: const InputDecoration(
+                                    labelText: 'Custom Section Name (e.g. Section F)',
+                                    hintText: 'Enter section letter or name',
+                                    prefixIcon: Icon(Icons.edit_note_rounded),
+                                  ),
+                                  textCapitalization: TextCapitalization.words,
+                                  validator: (v) => _useCustomSection &&
+                                          (v == null || v.trim().isEmpty)
+                                      ? 'Enter a section name'
+                                      : null,
+                                ),
+                              ],
+                            ],
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 20),
+
+                      // Section 3: Questions list
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text(
+                            'Questions (${_questions.length})',
+                            style: theme.textTheme.titleMedium?.copyWith(
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          if (_questions.isNotEmpty)
+                            Text(
+                              '${_questions.length} points total',
+                              style: theme.textTheme.bodyMedium?.copyWith(
+                                color: theme.colorScheme.primary,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+
+                      if (_questions.isEmpty)
+                        Card(
+                          child: Padding(
+                            padding: const EdgeInsets.all(24),
+                            child: Center(
+                              child: Column(
+                                children: [
+                                  Icon(
+                                    Icons.quiz_outlined,
+                                    size: 44,
+                                    color: theme.colorScheme.onSurfaceVariant,
+                                  ),
+                                  const SizedBox(height: 8),
+                                  Text(
+                                    'No questions added yet. Use the question builder below to add questions.',
+                                    textAlign: TextAlign.center,
+                                    style: theme.textTheme.bodyMedium?.copyWith(
+                                      color: theme.colorScheme.onSurfaceVariant,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
                         )
-                      : const Text('Publish quiz'),
+                      else
+                        ListView.separated(
+                          shrinkWrap: true,
+                          physics: const NeverScrollableScrollPhysics(),
+                          itemCount: _questions.length,
+                          separatorBuilder: (context, index) => const SizedBox(height: 6),
+                          itemBuilder: (context, index) {
+                            final q = _questions[index];
+                            return Card(
+                              child: ListTile(
+                                leading: CircleAvatar(
+                                  backgroundColor: theme.colorScheme.primaryContainer,
+                                  child: Text(
+                                    '${index + 1}',
+                                    style: TextStyle(
+                                      color: theme.colorScheme.onPrimaryContainer,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ),
+                                title: Text(
+                                  q['text'] as String,
+                                  style: const TextStyle(fontWeight: FontWeight.w600),
+                                ),
+                                subtitle: Text(
+                                  '${_questionTypeLabel(q['type'] as String)} · 1 pt'
+                                  '${(q['explanation'] as String?)?.isNotEmpty == true ? ' · with explanation' : ''}',
+                                ),
+                                trailing: IconButton(
+                                  tooltip: 'Remove',
+                                  icon: const Icon(Icons.delete_outline, color: Colors.red),
+                                  onPressed: _isSaving || _questionsSaved
+                                      ? null
+                                      : () => setState(() => _questions.removeAt(index)),
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+
+                      const SizedBox(height: 24),
+
+                      // Section 4: Add New Question Card
+                      Card(
+                        color: theme.colorScheme.surfaceContainerLow,
+                        child: Padding(
+                          padding: const EdgeInsets.all(20),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Add Question',
+                                style: theme.textTheme.titleMedium?.copyWith(
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                              const SizedBox(height: 14),
+                              TextFormField(
+                                controller: _questionController,
+                                decoration: const InputDecoration(
+                                  labelText: 'Question Text',
+                                  prefixIcon: Icon(Icons.help_outline_rounded),
+                                ),
+                                textCapitalization: TextCapitalization.sentences,
+                                readOnly: _questionsSaved,
+                              ),
+                              const SizedBox(height: 12),
+                              DropdownButtonFormField<String>(
+                                initialValue: _questionType,
+                                decoration: const InputDecoration(
+                                  labelText: 'Question Type',
+                                  prefixIcon: Icon(Icons.category_outlined),
+                                ),
+                                items: const [
+                                  DropdownMenuItem(
+                                    value: 'multiple_choice',
+                                    child: Text('Multiple Choice (4 options)'),
+                                  ),
+                                  DropdownMenuItem(
+                                    value: 'true_false',
+                                    child: Text('True or False'),
+                                  ),
+                                  DropdownMenuItem(
+                                    value: 'short_answer',
+                                    child: Text('Fill in the blank / Short Answer'),
+                                  ),
+                                ],
+                                onChanged: _questionsSaved
+                                    ? null
+                                    : (value) {
+                                        if (value != null) {
+                                          setState(() {
+                                            _questionType = value;
+                                            _correctOption = 0;
+                                          });
+                                        }
+                                      },
+                              ),
+                              const SizedBox(height: 14),
+
+                              if (_questionType == 'short_answer') ...[
+                                TextFormField(
+                                  controller: _correctAnswerController,
+                                  decoration: const InputDecoration(
+                                    labelText: 'Correct Answer',
+                                    hintText: 'Enter the answer students should input',
+                                    prefixIcon: Icon(Icons.check_circle_outline),
+                                  ),
+                                  readOnly: _questionsSaved,
+                                ),
+                              ] else ...[
+                                Text(
+                                  'Mark the correct choice:',
+                                  style: theme.textTheme.labelMedium?.copyWith(
+                                    color: theme.colorScheme.onSurfaceVariant,
+                                  ),
+                                ),
+                                const SizedBox(height: 6),
+                                RadioGroup<int>(
+                                  groupValue: _correctOption,
+                                  onChanged: (v) {
+                                    if (!_questionsSaved && v != null) {
+                                      setState(() => _correctOption = v);
+                                    }
+                                  },
+                                  child: Column(
+                                    children: [
+                                      for (var index = 0;
+                                          index <
+                                              (_questionType == 'true_false'
+                                                  ? 2
+                                                  : _optionControllers.length);
+                                          index++)
+                                        Padding(
+                                          padding: const EdgeInsets.only(bottom: 8),
+                                          child: Row(
+                                            children: [
+                                              Radio<int>(
+                                                value: index,
+                                              ),
+                                              Expanded(
+                                                child: _questionType == 'true_false'
+                                                    ? Text(
+                                                        index == 0 ? 'True' : 'False',
+                                                        style: const TextStyle(
+                                                          fontWeight: FontWeight.bold,
+                                                        ),
+                                                      )
+                                                    : TextFormField(
+                                                        controller: _optionControllers[index],
+                                                        readOnly: _questionsSaved,
+                                                        decoration: InputDecoration(
+                                                          labelText: 'Option ${String.fromCharCode(65 + index)}',
+                                                          isDense: true,
+                                                        ),
+                                                      ),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+
+                              const SizedBox(height: 12),
+                              TextFormField(
+                                controller: _explanationController,
+                                decoration: const InputDecoration(
+                                  labelText: 'Explanation (Optional)',
+                                  hintText: 'Explains why this answer is correct after submission',
+                                  prefixIcon: Icon(Icons.lightbulb_outline_rounded),
+                                ),
+                                maxLines: 2,
+                                readOnly: _questionsSaved,
+                              ),
+                              const SizedBox(height: 14),
+
+                              Align(
+                                alignment: Alignment.centerRight,
+                                child: FilledButton.tonalIcon(
+                                  onPressed: _isSaving || _questionsSaved
+                                      ? null
+                                      : _addQuestion,
+                                  icon: const Icon(Icons.add_rounded),
+                                  label: const Text('Add to Quiz'),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+
+                      if (_error != null) ...[
+                        const SizedBox(height: 16),
+                        Container(
+                          padding: const EdgeInsets.all(14),
+                          decoration: BoxDecoration(
+                            color: theme.colorScheme.errorContainer,
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Row(
+                            children: [
+                              Icon(Icons.error_outline,
+                                  color: theme.colorScheme.onErrorContainer),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Text(
+                                  _error!,
+                                  style: TextStyle(
+                                    color: theme.colorScheme.onErrorContainer,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+
+                      const SizedBox(height: 24),
+                      FilledButton.icon(
+                        style: FilledButton.styleFrom(
+                          minimumSize: const Size.fromHeight(52),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                        ),
+                        onPressed: _isSaving ? null : _saveQuiz,
+                        icon: _isSaving
+                            ? const SizedBox(
+                                height: 20,
+                                width: 20,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: Colors.white,
+                                ),
+                              )
+                            : const Icon(Icons.publish_rounded),
+                        label: Text(
+                          _isSaving ? 'Publishing quiz...' : 'Publish Quiz',
+                          style: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 32),
+                    ],
+                  ),
                 ),
               ],
             ),
@@ -627,8 +927,8 @@ class _QuizBuilderScreenState extends ConsumerState<QuizBuilderScreen> {
   }
 
   String _questionTypeLabel(String type) => switch (type) {
-    'true_false' => 'True or false',
-    'short_answer' => 'Fill in the blank',
-    _ => 'Multiple choice',
-  };
+        'true_false' => 'True or false',
+        'short_answer' => 'Fill in the blank',
+        _ => 'Multiple choice',
+      };
 }

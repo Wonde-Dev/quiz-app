@@ -36,17 +36,41 @@ class _StudentManagementScreenState
   bool get _isAdmin => ref.read(authStateProvider).user?.role == AppRoles.admin;
 
   Future<List<Map<String, dynamic>>> _loadAccounts() async {
-    final response = await Supabase.instance.client.functions.invoke(
-      'manage-account',
-      body: {'action': 'list', if (_isAdmin) 'role': _filterRole},
-    );
-    final data = response.data;
-    if (data is! Map<String, dynamic> || data['accounts'] is! List) {
-      throw const FormatException('Account service returned an invalid list');
+    try {
+      final response = await Supabase.instance.client.functions.invoke(
+        'manage-account',
+        body: {'action': 'list', if (_isAdmin) 'role': _filterRole},
+      );
+      final data = response.data;
+      if (data is Map<String, dynamic> && data['accounts'] is List) {
+        return (data['accounts'] as List)
+            .map((account) => Map<String, dynamic>.from(account as Map))
+            .toList();
+      }
+    } catch (e) {
+      debugPrint('manage-account list fallback: $e');
     }
-    return (data['accounts'] as List)
-        .map((account) => Map<String, dynamic>.from(account as Map))
-        .toList();
+
+    final client = Supabase.instance.client;
+    final currentUserId = client.auth.currentUser?.id;
+    var query = client
+        .from('users')
+        .select('id, username, full_name, role, requested_role, school_id');
+
+    if (!_isAdmin) {
+      query = query.eq('role', AppRoles.student);
+      final schoolId = ref.read(authStateProvider).user?.schoolId;
+      if (schoolId != null) query = query.eq('school_id', schoolId);
+    } else if (_filterRole != 'all') {
+      query = query.eq('role', _filterRole);
+    }
+
+    if (currentUserId != null) {
+      query = query.neq('id', currentUserId);
+    }
+
+    final rows = await query.order('full_name');
+    return List<Map<String, dynamic>>.from(rows);
   }
 
   Future<void> _reset(List<String> studentIds) async {
@@ -249,6 +273,10 @@ class _StudentManagementScreenState
                             value: AppRoles.teacher,
                             child: Text('Teacher'),
                           ),
+                          DropdownMenuItem(
+                            value: AppRoles.admin,
+                            child: Text('Admin'),
+                          ),
                         ],
                         onChanged: (value) {
                           if (value == null) return;
@@ -307,17 +335,18 @@ class _StudentManagementScreenState
                           ? 'Use at least 8 characters'
                           : null,
                     ),
-                    TextFormField(
-                      controller: subjectController,
-                      decoration: const InputDecoration(
-                        labelText: 'Main subject / teaching subject',
+                    if (role == AppRoles.teacher)
+                      TextFormField(
+                        controller: subjectController,
+                        decoration: const InputDecoration(
+                          labelText: 'Main subject / teaching subject',
+                        ),
+                        textCapitalization: TextCapitalization.words,
+                        validator: (value) =>
+                            value == null || value.trim().isEmpty
+                            ? 'Enter a subject'
+                            : null,
                       ),
-                      textCapitalization: TextCapitalization.words,
-                      validator: (value) =>
-                          value == null || value.trim().isEmpty
-                          ? 'Enter a subject'
-                          : null,
-                    ),
                     if (_isAdmin && role != AppRoles.admin)
                       schools.isEmpty
                           ? const Padding(
@@ -457,26 +486,34 @@ class _StudentManagementScreenState
     String schoolId,
   ) async {
     if (!_isAdmin) {
-      final response = await Supabase.instance.client.functions.invoke(
-        'manage-account',
-        body: {'action': 'classes'},
-      );
-      final data = response.data;
-      if (data is! Map<String, dynamic> || data['sections'] is! List) {
-        throw const FormatException(
-          'Account service returned invalid assigned classes',
+      try {
+        final response = await Supabase.instance.client.functions.invoke(
+          'manage-account',
+          body: {'action': 'classes'},
         );
+        final data = response.data;
+        if (data is Map<String, dynamic> &&
+            data['sections'] is List &&
+            (data['sections'] as List).isNotEmpty) {
+          return (data['sections'] as List)
+              .map((section) => Map<String, dynamic>.from(section as Map))
+              .toList();
+        }
+      } catch (e) {
+        debugPrint('classes function fallback: $e');
       }
-      return (data['sections'] as List)
-          .map((section) => Map<String, dynamic>.from(section as Map))
-          .toList();
     }
-    final rows = await Supabase.instance.client
-        .from('sections')
-        .select('id, name, school_grades!inner(name)')
-        .eq('school_id', schoolId)
-        .order('name');
-    return List<Map<String, dynamic>>.from(rows);
+    try {
+      final rows = await Supabase.instance.client
+          .from('sections')
+          .select('id, name, school_grades!inner(name)')
+          .eq('school_id', schoolId)
+          .order('name');
+      return List<Map<String, dynamic>>.from(rows);
+    } catch (e) {
+      debugPrint('Direct sections load fallback: $e');
+      return [];
+    }
   }
 
   Future<void> _deleteAccount(Map<String, dynamic> account) async {
@@ -743,7 +780,7 @@ class _StudentManagementScreenState
                                         : () => _reset([id]),
                                     icon: const Icon(Icons.lock_reset),
                                   ),
-                                if (_isAdmin)
+                                if (_isAdmin || role == AppRoles.student)
                                   IconButton(
                                     tooltip: 'Delete account',
                                     onPressed: _isResetting || _deletingId == id
