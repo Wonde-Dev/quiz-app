@@ -16,39 +16,52 @@ class MyApp extends ConsumerWidget {
         title: 'High School Quiz App',
         theme: ThemeData(
           colorScheme: ColorScheme.fromSeed(
-            seedColor: const Color(0xFF173F73),
+            seedColor: const Color(0xFF0F172A),
+            primary: const Color(0xFF0F172A),
+            surface: Colors.white,
+            surfaceContainerHighest: const Color(0xFFF1F5F9),
             brightness: Brightness.light,
           ),
-          scaffoldBackgroundColor: const Color(0xFFF4F7FB),
+          scaffoldBackgroundColor: const Color(0xFFFAFBFC),
           cardTheme: CardThemeData(
             color: Colors.white,
             elevation: 0,
+            shadowColor: const Color(0x0A000000),
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(20),
-              side: const BorderSide(color: Color(0xFFE1E9F2)),
+              side: const BorderSide(color: Color(0xFFE2E8F0), width: 1.2),
             ),
+          ),
+          appBarTheme: const AppBarTheme(
+            backgroundColor: Colors.transparent,
+            elevation: 0,
+            scrolledUnderElevation: 0,
+            foregroundColor: Color(0xFF0F172A),
           ),
           inputDecorationTheme: InputDecorationTheme(
             filled: true,
-            fillColor: const Color(0xFFF6F8FB),
+            fillColor: Colors.white,
+            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
             border: OutlineInputBorder(
               borderRadius: BorderRadius.circular(14),
-              borderSide: const BorderSide(color: Color(0xFFDCE5EF)),
+              borderSide: const BorderSide(color: Color(0xFFE2E8F0)),
             ),
             enabledBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(14),
-              borderSide: const BorderSide(color: Color(0xFFDCE5EF)),
+              borderSide: const BorderSide(color: Color(0xFFE2E8F0)),
             ),
             focusedBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(14),
               borderSide: const BorderSide(
-                color: Color(0xFF173F73),
+                color: Color(0xFF0F172A),
                 width: 1.5,
               ),
             ),
           ),
           filledButtonTheme: FilledButtonThemeData(
             style: FilledButton.styleFrom(
+              backgroundColor: const Color(0xFF0F172A),
+              foregroundColor: Colors.white,
               minimumSize: const Size(0, 50),
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(14),

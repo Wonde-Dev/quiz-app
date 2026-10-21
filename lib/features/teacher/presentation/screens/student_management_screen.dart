@@ -259,13 +259,150 @@ class _StudentManagementScreenState
       );
       if (!mounted) return;
       setState(() => _studentsFuture = _loadAccounts());
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            '${account['role']} account created: ${account['username']}',
+
+      // Show animated success dialog with copyable credentials
+      if (mounted) {
+        final username = account['username'] as String;
+        final password = account['password'] as String;
+        final role = account['role'] as String;
+        final fullName = account['fullName'] as String;
+
+        await showDialog<void>(
+          context: context,
+          builder: (dialogCtx) => AlertDialog(
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(24),
+              side: const BorderSide(color: Color(0xFFE2E8F0)),
+            ),
+            contentPadding: const EdgeInsets.all(24),
+            content: SizedBox(
+              width: 400,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    width: 56,
+                    height: 56,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF10B981).withValues(alpha: 0.12),
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(
+                      Icons.check_circle_rounded,
+                      color: Color(0xFF10B981),
+                      size: 32,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    'Account Ready & Registered',
+                    style: Theme.of(dialogCtx).textTheme.titleLarge?.copyWith(
+                          fontWeight: FontWeight.w900,
+                        ),
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    'The $role account for $fullName has been created successfully.',
+                    style: const TextStyle(color: Color(0xFF64748B), fontSize: 13),
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 20),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF8FAFC),
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: const Color(0xFFE2E8F0)),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'ACCOUNT CREDENTIALS',
+                          style: TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: 0.8,
+                            color: Color(0xFF64748B),
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                        Row(
+                          children: [
+                            const Text('Username: ', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+                            Expanded(
+                              child: SelectableText(
+                                username,
+                                style: const TextStyle(fontFamily: 'monospace', fontWeight: FontWeight.bold, fontSize: 13),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        Row(
+                          children: [
+                            const Text('Password: ', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+                            Expanded(
+                              child: SelectableText(
+                                password,
+                                style: const TextStyle(fontFamily: 'monospace', fontWeight: FontWeight.bold, fontSize: 13, color: Color(0xFF0F172A)),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          style: OutlinedButton.styleFrom(
+                            minimumSize: const Size(0, 46),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                          ),
+                          icon: const Icon(Icons.copy_rounded, size: 16),
+                          label: const Text('Copy Credentials'),
+                          onPressed: () {
+                            Clipboard.setData(
+                              ClipboardData(
+                                text: 'Username: $username\nPassword: $password',
+                              ),
+                            );
+                            ScaffoldMessenger.of(dialogCtx).showSnackBar(
+                              const SnackBar(
+                                content: Text('Credentials copied to clipboard!'),
+                                duration: Duration(seconds: 2),
+                                behavior: SnackBarBehavior.floating,
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      FilledButton(
+                        style: FilledButton.styleFrom(
+                          minimumSize: const Size(80, 46),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                        onPressed: () => Navigator.pop(dialogCtx),
+                        child: const Text('Done'),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
           ),
-        ),
-      );
+        );
+      }
     } catch (error) {
       if (mounted) {
         setState(
@@ -314,45 +451,131 @@ class _StudentManagementScreenState
         ? _loadSectionsForSchool(schoolId)
         : Future.value([]);
     final formKey = GlobalKey<FormState>();
+
     final result = await showDialog<Map<String, dynamic>>(
       context: context,
       builder: (dialogContext) => StatefulBuilder(
-        builder: (context, setDialogState) => AlertDialog(
-          title: Text(_isAdmin ? 'Create account' : 'Register student'),
-          content: SizedBox(
-            width: 440,
-            child: Form(
-              key: formKey,
-              child: SingleChildScrollView(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    if (_isAdmin)
-                      DropdownButtonFormField<String>(
-                        initialValue: role,
-                        decoration: const InputDecoration(labelText: 'Role'),
-                        items: const [
-                          DropdownMenuItem(
-                            value: AppRoles.student,
-                            child: Text('Student'),
-                          ),
-                          DropdownMenuItem(
-                            value: AppRoles.teacher,
-                            child: Text('Teacher'),
-                          ),
-                          DropdownMenuItem(
-                            value: AppRoles.admin,
-                            child: Text('Admin'),
-                          ),
-                        ],
+        builder: (context, setDialogState) {
+          final isDark = Theme.of(context).brightness == Brightness.dark;
+          final roleColor = role == AppRoles.teacher
+              ? const Color(0xFF10B981)
+              : role == AppRoles.admin
+                  ? const Color(0xFF8B5CF6)
+                  : const Color(0xFF6366F1);
+
+          return AlertDialog(
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(24),
+              side: BorderSide(
+                color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0),
+              ),
+            ),
+            titlePadding: const EdgeInsets.fromLTRB(24, 24, 24, 0),
+            contentPadding: const EdgeInsets.fromLTRB(24, 16, 24, 16),
+            title: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: roleColor.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Icon(
+                    role == AppRoles.admin
+                        ? Icons.admin_panel_settings_rounded
+                        : role == AppRoles.teacher
+                            ? Icons.co_present_rounded
+                            : Icons.school_rounded,
+                    color: roleColor,
+                    size: 24,
+                  ),
+                ),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        _isAdmin ? 'Register New Account' : 'Register Student',
+                        style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 18),
+                      ),
+                      Text(
+                        'Credentials and classroom assignment',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            content: SizedBox(
+              width: 480,
+              child: Form(
+                key: formKey,
+                child: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      if (_isAdmin) ...[
+                        const Text(
+                          'Select Account Role',
+                          style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
+                        ),
+                        const SizedBox(height: 8),
+                        Row(
+                          children: [
+                            for (final opt in const [
+                              (role: AppRoles.student, label: 'Student', icon: Icons.school_outlined),
+                              (role: AppRoles.teacher, label: 'Teacher', icon: Icons.co_present_outlined),
+                              (role: AppRoles.admin, label: 'Admin', icon: Icons.shield_outlined),
+                            ])
+                              Expanded(
+                                child: Padding(
+                                  padding: const EdgeInsets.symmetric(horizontal: 3),
+                                  child: ChoiceChip(
+                                    avatar: Icon(opt.icon, size: 16),
+                                    label: Text(opt.label, style: const TextStyle(fontSize: 12)),
+                                    selected: role == opt.role,
+                                    onSelected: (selected) {
+                                      if (!selected) return;
+                                      setDialogState(() {
+                                        role = opt.role;
+                                        final uName = _usernameFor(nameController.text, role);
+                                        usernameController.text = uName;
+                                        if (uName.isNotEmpty) {
+                                          passwordController.text = defaultRolePassword(
+                                            usernameOrFullName: uName,
+                                            role: role,
+                                          );
+                                        }
+                                        if (role != AppRoles.admin && schoolId == null && schools.isNotEmpty) {
+                                          schoolId = schools.first['id'] as String;
+                                        }
+                                      });
+                                    },
+                                  ),
+                                ),
+                              ),
+                          ],
+                        ),
+                        const SizedBox(height: 16),
+                      ],
+
+                      TextFormField(
+                        controller: nameController,
+                        decoration: const InputDecoration(
+                          labelText: 'Full Name',
+                          hintText: 'e.g. John Doe',
+                          prefixIcon: Icon(Icons.badge_outlined),
+                        ),
+                        textCapitalization: TextCapitalization.words,
                         onChanged: (value) {
-                          if (value == null) return;
                           setDialogState(() {
-                            role = value;
-                            final uName = _usernameFor(
-                              nameController.text,
-                              role,
-                            );
+                            final uName = _usernameFor(value, role);
                             usernameController.text = uName;
                             if (uName.isNotEmpty) {
                               passwordController.text = defaultRolePassword(
@@ -360,235 +583,278 @@ class _StudentManagementScreenState
                                 role: role,
                               );
                             }
-                            if (role != AppRoles.admin && schoolId == null && schools.isNotEmpty) {
-                              schoolId = schools.first['id'] as String;
-                            }
                           });
                         },
+                        validator: (value) =>
+                            value == null || value.trim().split(RegExp(r'\s+')).length < 2
+                                ? 'Enter first and last name'
+                                : null,
                       ),
-                    TextFormField(
-                      controller: nameController,
-                      decoration: const InputDecoration(labelText: 'Full name'),
-                      textCapitalization: TextCapitalization.words,
-                      onChanged: (value) {
-                        setDialogState(() {
-                          final uName = _usernameFor(value, role);
-                          usernameController.text = uName;
-                          if (uName.isNotEmpty) {
-                            passwordController.text = defaultRolePassword(
-                              usernameOrFullName: uName,
-                              role: role,
-                            );
+                      const SizedBox(height: 12),
+
+                      TextFormField(
+                        controller: usernameController,
+                        decoration: InputDecoration(
+                          labelText: 'Generated Username',
+                          helperText: 'Must end in @${role == AppRoles.teacher ? 'Teacher' : role == AppRoles.admin ? 'Admin' : 'Student'}.edu',
+                          prefixIcon: const Icon(Icons.alternate_email_rounded),
+                        ),
+                        onChanged: (value) {
+                          if (value.trim().isNotEmpty) {
+                            setDialogState(() {
+                              passwordController.text = defaultRolePassword(
+                                usernameOrFullName: value.trim(),
+                                role: role,
+                              );
+                            });
                           }
-                        });
-                      },
-                      validator: (value) =>
-                          value == null ||
-                              value.trim().split(RegExp(r'\s+')).length < 2
-                          ? 'Enter first and last name'
-                          : null,
-                    ),
-                    TextFormField(
-                      controller: usernameController,
-                      decoration: const InputDecoration(labelText: 'Username'),
-                      onChanged: (value) {
-                        if (value.trim().isNotEmpty) {
-                          setDialogState(() {
-                            passwordController.text = defaultRolePassword(
-                              usernameOrFullName: value.trim(),
-                              role: role,
-                            );
-                          });
-                        }
-                      },
-                      validator: (value) {
-                        if (value == null || !isRoleUsername(value, role)) {
-                          return 'Enter a valid username for this role';
-                        }
-                        return null;
-                      },
-                    ),
-                    TextFormField(
-                      controller: emailController,
-                      decoration: const InputDecoration(labelText: 'Email'),
-                      keyboardType: TextInputType.emailAddress,
-                      validator: (value) =>
-                          value == null ||
-                              !RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$')
-                                  .hasMatch(value.trim())
-                          ? 'Enter a valid email address'
-                          : null,
-                    ),
-                    TextFormField(
-                      controller: passwordController,
-                      decoration: InputDecoration(
-                        labelText: 'Temporary password',
-                        helperText: 'Format: Name1@${roleLetter(role)}.edu',
-                        suffixIcon: Row(
-                          mainAxisSize: MainAxisSize.min,
+                        },
+                        validator: (value) {
+                          if (value == null || !isRoleUsername(value, role)) {
+                            return 'Enter a valid username for this role';
+                          }
+                          return null;
+                        },
+                      ),
+                      const SizedBox(height: 12),
+
+                      TextFormField(
+                        controller: emailController,
+                        decoration: const InputDecoration(
+                          labelText: 'Email Address',
+                          hintText: 'user@school.edu',
+                          prefixIcon: Icon(Icons.mail_outline_rounded),
+                        ),
+                        keyboardType: TextInputType.emailAddress,
+                        validator: (value) => value == null ||
+                                !RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(value.trim())
+                            ? 'Enter a valid email address'
+                            : null,
+                      ),
+                      const SizedBox(height: 12),
+
+                      // Live Dynamic Default Password Card
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(
+                            color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0),
+                          ),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            IconButton(
-                              tooltip: obscurePassword
-                                  ? 'Show password'
-                                  : 'Hide password',
-                              icon: Icon(
-                                obscurePassword
-                                    ? Icons.visibility_outlined
-                                    : Icons.visibility_off_outlined,
-                              ),
-                              onPressed: () => setDialogState(
-                                () => obscurePassword = !obscurePassword,
+                            Row(
+                              children: [
+                                const Icon(Icons.auto_awesome_rounded, size: 16, color: Color(0xFF10B981)),
+                                const SizedBox(width: 8),
+                                const Expanded(
+                                  child: Text(
+                                    'Default Password Formula',
+                                    style: TextStyle(fontWeight: FontWeight.w700, fontSize: 12),
+                                  ),
+                                ),
+                                if (passwordController.text.isNotEmpty)
+                                  IconButton(
+                                    icon: const Icon(Icons.copy_rounded, size: 14),
+                                    tooltip: 'Copy temporary password',
+                                    onPressed: () {
+                                      Clipboard.setData(ClipboardData(text: passwordController.text));
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        const SnackBar(
+                                          content: Text('Password copied!'),
+                                          duration: Duration(seconds: 1),
+                                          behavior: SnackBarBehavior.floating,
+                                        ),
+                                      );
+                                    },
+                                  ),
+                              ],
+                            ),
+                            Text(
+                              passwordController.text.isNotEmpty
+                                  ? 'Active: ${passwordController.text}'
+                                  : 'Pattern: <NamePart>1@${roleLetter(role)}.edu',
+                              style: const TextStyle(
+                                fontFamily: 'monospace',
+                                fontWeight: FontWeight.bold,
+                                fontSize: 12,
+                                color: Color(0xFF10B981),
                               ),
                             ),
                           ],
                         ),
                       ),
-                      obscureText: obscurePassword,
-                      validator: (value) => value == null || value.length < 8
-                          ? 'Use at least 8 characters'
-                          : null,
-                    ),
-                    if (role == AppRoles.teacher)
+                      const SizedBox(height: 12),
+
                       TextFormField(
-                        controller: subjectController,
-                        decoration: const InputDecoration(
-                          labelText: 'Main subject / teaching subject',
+                        controller: passwordController,
+                        decoration: InputDecoration(
+                          labelText: 'Temporary Password',
+                          prefixIcon: const Icon(Icons.lock_outline_rounded),
+                          suffixIcon: IconButton(
+                            tooltip: obscurePassword ? 'Show password' : 'Hide password',
+                            icon: Icon(
+                              obscurePassword ? Icons.visibility_outlined : Icons.visibility_off_outlined,
+                            ),
+                            onPressed: () => setDialogState(
+                              () => obscurePassword = !obscurePassword,
+                            ),
+                          ),
                         ),
-                        textCapitalization: TextCapitalization.words,
-                        validator: (value) =>
-                            value == null || value.trim().isEmpty
-                            ? 'Enter a subject'
+                        obscureText: obscurePassword,
+                        validator: (value) => value == null || value.length < 8
+                            ? 'Use at least 8 characters'
                             : null,
                       ),
-                    if (_isAdmin && role != AppRoles.admin)
-                      schools.isEmpty
-                          ? const Padding(
-                              padding: EdgeInsets.only(top: 12),
-                              child: Text(
-                                'Add a school before creating student or teacher accounts.',
+                      const SizedBox(height: 12),
+
+                      if (role == AppRoles.teacher) ...[
+                        TextFormField(
+                          controller: subjectController,
+                          decoration: const InputDecoration(
+                            labelText: 'Main Subject / Department',
+                            hintText: 'e.g. Mathematics, Physics',
+                            prefixIcon: Icon(Icons.menu_book_outlined),
+                          ),
+                          textCapitalization: TextCapitalization.words,
+                          validator: (value) => value == null || value.trim().isEmpty
+                              ? 'Enter a subject'
+                              : null,
+                        ),
+                        const SizedBox(height: 12),
+                      ],
+
+                      if (_isAdmin && role != AppRoles.admin) ...[
+                        schools.isEmpty
+                            ? const Padding(
+                                padding: EdgeInsets.only(top: 8),
+                                child: Text('Add a school before creating student or teacher accounts.'),
+                              )
+                            : DropdownButtonFormField<String>(
+                                initialValue: schoolId,
+                                decoration: const InputDecoration(
+                                  labelText: 'School',
+                                  prefixIcon: Icon(Icons.location_city_rounded),
+                                ),
+                                items: [
+                                  for (final school in schools)
+                                    DropdownMenuItem(
+                                      value: school['id'] as String,
+                                      child: Text(school['name'] as String? ?? 'School'),
+                                    ),
+                                ],
+                                onChanged: (value) => setDialogState(() {
+                                  schoolId = value;
+                                  sectionId = null;
+                                  sectionsFuture = value != null
+                                      ? _loadSectionsForSchool(value)
+                                      : Future.value([]);
+                                }),
                               ),
-                            )
-                          : DropdownButtonFormField<String>(
-                              initialValue: schoolId,
+                        const SizedBox(height: 12),
+                      ],
+
+                      if (schoolId != null && role != AppRoles.admin)
+                        FutureBuilder<List<Map<String, dynamic>>>(
+                          future: sectionsFuture,
+                          builder: (context, snapshot) {
+                            if (snapshot.hasError) {
+                              return Padding(
+                                padding: const EdgeInsets.only(top: 8),
+                                child: Text(
+                                  'Could not load grade sections: ${snapshot.error}',
+                                  style: TextStyle(color: Theme.of(context).colorScheme.error),
+                                ),
+                              );
+                            }
+                            if (!snapshot.hasData) {
+                              return const Padding(
+                                padding: EdgeInsets.only(top: 8),
+                                child: LinearProgressIndicator(),
+                              );
+                            }
+                            final sections = snapshot.data!;
+                            if (sections.isEmpty) {
+                              return const Padding(
+                                padding: EdgeInsets.only(top: 8),
+                                child: Text('No sections available for this school.'),
+                              );
+                            }
+                            return DropdownButtonFormField<String>(
+                              key: ValueKey(schoolId),
+                              initialValue: sectionId,
                               decoration: const InputDecoration(
-                                labelText: 'School',
+                                labelText: 'Grade & Classroom Section',
+                                prefixIcon: Icon(Icons.meeting_room_outlined),
                               ),
                               items: [
-                                for (final school in schools)
+                                for (final section in sections)
                                   DropdownMenuItem(
-                                    value: school['id'] as String,
+                                    value: section['id'] as String,
                                     child: Text(
-                                      school['name'] as String? ?? 'School',
+                                      '${(section['school_grades'] as Map<String, dynamic>)['name']} · Section ${section['name']}',
                                     ),
                                   ),
                               ],
-                              onChanged: (value) => setDialogState(() {
-                                schoolId = value;
-                                sectionId = null;
-                                sectionsFuture = value != null
-                                    ? _loadSectionsForSchool(value)
-                                    : Future.value([]);
-                              }),
-                            ),
-                    if (schoolId != null)
-                      FutureBuilder<List<Map<String, dynamic>>>(
-                        future: sectionsFuture,
-                        builder: (context, snapshot) {
-                          if (snapshot.hasError) {
-                            return Padding(
-                              padding: const EdgeInsets.only(top: 12),
-                              child: Text(
-                                'Could not load grade sections: ${snapshot.error}',
-                                style: TextStyle(
-                                  color: Theme.of(context).colorScheme.error,
-                                ),
-                              ),
+                              onChanged: (value) => setDialogState(() => sectionId = value),
+                              validator: (value) =>
+                                  value == null ? 'Choose a grade and classroom section' : null,
                             );
-                          }
-                          if (!snapshot.hasData) {
-                            return const Padding(
-                              padding: EdgeInsets.only(top: 12),
-                              child: LinearProgressIndicator(),
-                            );
-                          }
-                          final sections = snapshot.data!;
-                          if (sections.isEmpty) {
-                            return const Padding(
-                              padding: EdgeInsets.only(top: 12),
-                              child: Text(
-                                'No sections are available for this school.',
-                              ),
-                            );
-                          }
-                          return DropdownButtonFormField<String>(
-                            key: ValueKey(schoolId),
-                            initialValue: sectionId,
-                            decoration: const InputDecoration(
-                              labelText: 'Grade and class or section',
-                            ),
-                            items: [
-                              for (final section in sections)
-                                DropdownMenuItem(
-                                  value: section['id'] as String,
-                                  child: Text(
-                                    '${(section['school_grades'] as Map<String, dynamic>)['name']} · ${section['name']}',
-                                  ),
-                                ),
-                            ],
-                            onChanged: (value) =>
-                                setDialogState(() => sectionId = value),
-                            validator: (value) => value == null
-                                ? 'Choose a grade and class or section'
-                                : null,
-                          );
-                        },
-                      ),
-                  ],
+                          },
+                        ),
+                    ],
+                  ),
                 ),
               ),
             ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(dialogContext),
-              child: const Text('Cancel'),
-            ),
-            FilledButton(
-              onPressed:
-                  (_isAdmin && role != AppRoles.admin && schoolId == null) ||
-                      (role == AppRoles.student && sectionId == null) ||
-                      (role == AppRoles.teacher && sectionId == null)
-                  ? null
-                  : () {
-                      if (!formKey.currentState!.validate()) return;
-                      Navigator.pop(dialogContext, {
-                        'role': role,
-                        'fullName': nameController.text.trim(),
-                        'username': usernameController.text.trim(),
-                        'email': emailController.text.trim(),
-                        'password': passwordController.text.trim().isNotEmpty
-                            ? passwordController.text.trim()
-                            : defaultRolePassword(
-                                usernameOrFullName:
-                                    usernameController.text.trim(),
-                                role: role,
-                              ),
-                        'subject': subjectController.text.trim().isNotEmpty
-                            ? subjectController.text.trim()
-                            : 'General',
-                        if (role != AppRoles.admin)
-                          'schoolId': _isAdmin
-                              ? schoolId
-                              : ref.read(authStateProvider).user?.schoolId,
-                        if (role == AppRoles.student ||
-                            role == AppRoles.teacher)
-                          'sectionId': sectionId,
-                      });
-                    },
-              child: const Text('Create'),
-            ),
-          ],
-        ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                style: FilledButton.styleFrom(
+                  backgroundColor: const Color(0xFF0F172A),
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+                onPressed: (_isAdmin && role != AppRoles.admin && schoolId == null) ||
+                        (role == AppRoles.student && sectionId == null) ||
+                        (role == AppRoles.teacher && sectionId == null)
+                    ? null
+                    : () {
+                        if (!formKey.currentState!.validate()) return;
+                        Navigator.pop(dialogContext, {
+                          'role': role,
+                          'fullName': nameController.text.trim(),
+                          'username': usernameController.text.trim(),
+                          'email': emailController.text.trim(),
+                          'password': passwordController.text.trim().isNotEmpty
+                              ? passwordController.text.trim()
+                              : defaultRolePassword(
+                                  usernameOrFullName: usernameController.text.trim(),
+                                  role: role,
+                                ),
+                          'subject': subjectController.text.trim().isNotEmpty
+                              ? subjectController.text.trim()
+                              : 'General',
+                          if (role != AppRoles.admin)
+                            'schoolId': _isAdmin ? schoolId : ref.read(authStateProvider).user?.schoolId,
+                          if (role == AppRoles.student || role == AppRoles.teacher)
+                            'sectionId': sectionId,
+                        });
+                      },
+                child: const Text('Create Account'),
+              ),
+            ],
+          );
+        },
       ),
     );
     nameController.dispose();

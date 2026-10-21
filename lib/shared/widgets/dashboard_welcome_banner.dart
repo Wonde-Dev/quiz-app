@@ -31,6 +31,8 @@ class _DashboardWelcomeBannerState extends State<DashboardWelcomeBanner>
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+
     return AnimatedBuilder(
       animation: _controller,
       builder: (context, child) {
@@ -38,52 +40,47 @@ class _DashboardWelcomeBannerState extends State<DashboardWelcomeBanner>
         return Container(
           clipBehavior: Clip.hardEdge,
           decoration: BoxDecoration(
+            color: isDark ? const Color(0xFF1E293B) : Colors.white,
             borderRadius: BorderRadius.circular(24),
-            gradient: LinearGradient(
-              begin: Alignment.lerp(
-                Alignment.topLeft,
-                Alignment.bottomLeft,
-                progress * 0.35,
-              )!,
-              end: Alignment.lerp(
-                Alignment.bottomRight,
-                Alignment.topRight,
-                progress * 0.35,
-              )!,
-              colors: const [
-                Color(0xFF12345A),
-                Color(0xFF16558A),
-                Color(0xFF087E8B),
-              ],
+            border: Border.all(
+              color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0),
+              width: 1.2,
             ),
             boxShadow: [
               BoxShadow(
-                color: const Color(0xFF12345A).withValues(alpha: 0.16),
-                blurRadius: 24,
-                offset: const Offset(0, 12),
+                color: isDark
+                    ? Colors.black.withValues(alpha: 0.3)
+                    : const Color(0xFF0F172A).withValues(alpha: 0.05),
+                blurRadius: 28,
+                offset: const Offset(0, 10),
               ),
             ],
           ),
           child: Stack(
             children: [
+              // Animated subtle pastel ambient orbs
               Positioned(
-                right: -28 + (progress * 14),
-                top: -76,
+                right: -20 + (progress * 18),
+                top: -50,
                 child: _BannerGlow(
-                  size: 190,
-                  color: Colors.white.withValues(alpha: 0.08),
+                  size: 210,
+                  color: isDark
+                      ? const Color(0x2038BDF8)
+                      : const Color(0x1F6366F1),
                 ),
               ),
               Positioned(
-                right: 78 - (progress * 14),
-                bottom: -100,
+                left: 40 - (progress * 20),
+                bottom: -80,
                 child: _BannerGlow(
-                  size: 190,
-                  color: const Color(0xFF78E2DF).withValues(alpha: 0.14),
+                  size: 200,
+                  color: isDark
+                      ? const Color(0x2034D399)
+                      : const Color(0x1E10B981),
                 ),
               ),
               Padding(
-                padding: const EdgeInsets.all(24),
+                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 22),
                 child: Row(
                   children: [
                     Expanded(
@@ -91,43 +88,100 @@ class _DashboardWelcomeBannerState extends State<DashboardWelcomeBanner>
                         crossAxisAlignment: CrossAxisAlignment.start,
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          Text(
-                            'HIGH SCHOOL\nQUIZ APP',
-                            style: theme.textTheme.headlineSmall?.copyWith(
-                              color: Colors.white,
-                              fontWeight: FontWeight.w900,
-                              height: 1.02,
-                              letterSpacing: 0.3,
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 10,
+                              vertical: 4,
+                            ),
+                            decoration: BoxDecoration(
+                              color: isDark
+                                  ? const Color(0xFF334155)
+                                  : const Color(0xFFF1F5F9),
+                              borderRadius: BorderRadius.circular(20),
+                              border: Border.all(
+                                color: isDark
+                                    ? const Color(0xFF475569)
+                                    : const Color(0xFFE2E8F0),
+                              ),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Container(
+                                  width: 6,
+                                  height: 6,
+                                  decoration: const BoxDecoration(
+                                    color: Color(0xFF10B981),
+                                    shape: BoxShape.circle,
+                                  ),
+                                ),
+                                const SizedBox(width: 6),
+                                Text(
+                                  'ACADEMIC PORTAL',
+                                  style: TextStyle(
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.w700,
+                                    letterSpacing: 0.8,
+                                    color: isDark
+                                        ? const Color(0xFF94A3B8)
+                                        : const Color(0xFF64748B),
+                                  ),
+                                ),
+                              ],
                             ),
                           ),
                           const SizedBox(height: 10),
                           Text(
+                            'High School Quiz App',
+                            style: theme.textTheme.headlineSmall?.copyWith(
+                              color: isDark ? Colors.white : const Color(0xFF0F172A),
+                              fontWeight: FontWeight.w900,
+                              letterSpacing: -0.4,
+                              height: 1.1,
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
                             widget.subtitle,
                             style: theme.textTheme.bodyMedium?.copyWith(
-                              color: Colors.white.withValues(alpha: 0.84),
+                              color: isDark
+                                  ? const Color(0xFF94A3B8)
+                                  : const Color(0xFF64748B),
                               height: 1.4,
                             ),
                           ),
                         ],
                       ),
                     ),
-                    const SizedBox(width: 12),
+                    const SizedBox(width: 16),
                     Transform.translate(
-                      offset: Offset(0, (progress - 0.5) * 10),
+                      offset: Offset(0, (progress - 0.5) * 8),
                       child: Container(
                         width: 64,
                         height: 64,
                         decoration: BoxDecoration(
-                          color: Colors.white.withValues(alpha: 0.14),
-                          borderRadius: BorderRadius.circular(21),
+                          color: isDark
+                              ? const Color(0xFF0F172A)
+                              : Colors.white,
+                          borderRadius: BorderRadius.circular(20),
                           border: Border.all(
-                            color: Colors.white.withValues(alpha: 0.2),
+                            color: isDark
+                                ? const Color(0xFF475569)
+                                : const Color(0xFFE2E8F0),
+                            width: 1.5,
                           ),
+                          boxShadow: [
+                            BoxShadow(
+                              color: const Color(0xFF0F172A).withValues(alpha: 0.08),
+                              blurRadius: 16,
+                              offset: const Offset(0, 6),
+                            ),
+                          ],
                         ),
                         child: const Icon(
                           Icons.auto_stories_rounded,
-                          color: Color(0xFFB9F2EA),
-                          size: 34,
+                          color: Color(0xFF0F172A),
+                          size: 30,
                         ),
                       ),
                     ),
@@ -155,7 +209,9 @@ class _BannerGlow extends StatelessWidget {
       height: size,
       decoration: BoxDecoration(
         shape: BoxShape.circle,
-        gradient: RadialGradient(colors: [color, color.withValues(alpha: 0)]),
+        gradient: RadialGradient(
+          colors: [color, color.withValues(alpha: 0)],
+        ),
       ),
     );
   }

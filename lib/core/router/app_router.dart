@@ -9,6 +9,7 @@ import 'package:quiz_app/features/auth/presentation/screens/login_screen.dart';
 import 'package:quiz_app/features/auth/presentation/screens/account_status_screen.dart';
 import 'package:quiz_app/features/admin/presentation/screens/account_approvals_screen.dart';
 import 'package:quiz_app/features/admin/presentation/screens/course_assignment_screen.dart';
+import 'package:quiz_app/features/admin/presentation/screens/audit_log_screen.dart';
 import 'package:quiz_app/features/profile/presentation/screens/profile_screen.dart';
 import 'package:quiz_app/features/profile/presentation/screens/activity_screen.dart';
 import 'package:quiz_app/features/student/presentation/screens/student_dashboard_screen.dart';
@@ -44,12 +45,7 @@ final routerProvider = Provider<GoRouter>((ref) {
         return location == '/change-password' ? null : '/change-password';
       }
       if (location == '/account-status') {
-        return switch (user.role) {
-          AppRoles.admin => '/admin/dashboard',
-          AppRoles.teacher => '/teacher/dashboard',
-          AppRoles.student => '/student/dashboard',
-          _ => '/login',
-        };
+        return null;
       }
       if (location == '/login' ||
           location.startsWith('/login/') ||
@@ -111,6 +107,10 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/admin/classes',
         builder: (context, state) => const CourseAssignmentScreen(),
+      ),
+      GoRoute(
+        path: '/admin/audit-logs',
+        builder: (context, state) => const AuditLogScreen(),
       ),
       GoRoute(
         path: '/teacher/dashboard',
