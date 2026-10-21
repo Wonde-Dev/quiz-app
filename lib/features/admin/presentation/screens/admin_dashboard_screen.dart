@@ -492,6 +492,17 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen>
             const SizedBox(height: 10),
 
             _ActionTile(
+              icon: Icons.co_present_rounded,
+              color: const Color(0xFF10B981),
+              title: 'Faculty Directory & Passwords',
+              subtitle:
+                  'View approved teachers, assign subjects, and reset faculty passwords directly.',
+              buttonText: 'Teachers',
+              onTap: () => context.push('/admin/teachers'),
+            ),
+            const SizedBox(height: 10),
+
+            _ActionTile(
               icon: Icons.class_outlined,
               color: const Color(0xFFF59E0B),
               title: 'Class & Section Assignments',

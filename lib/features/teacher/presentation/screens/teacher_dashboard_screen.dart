@@ -15,16 +15,28 @@ class TeacherDashboardScreen extends ConsumerStatefulWidget {
 }
 
 class _TeacherDashboardScreenState
-    extends ConsumerState<TeacherDashboardScreen> {
+    extends ConsumerState<TeacherDashboardScreen>
+    with SingleTickerProviderStateMixin {
   int _studentCount = 0;
   int _quizCount = 0;
   int _submissionCount = 0;
   bool _loading = true;
+  late final AnimationController _pulseController;
 
   @override
   void initState() {
     super.initState();
+    _pulseController = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 2),
+    )..repeat(reverse: true);
     _loadStats();
+  }
+
+  @override
+  void dispose() {
+    _pulseController.dispose();
+    super.dispose();
   }
 
   Future<void> _loadStats() async {
@@ -86,81 +98,219 @@ class _TeacherDashboardScreenState
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
     final currentUser = ref.watch(authStateProvider).user;
     final teacherName = currentUser?.fullName?.isNotEmpty == true
         ? currentUser!.fullName!
         : currentUser?.username ?? 'Teacher';
 
     return DashboardShell(
-      title: 'Teacher dashboard',
+      title: 'Teacher Control Center',
       body: RefreshIndicator(
         onRefresh: _loadStats,
         child: ListView(
           padding: const EdgeInsets.all(20),
           children: [
-            // Welcome Header
+            // Welcome Header - Crisp White Aesthetic
             Container(
-              padding: const EdgeInsets.all(20),
+              padding: const EdgeInsets.all(22),
               decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  colors: [
-                    const Color(0xFF5847D8),
-                    const Color(0xFF7E6DF0),
-                  ],
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
+                color: isDark ? const Color(0xFF1E293B) : Colors.white,
+                borderRadius: BorderRadius.circular(24),
+                border: Border.all(
+                  color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0),
+                  width: 1.2,
                 ),
-                borderRadius: BorderRadius.circular(20),
                 boxShadow: [
                   BoxShadow(
-                    color: const Color(0xFF5847D8).withValues(alpha: 0.3),
-                    blurRadius: 16,
-                    offset: const Offset(0, 6),
+                    color: isDark
+                        ? Colors.black.withValues(alpha: 0.3)
+                        : const Color(0xFF0F172A).withValues(alpha: 0.05),
+                    blurRadius: 26,
+                    offset: const Offset(0, 8),
                   ),
                 ],
               ),
-              child: Row(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.2),
-                      borderRadius: BorderRadius.circular(14),
-                    ),
-                    child: const Icon(
-                      Icons.school_rounded,
-                      color: Colors.white,
-                      size: 28,
-                    ),
+                  Row(
+                    children: [
+                      // Active Pulse Status Badge
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 4,
+                        ),
+                        decoration: BoxDecoration(
+                          color: isDark
+                              ? const Color(0xFF334155)
+                              : const Color(0xFFF1F5F9),
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(
+                            color: isDark
+                                ? const Color(0xFF475569)
+                                : const Color(0xFFE2E8F0),
+                          ),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            AnimatedBuilder(
+                              animation: _pulseController,
+                              builder: (context, _) => Container(
+                                width: 8,
+                                height: 8,
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFF10B981),
+                                  shape: BoxShape.circle,
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: const Color(0xFF10B981).withValues(
+                                        alpha: 0.3 + (_pulseController.value * 0.5),
+                                      ),
+                                      blurRadius: 6,
+                                      spreadRadius: 2,
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Text(
+                              'TEACHER PORTAL · ACTIVE',
+                              style: TextStyle(
+                                fontSize: 10,
+                                fontWeight: FontWeight.w800,
+                                letterSpacing: 0.8,
+                                color: isDark
+                                    ? const Color(0xFF94A3B8)
+                                    : const Color(0xFF64748B),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const Spacer(),
+                      IconButton.filledTonal(
+                        tooltip: 'Refresh teaching stats',
+                        onPressed: _loading ? null : _loadStats,
+                        icon: _loading
+                            ? const SizedBox(
+                                width: 16,
+                                height: 16,
+                                child: CircularProgressIndicator(strokeWidth: 2),
+                              )
+                            : const Icon(Icons.refresh_rounded, size: 20),
+                      ),
+                    ],
                   ),
-                  const SizedBox(width: 14),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Welcome, $teacherName',
-                          style: theme.textTheme.titleLarge?.copyWith(
-                            color: Colors.white,
-                            fontWeight: FontWeight.bold,
+                  const SizedBox(height: 16),
+                  Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: isDark
+                              ? const Color(0xFF0F172A)
+                              : const Color(0xFFF8FAFC),
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(
+                            color: isDark
+                                ? const Color(0xFF334155)
+                                : const Color(0xFFE2E8F0),
                           ),
                         ),
-                        const SizedBox(height: 2),
-                        Text(
-                          'Create engaging quizzes & evaluate student progress',
-                          style: theme.textTheme.bodyMedium?.copyWith(
-                            color: Colors.white.withValues(alpha: 0.9),
+                        child: const Icon(
+                          Icons.school_rounded,
+                          color: Color(0xFF10B981),
+                          size: 32,
+                        ),
+                      ),
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Welcome, $teacherName',
+                              style: theme.textTheme.titleLarge?.copyWith(
+                                color: isDark ? Colors.white : const Color(0xFF0F172A),
+                                fontWeight: FontWeight.w900,
+                                letterSpacing: -0.4,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              'Create engaging quizzes, evaluate submissions, and guide student success.',
+                              style: theme.textTheme.bodyMedium?.copyWith(
+                                color: isDark
+                                    ? const Color(0xFF94A3B8)
+                                    : const Color(0xFF64748B),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 18),
+                  Wrap(
+                    spacing: 10,
+                    runSpacing: 8,
+                    children: [
+                      FilledButton.icon(
+                        style: FilledButton.styleFrom(
+                          backgroundColor: const Color(0xFF0F172A),
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 12,
+                          ),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
                           ),
                         ),
-                      ],
-                    ),
+                        icon: const Icon(Icons.add_circle_outline_rounded, size: 18),
+                        label: const Text('Prepare New Quiz'),
+                        onPressed: () => context.push('/teacher/quizzes/new'),
+                      ),
+                      OutlinedButton.icon(
+                        style: OutlinedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 12,
+                          ),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          side: BorderSide(
+                            color: isDark
+                                ? const Color(0xFF475569)
+                                : const Color(0xFFCBD5E1),
+                          ),
+                        ),
+                        icon: const Icon(Icons.fact_check_rounded, size: 18),
+                        label: const Text('Evaluate Submissions'),
+                        onPressed: () => context.push('/teacher/results'),
+                      ),
+                    ],
                   ),
                 ],
               ),
             ),
-            const SizedBox(height: 20),
+            const SizedBox(height: 24),
 
             // Live metrics
+            Text(
+              'Classroom Overview',
+              style: theme.textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.w800,
+                color: isDark ? Colors.white : const Color(0xFF0F172A),
+              ),
+            ),
+            const SizedBox(height: 12),
+
             Row(
               children: [
                 Expanded(
@@ -168,8 +318,8 @@ class _TeacherDashboardScreenState
                     title: 'Students',
                     value: '$_studentCount',
                     loading: _loading,
-                    icon: Icons.people_outline_rounded,
-                    color: const Color(0xFF5847D8),
+                    icon: Icons.school_rounded,
+                    color: const Color(0xFF6366F1),
                   ),
                 ),
                 const SizedBox(width: 10),
@@ -178,8 +328,8 @@ class _TeacherDashboardScreenState
                     title: 'My Quizzes',
                     value: '$_quizCount',
                     loading: _loading,
-                    icon: Icons.quiz_outlined,
-                    color: Colors.teal.shade700,
+                    icon: Icons.quiz_rounded,
+                    color: const Color(0xFF10B981),
                   ),
                 ),
                 const SizedBox(width: 10),
@@ -188,8 +338,8 @@ class _TeacherDashboardScreenState
                     title: 'Submissions',
                     value: '$_submissionCount',
                     loading: _loading,
-                    icon: Icons.fact_check_outlined,
-                    color: Colors.indigo.shade700,
+                    icon: Icons.fact_check_rounded,
+                    color: const Color(0xFF8B5CF6),
                   ),
                 ),
               ],
@@ -199,7 +349,8 @@ class _TeacherDashboardScreenState
             Text(
               'Teaching & Exam Actions',
               style: theme.textTheme.titleMedium?.copyWith(
-                fontWeight: FontWeight.bold,
+                fontWeight: FontWeight.w800,
+                color: isDark ? Colors.white : const Color(0xFF0F172A),
               ),
             ),
             const SizedBox(height: 12),
@@ -207,7 +358,7 @@ class _TeacherDashboardScreenState
             // Action Tiles
             _TeacherActionTile(
               icon: Icons.add_circle_outline_rounded,
-              color: const Color(0xFF5847D8),
+              color: const Color(0xFF8B5CF6),
               title: 'Prepare a Quiz',
               subtitle:
                   'Create exams choosing Grade 9 to 12 and Section A, B, C (or custom section).',
@@ -218,10 +369,10 @@ class _TeacherDashboardScreenState
 
             _TeacherActionTile(
               icon: Icons.fact_check_rounded,
-              color: Colors.green.shade700,
+              color: const Color(0xFF10B981),
               title: 'Evaluate Quizzes & Results',
               subtitle:
-                  'Review student answers question-by-question, evaluate responses, and adjust scores.',
+                  'Review student answers question-by-question, evaluate responses, inspect images, and adjust scores.',
               buttonText: 'Evaluate',
               onTap: () => context.push('/teacher/results'),
             ),
@@ -229,10 +380,10 @@ class _TeacherDashboardScreenState
 
             _TeacherActionTile(
               icon: Icons.person_add_alt_1_rounded,
-              color: Colors.teal.shade700,
+              color: const Color(0xFF6366F1),
               title: 'Register Students',
               subtitle:
-                  'Register new students in your classes and school with their temporary credentials.',
+                  'Register new students in your classes and school with their temporary credentials and auto-password formula.',
               buttonText: 'Register Students',
               onTap: () => context.push('/teacher/students'),
             ),
@@ -240,10 +391,10 @@ class _TeacherDashboardScreenState
 
             _TeacherActionTile(
               icon: Icons.lock_reset_rounded,
-              color: Colors.orange.shade800,
+              color: const Color(0xFFF59E0B),
               title: 'Reset Student Passwords',
               subtitle:
-                  'Reset student passwords with one tap. Generates new temporary credentials securely.',
+                  'Reset student passwords with one tap. Generates new temporary credentials securely (Student1@S.edu).',
               buttonText: 'Reset Password',
               onTap: () => context.push('/teacher/reset-passwords'),
             ),
@@ -273,43 +424,62 @@ class _TeacherStatCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return Card(
-      elevation: 0,
-      color: color.withValues(alpha: 0.08),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(16),
-        side: BorderSide(color: color.withValues(alpha: 0.2)),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 14),
-        child: Column(
-          children: [
-            Icon(icon, color: color, size: 24),
-            const SizedBox(height: 6),
-            loading
-                ? const SizedBox(
-                    height: 18,
-                    width: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : Text(
-                    value,
-                    style: theme.textTheme.titleLarge?.copyWith(
-                      fontWeight: FontWeight.bold,
-                      color: color,
-                    ),
-                  ),
-            const SizedBox(height: 2),
-            Text(
-              title,
-              textAlign: TextAlign.center,
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: theme.colorScheme.onSurfaceVariant,
-                fontSize: 11,
-              ),
-            ),
-          ],
+    final isDark = theme.brightness == Brightness.dark;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 18),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF1E293B) : Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0),
+          width: 1.2,
         ),
+        boxShadow: [
+          BoxShadow(
+            color: isDark
+                ? Colors.black.withValues(alpha: 0.2)
+                : const Color(0xFF0F172A).withValues(alpha: 0.04),
+            blurRadius: 18,
+            offset: const Offset(0, 6),
+          ),
+        ],
+      ),
+      child: Column(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Icon(icon, color: color, size: 22),
+          ),
+          const SizedBox(height: 10),
+          loading
+              ? const SizedBox(
+                  height: 20,
+                  width: 20,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : Text(
+                  value,
+                  style: theme.textTheme.headlineSmall?.copyWith(
+                    fontWeight: FontWeight.w900,
+                    color: isDark ? Colors.white : const Color(0xFF0F172A),
+                    letterSpacing: -0.5,
+                  ),
+                ),
+          const SizedBox(height: 2),
+          Text(
+            title,
+            style: TextStyle(
+              color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+              fontWeight: FontWeight.w600,
+              fontSize: 12,
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -335,47 +505,69 @@ class _TeacherActionTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
 
-    return Card(
-      child: InkWell(
+    return Container(
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF1E293B) : Colors.white,
         borderRadius: BorderRadius.circular(20),
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: color.withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0),
+          width: 1.2,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: isDark
+                ? Colors.black.withValues(alpha: 0.2)
+                : const Color(0xFF0F172A).withValues(alpha: 0.03),
+            blurRadius: 16,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(20),
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: color.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  child: Icon(icon, color: color, size: 26),
                 ),
-                child: Icon(icon, color: color, size: 28),
-              ),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      title,
-                      style: const TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 16,
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        title,
+                        style: TextStyle(
+                          fontWeight: FontWeight.w800,
+                          fontSize: 15,
+                          color: isDark ? Colors.white : const Color(0xFF0F172A),
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      subtitle,
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: theme.colorScheme.onSurfaceVariant,
+                      const SizedBox(height: 4),
+                      Text(
+                        subtitle,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: isDark
+                              ? const Color(0xFF94A3B8)
+                              : const Color(0xFF64748B),
+                          height: 1.35,
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: 10),
-                    Align(
-                      alignment: Alignment.centerLeft,
-                      child: FilledButton.tonal(
+                      const SizedBox(height: 10),
+                      FilledButton.tonal(
                         style: FilledButton.styleFrom(
                           minimumSize: const Size(0, 36),
                           padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -383,11 +575,11 @@ class _TeacherActionTile extends StatelessWidget {
                         onPressed: onTap,
                         child: Text(buttonText),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),

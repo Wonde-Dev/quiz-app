@@ -10,6 +10,7 @@ import 'package:quiz_app/features/auth/presentation/screens/account_status_scree
 import 'package:quiz_app/features/admin/presentation/screens/account_approvals_screen.dart';
 import 'package:quiz_app/features/admin/presentation/screens/course_assignment_screen.dart';
 import 'package:quiz_app/features/admin/presentation/screens/audit_log_screen.dart';
+import 'package:quiz_app/features/admin/presentation/screens/teacher_management_screen.dart';
 import 'package:quiz_app/features/profile/presentation/screens/profile_screen.dart';
 import 'package:quiz_app/features/profile/presentation/screens/activity_screen.dart';
 import 'package:quiz_app/features/student/presentation/screens/student_dashboard_screen.dart';
@@ -111,6 +112,10 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/admin/audit-logs',
         builder: (context, state) => const AuditLogScreen(),
+      ),
+      GoRoute(
+        path: '/admin/teachers',
+        builder: (context, state) => const TeacherManagementScreen(),
       ),
       GoRoute(
         path: '/teacher/dashboard',
