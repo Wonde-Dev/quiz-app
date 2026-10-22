@@ -21,14 +21,29 @@ class _AccountApprovalsScreenState extends State<AccountApprovalsScreen> {
   }
 
   Future<List<Map<String, dynamic>>> _load() async {
-    final rows = await Supabase.instance.client
-        .from('users')
-        .select(
-          'id, username, email, full_name, requested_role, requested_grade, requested_class, requested_subject, created_at',
-        )
-        .eq('approval_status', 'pending')
-        .order('created_at');
-    return List<Map<String, dynamic>>.from(rows);
+    try {
+      final rows = await Supabase.instance.client
+          .from('users')
+          .select(
+            'id, username, email, full_name, requested_role, requested_grade, requested_class, requested_subject, created_at',
+          )
+          .eq('approval_status', 'pending')
+          .order('created_at');
+      return List<Map<String, dynamic>>.from(rows);
+    } catch (e) {
+      if (e is PostgrestException && e.code == '42703') {
+        // Resilient fallback if requested_class/requested_grade/requested_subject columns are not yet in the DB
+        final fallbackRows = await Supabase.instance.client
+            .from('users')
+            .select(
+              'id, username, email, full_name, requested_role, created_at',
+            )
+            .eq('approval_status', 'pending')
+            .order('created_at');
+        return List<Map<String, dynamic>>.from(fallbackRows);
+      }
+      rethrow;
+    }
   }
 
   Future<void> _review(Map<String, dynamic> request, String decision) async {

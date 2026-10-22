@@ -29,5 +29,22 @@ String supabaseErrorMessage(Object error, {required String action}) {
     }
     return '$action failed: $message';
   }
+  if (error is FunctionException) {
+    final status = error.status;
+    final details = error.details?.toString() ?? '';
+    if (status == 404 || details.contains('NOT_FOUND') || details.contains('not found')) {
+      return '$action failed: The Supabase Edge Function was not found on your project (404).\n'
+          'Please deploy it using the Supabase CLI:\n'
+          '  supabase functions deploy manage-account';
+    }
+    return '$action failed: ${error.details ?? error.reasonPhrase ?? error}';
+  }
+  final errorStr = error.toString();
+  if (errorStr.contains('Requested function was not found') ||
+      errorStr.contains('code: NOT_FOUND')) {
+    return '$action failed: The Supabase Edge Function was not found on your project (404).\n'
+        'Please deploy it using the Supabase CLI:\n'
+        '  supabase functions deploy manage-account';
+  }
   return '$action failed: $error';
 }

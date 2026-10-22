@@ -125,6 +125,7 @@ grant select (
   created_at, last_login
 ) on public.users to authenticated;
 grant update (must_change_password) on public.users to authenticated;
+grant delete on public.users to authenticated;
 grant select on public.school_grades, public.sections, public.courses,
   public.teacher_courses, public.student_sections, public.quizzes,
   public.questions, public.grades, public.quiz_attempts, public.answers,
@@ -168,6 +169,16 @@ create policy users_update_own_temporary_password_flag
   on public.users for update to authenticated
   using (id = (select auth.uid()))
   with check (id = (select auth.uid()));
+create policy users_delete_authorized
+  on public.users for delete to authenticated
+  using (
+    (select private.app_current_role()) = 'admin'
+    or (
+      (select private.app_current_role()) = 'teacher'
+      and role = 'student'
+      and school_id = (select private.app_current_school_id())
+    )
+  );
 
 create policy school_grades_read_same_school
   on public.school_grades for select to authenticated
@@ -447,5 +458,232 @@ create policy profile_photos_delete_own
     bucket_id = 'profile-photos'
     and (storage.foldername(name))[1] = (select auth.uid())::text
   );
+
+-- ==============================================================================
+-- QUIZ APP COMPREHENSIVE ADDITIONS
+-- ==============================================================================
+
+alter table public.users
+  add column if not exists requested_grade text,
+  add column if not exists requested_class text,
+  add column if not exists requested_subject text,
+  add column if not exists is_active boolean not null default true,
+  add column if not exists must_change_password boolean not null default false,
+  add column if not exists approval_status text not null default 'approved';
+
+-- Set WondeAdmin@Admin.edu for admin
+update public.users
+set username = 'WondeAdmin@Admin.edu',
+    role = 'admin',
+    requested_role = 'admin',
+    approval_status = 'approved',
+    is_active = true
+where lower(email) = 'wondedev369@gmail.com'
+   or lower(username) in ('wondedev@admin.edu', 'wondevadmin@admin.edu', 'wondeadmin@admin.edu');
+
+-- Username to Email Resolver for Login
+create or replace function public.get_email_by_username(p_username text)
+returns text
+language plpgsql
+security definer
+set search_path = 'public', 'pg_temp'
+as $$
+declare
+  target_email text;
+  clean_input text := lower(btrim(p_username));
+  alt_input text;
+begin
+  select email into target_email
+  from public.users
+  where lower(username) = clean_input
+    and is_active = true
+  limit 1;
+
+  if target_email is not null then
+    return target_email;
+  end if;
+
+  if clean_input in ('wondeadmin@admin.edu', 'wondedev@admin.edu', 'wondeadmin', 'wondedev') then
+    select email into target_email
+    from public.users
+    where role = 'admin' and is_active = true
+    limit 1;
+    return coalesce(target_email, 'wondedev369@gmail.com');
+  end if;
+
+  if clean_input like '%@students.edu' then
+    alt_input := replace(clean_input, '@students.edu', '@student.edu');
+    select email into target_email
+    from public.users
+    where lower(username) = alt_input and is_active = true
+    limit 1;
+    if target_email is not null then return target_email; end if;
+  elsif clean_input like '%@student.edu' then
+    alt_input := replace(clean_input, '@student.edu', '@students.edu');
+    select email into target_email
+    from public.users
+    where lower(username) = alt_input and is_active = true
+    limit 1;
+    if target_email is not null then return target_email; end if;
+  end if;
+
+  return null;
+end;
+$$;
+
+grant execute on function public.get_email_by_username(text) to anon, authenticated;
+
+-- Quizzes & Questions visibility
+grant select on public.quizzes to authenticated;
+grant select on public.questions to authenticated;
+
+alter table public.quizzes
+  add column if not exists target_grade text,
+  add column if not exists target_section text;
+
+drop policy if exists quizzes_students_read_published on public.quizzes;
+drop policy if exists quizzes_students_read_published_same_school on public.quizzes;
+drop policy if exists quizzes_students_read_targeted on public.quizzes;
+create policy quizzes_students_read_targeted
+  on public.quizzes for select to authenticated
+  using (
+    (select private.app_current_role()) in ('admin', 'teacher')
+    or (
+      is_published = true
+      and (
+        exists (
+          select 1 from public.student_sections ss
+          where ss.student_id = auth.uid()
+            and ss.section_id = quizzes.section_id
+        )
+        or exists (
+          select 1 from public.student_sections ss
+          join public.sections s_student on s_student.id = ss.section_id
+          join public.sections s_quiz on s_quiz.id = quizzes.section_id
+          where ss.student_id = auth.uid()
+            and s_quiz.grade_id = s_student.grade_id
+            and lower(s_quiz.name) = lower(s_student.name)
+        )
+        or exists (
+          select 1 from public.users u
+          where u.id = auth.uid()
+            and (
+              (quizzes.target_grade is not null and lower(u.requested_grade) = lower(quizzes.target_grade)
+               and (quizzes.target_section is null or lower(u.requested_class) = lower(quizzes.target_section)))
+              or (quizzes.section_id is null and quizzes.target_grade is null)
+            )
+        )
+        or (quizzes.section_id is null and quizzes.target_grade is null)
+      )
+    )
+  );
+
+drop policy if exists questions_student_read_for_quiz on public.questions;
+drop policy if exists questions_all_read on public.questions;
+create policy questions_all_read
+  on public.questions for select to authenticated
+  using (true);
+
+-- User Deletion RPC for Admin and Teachers
+create or replace function public.delete_user_account(user_id uuid)
+returns jsonb
+language plpgsql
+security definer
+set search_path = 'public', 'auth', 'pg_temp'
+as $$
+declare
+  caller_id uuid := auth.uid();
+  caller_role text;
+  caller_school uuid;
+  target_user record;
+begin
+  if caller_id is null then
+    raise exception 'Authentication required' using errcode = '42501';
+  end if;
+
+  select * into caller_role from private.app_current_role();
+  if caller_role is null or caller_role not in ('admin', 'teacher') then
+    raise exception 'Permission denied: only administrators and teachers can delete accounts' using errcode = '42501';
+  end if;
+
+  select * into caller_school from private.app_current_school_id();
+
+  select id, role, school_id, full_name, username into target_user
+  from public.users
+  where id = user_id;
+
+  if target_user.id is null then
+    return jsonb_build_object('success', true, 'message', 'Account already deleted');
+  end if;
+
+  if caller_id = user_id then
+    raise exception 'You cannot delete your own account' using errcode = '23514';
+  end if;
+
+  if caller_role = 'teacher' then
+    if target_user.role <> 'student' then
+      raise exception 'Teachers can only delete student accounts' using errcode = '42501';
+    end if;
+    if caller_school is not null and target_user.school_id is not null and target_user.school_id <> caller_school then
+      raise exception 'Teachers can only delete students from their own school' using errcode = '42501';
+    end if;
+  end if;
+
+  delete from public.student_sections where student_id = user_id;
+  delete from public.teacher_courses where teacher_id = user_id;
+  delete from public.courses where teacher_id = user_id;
+  delete from public.grades where student_id = user_id;
+  delete from public.users where id = user_id;
+  delete from auth.users where id = user_id;
+
+  return jsonb_build_object('success', true, 'id', user_id);
+end;
+$$;
+
+grant execute on function public.delete_user_account(uuid) to authenticated;
+
+-- Quiz Attempt RPC
+create or replace function public.get_quiz_attempt_data(p_quiz_id uuid)
+returns jsonb
+language plpgsql
+security definer
+set search_path = 'public', 'pg_temp'
+as $$
+declare
+  quiz_record record;
+  questions_json jsonb;
+begin
+  select * into quiz_record
+  from public.quizzes
+  where id = p_quiz_id;
+
+  if quiz_record.id is null then
+    raise exception 'Quiz not found';
+  end if;
+
+  select coalesce(jsonb_agg(
+    jsonb_build_object(
+      'id', q.id,
+      'quiz_id', q.quiz_id,
+      'text', q.text,
+      'type', q.type,
+      'options', q.options,
+      'points', q.points,
+      'order', q."order",
+      'correct_answer', null,
+      'explanation', null
+    ) order by q."order" asc
+  ), '[]'::jsonb) into questions_json
+  from public.questions q
+  where q.quiz_id = p_quiz_id;
+
+  return jsonb_build_object(
+    'quiz', to_jsonb(quiz_record),
+    'questions', questions_json
+  );
+end;
+$$;
+
+grant execute on function public.get_quiz_attempt_data(uuid) to authenticated;
 
 commit;

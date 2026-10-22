@@ -32,7 +32,7 @@ Deno.serve(async (request) => {
     ? body.username.trim().toLowerCase()
     : "";
   const password = typeof body.password === "string" ? body.password : "";
-  const isAppUsername = /^[a-z0-9]{1,50}@(admin|teacher|student|a|t|s)\.edu$/.test(username);
+  const isAppUsername = /^[a-z0-9]{1,50}@(admin|teacher|students?|a|t|s)\.edu$/.test(username);
   const isLegacyUsername = /^[a-z0-9.-]{3,64}$/.test(username);
   if ((!isAppUsername && !isLegacyUsername) || password.length === 0) {
     return json({ error: "Invalid username or password" }, 401);

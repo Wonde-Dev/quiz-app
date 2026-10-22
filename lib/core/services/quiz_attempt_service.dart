@@ -23,6 +23,7 @@ class QuizAttemptService {
   final SupabaseClient _client = Supabase.instance.client;
 
   Future<QuizAttemptData> start(String quizId) async {
+    // 1. Try edge function
     try {
       final response = await _client.functions.invoke(
         'quiz-attempt',
@@ -31,30 +32,45 @@ class QuizAttemptService {
       final data = _requireMap(response.data);
       final quiz = data['quiz'];
       final questions = data['questions'];
-      if (quiz is! Map<String, dynamic> || questions is! List) {
-        throw const FormatException('Quiz service returned an invalid quiz');
+      if (quiz is Map<String, dynamic> && questions is List && questions.isNotEmpty) {
+        await AuditLogService().logForCurrentUser(
+          action: 'quiz_started',
+          details: {
+            'quiz_id': quizId,
+            'quiz_title': quiz['title'] as String? ?? 'Quiz',
+          },
+        );
+        return QuizAttemptData(
+          quiz: Quiz.fromMap(quiz),
+          questions: questions.map((question) {
+            return Question.fromMap(Map<String, dynamic>.from(question as Map));
+          }).toList(),
+        );
       }
-      await AuditLogService().logForCurrentUser(
-        action: 'quiz_started',
-        details: {
-          'quiz_id': quizId,
-          'quiz_title': quiz['title'] as String? ?? 'Quiz',
-        },
+    } catch (_) {}
+
+    // 2. Try get_quiz_attempt_data RPC function
+    try {
+      final rpcRes = await _client.rpc(
+        'get_quiz_attempt_data',
+        params: {'p_quiz_id': quizId},
       );
-      return QuizAttemptData(
-        quiz: Quiz.fromMap(quiz),
-        questions: questions.map((question) {
-          if (question is! Map<String, dynamic>) {
-            throw const FormatException(
-              'Quiz service returned an invalid question',
-            );
-          }
-          return Question.fromMap(question);
-        }).toList(),
-      );
-    } catch (_) {
-      return _fallbackStart(quizId);
-    }
+      if (rpcRes is Map) {
+        final data = Map<String, dynamic>.from(rpcRes);
+        final quiz = data['quiz'];
+        final questions = data['questions'];
+        if (quiz is Map && questions is List && questions.isNotEmpty) {
+          return QuizAttemptData(
+            quiz: Quiz.fromMap(Map<String, dynamic>.from(quiz)),
+            questions: questions.map((q) {
+              return Question.fromMap(Map<String, dynamic>.from(q as Map));
+            }).toList(),
+          );
+        }
+      }
+    } catch (_) {}
+
+    return _fallbackStart(quizId);
   }
 
   Future<QuizAttemptData> _fallbackStart(String quizId) async {
@@ -139,12 +155,31 @@ class QuizAttemptService {
 
       if (q['type'] == 'multiple_choice' || q['type'] == 'true_false') {
         final options = q['options'] as List?;
+        String? selectedOptionId;
+        if (rawAns is String) {
+          if (rawAns.trim().startsWith('{') && rawAns.trim().endsWith('}')) {
+            try {
+              final parsed = jsonDecode(rawAns) as Map<String, dynamic>;
+              selectedOptionId = parsed['option_id'] as String? ??
+                  parsed['selected'] as String? ??
+                  parsed['text'] as String?;
+            } catch (_) {
+              selectedOptionId = rawAns;
+            }
+          } else {
+            selectedOptionId = rawAns;
+          }
+        } else if (rawAns is Map) {
+          selectedOptionId = rawAns['option_id'] as String? ??
+              rawAns['selected'] as String? ??
+              rawAns['text'] as String?;
+        }
         if (options != null) {
           final correctOpt = options.firstWhere(
             (o) => o is Map && o['is_correct'] == true,
             orElse: () => null,
           );
-          isCorrect = correctOpt != null && rawAns == correctOpt['id'];
+          isCorrect = correctOpt != null && selectedOptionId == correctOpt['id'];
         }
       } else if (q['type'] == 'short_answer') {
         final cAns = q['correct_answer'] as String?;

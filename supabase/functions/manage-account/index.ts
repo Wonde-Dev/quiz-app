@@ -244,11 +244,13 @@ Deno.serve(async (request) => {
       : requestedRole === "teacher"
       ? "Teacher"
       : "Student";
+    const allowedSuffixPattern = requestedRole === "student"
+      ? "(Student|Students)"
+      : roleSuffix;
     if (
-      !/^[A-Z][a-z]*([A-Z][a-z]*)+@(Admin|Teacher|Student)\.edu$/.test(username) ||
-      !username.endsWith(`@${roleSuffix}.edu`)
+      !new RegExp(`^[A-Z][a-z]*([A-Z][a-z]*)+(\\d+)?@${allowedSuffixPattern}\\.edu$`).test(username)
     ) {
-      return json({ error: `Username must match FirstnameLastname@${requestedRole}.edu` }, 400);
+      return json({ error: `Username must match FirstnameLastname@${roleSuffix}.edu` }, 400);
     }
     const { data: existingUsername, error: usernameError } = await admin
       .from("users")

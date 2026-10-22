@@ -36,6 +36,7 @@ class _StudentQuizListState extends State<_StudentQuizList> {
       List<Map<String, dynamic>> quizzes,
       List<Map<String, dynamic>> grades,
       List<Map<String, dynamic>> enrolledSections,
+      Map<String, dynamic>? studentProfile,
     })
   >
   _dashboard;
@@ -51,40 +52,90 @@ class _StudentQuizListState extends State<_StudentQuizList> {
       List<Map<String, dynamic>> quizzes,
       List<Map<String, dynamic>> grades,
       List<Map<String, dynamic>> enrolledSections,
+      Map<String, dynamic>? studentProfile,
     })
   >
   _loadDashboard() async {
     final client = Supabase.instance.client;
 
-    final responses = await Future.wait([
-      // 1. Quizzes
-      client
+    // 1. Quizzes with resilient fallback and targeting columns
+    List<Map<String, dynamic>> quizzes = [];
+    try {
+      final res = await client
           .from('quizzes')
           .select(
-            'id, title, description, time_limit_minutes, total_points, section_id, '
-            'section:sections(id, name, school_grades(name))',
+            'id, title, description, time_limit_minutes, total_points, section_id, target_grade, target_section, '
+            'section:sections(id, name, grade, grade_id, school_grades(name))',
           )
           .eq('is_published', true)
-          .order('created_at', ascending: false),
+          .order('created_at', ascending: false);
+      quizzes = List<Map<String, dynamic>>.from(res);
+    } catch (_) {
+      try {
+        final res = await client
+            .from('quizzes')
+            .select(
+              'id, title, description, time_limit_minutes, total_points, section_id',
+            )
+            .eq('is_published', true)
+            .order('created_at', ascending: false);
+        quizzes = List<Map<String, dynamic>>.from(res);
+      } catch (e) {
+        debugPrint('Student quizzes load fallback error: $e');
+      }
+    }
 
-      // 2. Grades
-      client
+    // 2. Grades
+    List<Map<String, dynamic>> grades = [];
+    try {
+      final res = await client
           .from('grades')
           .select('quiz_id, score, total_points, percentage, passed, submitted_at')
           .eq('student_id', widget.studentId)
-          .order('submitted_at', ascending: false),
+          .order('submitted_at', ascending: false);
+      grades = List<Map<String, dynamic>>.from(res);
+    } catch (e) {
+      debugPrint('Student grades load error: $e');
+    }
 
-      // 3. Enrolled Sections
-      client
+    // 3. Enrolled Sections
+    List<Map<String, dynamic>> enrolledSections = [];
+    try {
+      final res = await client
           .from('student_sections')
           .select('section_id, section:sections(id, name, school_grades(name))')
-          .eq('student_id', widget.studentId),
-    ]);
+          .eq('student_id', widget.studentId);
+      enrolledSections = List<Map<String, dynamic>>.from(res);
+    } catch (_) {
+      try {
+        final res = await client
+            .from('student_sections')
+            .select('section_id')
+            .eq('student_id', widget.studentId);
+        enrolledSections = List<Map<String, dynamic>>.from(res);
+      } catch (e) {
+        debugPrint('Student sections load fallback error: $e');
+      }
+    }
+
+    // 4. Student profile metadata (requested_grade and requested_class)
+    Map<String, dynamic>? studentProfile;
+    try {
+      final res = await client
+          .from('users')
+          .select('id, school_id, requested_grade, requested_class')
+          .eq('id', widget.studentId)
+          .maybeSingle();
+      studentProfile = res;
+    } catch (e) {
+      debugPrint('Student profile load note: $e');
+    }
 
     return (
-      quizzes: List<Map<String, dynamic>>.from(responses[0]),
-      grades: List<Map<String, dynamic>>.from(responses[1]),
-      enrolledSections: List<Map<String, dynamic>>.from(responses[2]),
+      quizzes: quizzes,
+      grades: grades,
+      enrolledSections: enrolledSections,
+      studentProfile: studentProfile,
     );
   }
 
@@ -99,6 +150,7 @@ class _StudentQuizListState extends State<_StudentQuizList> {
           List<Map<String, dynamic>> quizzes,
           List<Map<String, dynamic>> grades,
           List<Map<String, dynamic>> enrolledSections,
+          Map<String, dynamic>? studentProfile,
         })
       >(
         future: _dashboard,
@@ -145,6 +197,37 @@ class _StudentQuizListState extends State<_StudentQuizList> {
               .whereType<String>()
               .toSet();
 
+          // Collect Student's grade and section identifiers
+          final studentGradeNames = <String>{};
+          final studentSectionNames = <String>{};
+
+          for (final s in result.enrolledSections) {
+            final sec = s['section'] as Map<String, dynamic>?;
+            final g = sec?['school_grades'] as Map<String, dynamic>?;
+            final gName = g?['name'] as String?;
+            final sName = sec?['name'] as String?;
+            final secGrade = sec?['grade'] as String?;
+            if (gName != null && gName.trim().isNotEmpty) {
+              studentGradeNames.add(gName.trim().toLowerCase());
+            }
+            if (secGrade != null && secGrade.trim().isNotEmpty) {
+              studentGradeNames.add('grade ${secGrade.trim()}'.toLowerCase());
+              studentGradeNames.add(secGrade.trim().toLowerCase());
+            }
+            if (sName != null && sName.trim().isNotEmpty) {
+              studentSectionNames.add(sName.trim().toLowerCase());
+            }
+          }
+
+          final profGrade = result.studentProfile?['requested_grade'] as String?;
+          final profClass = result.studentProfile?['requested_class'] as String?;
+          if (profGrade != null && profGrade.trim().isNotEmpty) {
+            studentGradeNames.add(profGrade.trim().toLowerCase());
+          }
+          if (profClass != null && profClass.trim().isNotEmpty) {
+            studentSectionNames.add(profClass.trim().toLowerCase());
+          }
+
           // Section labels
           final sectionLabels = result.enrolledSections.map((s) {
             final sec = s['section'] as Map<String, dynamic>?;
@@ -154,14 +237,68 @@ class _StudentQuizListState extends State<_StudentQuizList> {
             return gName.isNotEmpty ? '$gName · $sName' : sName;
           }).where((l) => l.isNotEmpty).toList();
 
+          if (sectionLabels.isEmpty && (profGrade != null || profClass != null)) {
+            final gStr = profGrade ?? '';
+            final cStr = profClass ?? '';
+            if (gStr.isNotEmpty && cStr.isNotEmpty) {
+              sectionLabels.add('$gStr · $cStr');
+            } else if (gStr.isNotEmpty) {
+              sectionLabels.add(gStr);
+            } else if (cStr.isNotEmpty) {
+              sectionLabels.add(cStr);
+            }
+          }
+
           final enrolledLabel = sectionLabels.isNotEmpty
               ? sectionLabels.join(', ')
               : 'Enrolled Student';
 
-          // Quizzes partition
-          final availableQuizzes = result.quizzes
-              .where((q) => !gradesByQuiz.containsKey(q['id']))
-              .toList();
+          // Strictly filter quizzes for this student's grade and class/section
+          final availableQuizzes = result.quizzes.where((quiz) {
+            // Exclude already submitted quizzes
+            if (gradesByQuiz.containsKey(quiz['id'])) return false;
+
+            final quizSectionId = quiz['section_id'] as String?;
+            final quizTargetGrade = (quiz['target_grade'] as String?)?.trim().toLowerCase();
+            final quizTargetSection = (quiz['target_section'] as String?)?.trim().toLowerCase();
+
+            // Match directly by enrolled section ID
+            if (quizSectionId != null && studentSectionIds.contains(quizSectionId)) {
+              return true;
+            }
+
+            final sec = quiz['section'] as Map<String, dynamic>?;
+            final g = sec?['school_grades'] as Map<String, dynamic>?;
+            final qGradeName = ((g?['name'] ?? quizTargetGrade) as String?)?.trim().toLowerCase();
+            final qSecName = ((sec?['name'] ?? quizTargetSection) as String?)?.trim().toLowerCase();
+
+            // When quiz has target grade or section metadata
+            if (qGradeName != null && qGradeName.isNotEmpty) {
+              if (studentGradeNames.isNotEmpty) {
+                final gradeMatches = studentGradeNames.any((sg) =>
+                    sg == qGradeName ||
+                    sg.replaceAll('grade', '').trim() == qGradeName.replaceAll('grade', '').trim());
+
+                if (!gradeMatches) return false;
+
+                if (qSecName != null && qSecName.isNotEmpty && studentSectionNames.isNotEmpty) {
+                  final sectionMatches = studentSectionNames.any((sn) =>
+                      sn == qSecName ||
+                      sn.replaceAll('section', '').trim() == qSecName.replaceAll('section', '').trim());
+                  if (!sectionMatches) return false;
+                }
+
+                return true;
+              }
+            }
+
+            // General school quiz with no specific section/grade constraint
+            if (quizSectionId == null && (quizTargetGrade == null || quizTargetGrade.isEmpty)) {
+              return true;
+            }
+
+            return false;
+          }).toList();
           final submittedGrades = result.grades;
 
           // Stats
@@ -528,6 +665,8 @@ class _GradeResultTile extends StatelessWidget {
     final score = grade['score'] ?? 0;
     final total = grade['total_points'] ?? 0;
     final percentage = grade['percentage'] ?? 0;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final statusColor = passed ? const Color(0xFF10B981) : const Color(0xFFEF4444);
 
     final dateStr = DateTime.tryParse(grade['submitted_at'] as String? ?? '')
             ?.toLocal()
@@ -536,44 +675,86 @@ class _GradeResultTile extends StatelessWidget {
             .first ??
         'Submitted';
 
-    return Card(
-      margin: const EdgeInsets.only(bottom: 8),
-      child: ListTile(
-        leading: CircleAvatar(
-          backgroundColor: passed
-              ? Colors.green.withValues(alpha: 0.15)
-              : Colors.orange.withValues(alpha: 0.15),
-          child: Icon(
-            passed ? Icons.check_circle : Icons.rule_rounded,
-            color: passed ? Colors.green.shade700 : Colors.orange.shade800,
-          ),
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF1E293B) : Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0),
+          width: 1.2,
         ),
-        title: Text(
-          title,
-          style: const TextStyle(fontWeight: FontWeight.w600),
-        ),
-        subtitle: Text('Score: $score / $total ($percentage%) · $dateStr'),
-        trailing: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-          decoration: BoxDecoration(
-            color: passed
-                ? Colors.green.withValues(alpha: 0.1)
-                : Colors.red.withValues(alpha: 0.1),
-            borderRadius: BorderRadius.circular(10),
-            border: Border.all(
-              color: passed ? Colors.green : Colors.red,
-              width: 1,
+      ),
+      child: Row(
+        children: [
+          // Prominent percentage score gauge
+          Container(
+            width: 58,
+            height: 58,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: statusColor.withValues(alpha: 0.12),
+              border: Border.all(color: statusColor, width: 2),
+            ),
+            alignment: Alignment.center,
+            child: Text(
+              '$percentage%',
+              style: TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w900,
+                color: statusColor,
+              ),
             ),
           ),
-          child: Text(
-            passed ? 'Passed' : 'Failed',
-            style: TextStyle(
-              color: passed ? Colors.green.shade800 : Colors.red.shade800,
-              fontWeight: FontWeight.bold,
-              fontSize: 12,
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'Score: $score out of $total points ($percentage%)',
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  dateStr,
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: isDark ? Colors.white38 : Colors.grey.shade500,
+                  ),
+                ),
+              ],
             ),
           ),
-        ),
+          const SizedBox(width: 10),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+            decoration: BoxDecoration(
+              color: statusColor.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: statusColor.withValues(alpha: 0.5)),
+            ),
+            child: Text(
+              passed ? 'PASSED' : 'FAILED',
+              style: TextStyle(
+                color: statusColor,
+                fontWeight: FontWeight.w900,
+                fontSize: 11,
+                letterSpacing: 0.4,
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }

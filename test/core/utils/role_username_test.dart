@@ -18,6 +18,67 @@ void main() {
     test('rejects names without both first and last name', () {
       expect(roleUsername('Wonde', 'student'), isEmpty);
     });
+
+    test('supports optional order number', () {
+      expect(
+        roleUsername('Lamesa Ahamed', 'student', order: 1),
+        'LamesaAhamed1@Student.edu',
+      );
+      expect(
+        roleUsername('Lamesa Ahamed', 'student', order: 2),
+        'LamesaAhamed2@Student.edu',
+      );
+    });
+  });
+
+  group('nextRoleUsername', () {
+    test('handles overlapping duplicate names within the same role', () {
+      // 1st registration
+      expect(
+        nextRoleUsername(
+          fullName: 'Lamesa Ahamed',
+          role: 'student',
+          existingUsernames: [],
+        ),
+        'LamesaAhamed@Student.edu',
+      );
+
+      // 2nd registration: same name, same role -> appends 1
+      expect(
+        nextRoleUsername(
+          fullName: 'Lamesa Ahamed',
+          role: 'student',
+          existingUsernames: ['LamesaAhamed@Student.edu'],
+        ),
+        'LamesaAhamed1@Student.edu',
+      );
+
+      // 3rd registration: same name, same role -> appends 2
+      expect(
+        nextRoleUsername(
+          fullName: 'Lamesa Ahamed',
+          role: 'student',
+          existingUsernames: [
+            'LamesaAhamed@Student.edu',
+            'LamesaAhamed1@Student.edu',
+          ],
+        ),
+        'LamesaAhamed2@Student.edu',
+      );
+
+      // Same name on a DIFFERENT role (Teacher) -> starts unnumbered for teacher
+      expect(
+        nextRoleUsername(
+          fullName: 'Lamesa Ahamed',
+          role: 'teacher',
+          existingUsernames: [
+            'LamesaAhamed@Student.edu',
+            'LamesaAhamed1@Student.edu',
+          ],
+        ),
+        'LamesaAhamed@Teacher.edu',
+      );
+    });
   });
 
   group('isRoleUsername', () {
@@ -25,6 +86,9 @@ void main() {
       expect(isRoleUsername('WondeAssegid@Admin.edu', 'admin'), isTrue);
       expect(isRoleUsername('WondeAssegid@Teacher.edu', 'teacher'), isTrue);
       expect(isRoleUsername('WondeAssegid@Student.edu', 'student'), isTrue);
+      expect(isRoleUsername('WondeAssegid@Students.edu', 'student'), isTrue);
+      expect(isRoleUsername('LamesaAhamed1@Student.edu', 'student'), isTrue);
+      expect(isRoleUsername('LamesaAhamed2@Student.edu', 'student'), isTrue);
       expect(isRoleUsername('WondeAssegid@Admin.edu', 'student'), isFalse);
       expect(isRoleUsername('Wondeassegid@Student.edu', 'student'), isFalse);
     });
@@ -35,6 +99,8 @@ void main() {
       expect(roleFromUsername('WondeAssegid@Admin.edu'), 'admin');
       expect(roleFromUsername('WondeAssegid@Teacher.edu'), 'teacher');
       expect(roleFromUsername('WondeAssegid@Student.edu'), 'student');
+      expect(roleFromUsername('WondeAssegid@Students.edu'), 'student');
+      expect(roleFromUsername('LamesaAhamed1@Student.edu'), 'student');
     });
 
     test('rejects usernames that do not follow the required format', () {

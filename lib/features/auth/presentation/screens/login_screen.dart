@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:quiz_app/core/theme/theme_mode_provider.dart';
 import 'package:quiz_app/core/utils/role_username.dart';
 import 'package:quiz_app/core/utils/validators.dart';
@@ -25,6 +27,10 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   final _passwordController = TextEditingController();
   final _confirmController = TextEditingController();
   final _subjectController = TextEditingController();
+
+  final _imagePicker = ImagePicker();
+  XFile? _pickedAvatarFile;
+  Uint8List? _pickedAvatarBytes;
 
   late Future<List<Map<String, dynamic>>> _schoolsFuture;
   Future<List<Map<String, dynamic>>> _sectionsFuture = Future.value([]);
@@ -79,14 +85,17 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       if (!isRoleUsername(username, _requestedRole)) {
         notifier.setMessage(
           error:
-              'Use the suggested username ending in @${_requestedRole == 'teacher' ? 'Teacher' : 'Student'}.edu.',
+              'Use the suggested username ending in @${_requestedRole == 'teacher' ? 'Teacher' : 'Students'}.edu.',
         );
         return;
       }
+      final emailToUse = _emailController.text.trim().isNotEmpty
+          ? _emailController.text.trim().toLowerCase()
+          : username.toLowerCase();
       await notifier.register(
         fullName: _nameController.text.trim(),
         username: username,
-        email: _emailController.text.trim(),
+        email: emailToUse,
         password: _passwordController.text,
         requestedRole: _requestedRole,
         schoolId: _selectedSchoolId,
@@ -99,12 +108,91 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
             ? _subjectController.text.trim()
             : null,
       );
+      if (_pickedAvatarFile != null) {
+        try {
+          await ref.read(authStateProvider.notifier).saveAvatar(_pickedAvatarFile!);
+        } catch (e) {
+          debugPrint('Profile photo registration upload: $e');
+        }
+      }
     } else {
       await notifier.signIn(
         emailOrUsername: _usernameController.text.trim(),
         password: _passwordController.text,
         expectedRole: roleFromUsername(_usernameController.text.trim()),
       );
+    }
+  }
+
+  Future<void> _pickAvatar() async {
+    final source = await showModalBottomSheet<ImageSource>(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text(
+                'Profile Picture',
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+              ),
+              const SizedBox(height: 12),
+              ListTile(
+                leading: const Icon(Icons.camera_alt_outlined),
+                title: const Text('Take Photo with Camera'),
+                onTap: () => Navigator.pop(ctx, ImageSource.camera),
+              ),
+              ListTile(
+                leading: const Icon(Icons.photo_library_outlined),
+                title: const Text('Choose from Gallery'),
+                onTap: () => Navigator.pop(ctx, ImageSource.gallery),
+              ),
+              if (_pickedAvatarFile != null)
+                ListTile(
+                  leading: const Icon(Icons.delete_outline, color: Colors.red),
+                  title: const Text(
+                    'Remove Photo',
+                    style: TextStyle(color: Colors.red),
+                  ),
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    setState(() {
+                      _pickedAvatarFile = null;
+                      _pickedAvatarBytes = null;
+                    });
+                  },
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (source == null) return;
+    try {
+      final image = await _imagePicker.pickImage(
+        source: source,
+        maxWidth: 800,
+        maxHeight: 800,
+        imageQuality: 85,
+      );
+      if (image == null) return;
+      final bytes = await image.readAsBytes();
+      if (mounted) {
+        setState(() {
+          _pickedAvatarFile = image;
+          _pickedAvatarBytes = bytes;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not access image: $e')),
+        );
+      }
     }
   }
 
@@ -273,6 +361,66 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 
                         // Registration fields
                         if (_isRegistering) ...[
+                          Center(
+                            child: Stack(
+                              alignment: Alignment.bottomRight,
+                              children: [
+                                InkWell(
+                                  onTap: _pickAvatar,
+                                  borderRadius: BorderRadius.circular(44),
+                                  child: CircleAvatar(
+                                    radius: 40,
+                                    backgroundColor: isDark
+                                        ? const Color(0xFF1E293B)
+                                        : const Color(0xFFF1F5F9),
+                                    backgroundImage: _pickedAvatarBytes != null
+                                        ? MemoryImage(_pickedAvatarBytes!)
+                                        : null,
+                                    child: _pickedAvatarBytes == null
+                                        ? Icon(
+                                            Icons.person_outline_rounded,
+                                            size: 42,
+                                            color: isDark
+                                                ? const Color(0xFF94A3B8)
+                                                : const Color(0xFF64748B),
+                                          )
+                                        : null,
+                                  ),
+                                ),
+                                Material(
+                                  color: theme.colorScheme.primary,
+                                  shape: const CircleBorder(),
+                                  elevation: 2,
+                                  child: InkWell(
+                                    onTap: _pickAvatar,
+                                    customBorder: const CircleBorder(),
+                                    child: const Padding(
+                                      padding: EdgeInsets.all(6),
+                                      child: Icon(
+                                        Icons.camera_alt_rounded,
+                                        size: 16,
+                                        color: Colors.white,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          Center(
+                            child: TextButton.icon(
+                              onPressed: _pickAvatar,
+                              icon: const Icon(Icons.add_a_photo_outlined, size: 15),
+                              label: Text(
+                                _pickedAvatarBytes == null
+                                    ? 'Take or Choose Profile Photo'
+                                    : 'Change Profile Photo',
+                                style: const TextStyle(fontSize: 12),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+
                           const Text(
                             'Choose account type',
                             style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
@@ -301,16 +449,6 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                                   ),
                                 ),
                             ],
-                          ),
-                          const SizedBox(height: 6),
-                          Text(
-                            _requestedRole == 'teacher'
-                                ? 'Teacher applications are reviewed by your administrator.'
-                                : 'Student accounts are ready immediately upon creation.',
-                            style: TextStyle(
-                              fontSize: 11,
-                              color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
-                            ),
                           ),
                           const SizedBox(height: 16),
 
@@ -812,17 +950,63 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     }
   }
 
-  void _updateGeneratedUsername() {
-    final uname = roleUsername(
+  Future<void> _updateGeneratedUsername() async {
+    final base = roleUsername(
       _nameController.text,
       _requestedRole,
     );
-    _usernameController.text = uname;
+    if (base.isEmpty) {
+      _usernameController.text = '';
+      return;
+    }
+    _usernameController.text = base;
+    if (_emailController.text.isEmpty ||
+        _emailController.text.contains('@teacher.edu') ||
+        _emailController.text.contains('@student.edu') ||
+        _emailController.text.contains('@students.edu')) {
+      _emailController.text = base.toLowerCase();
+    }
+    _syncDefaultPassword(base);
+
+    // Query existing accounts in database to resolve overlapping usernames
+    try {
+      final namePart = base.split('@').first;
+      final rows = await Supabase.instance.client
+          .from('users')
+          .select('username')
+          .ilike('username', '$namePart%');
+      final existing = (rows as List)
+          .map((r) => r['username'] as String? ?? '')
+          .where((u) => u.isNotEmpty)
+          .toList();
+
+      final resolved = nextRoleUsername(
+        fullName: _nameController.text,
+        role: _requestedRole,
+        existingUsernames: existing,
+      );
+      if (mounted && _nameController.text.trim().isNotEmpty) {
+        _usernameController.text = resolved;
+        if (_emailController.text.isEmpty ||
+            _emailController.text.contains('@teacher.edu') ||
+            _emailController.text.contains('@student.edu') ||
+            _emailController.text.contains('@students.edu')) {
+          _emailController.text = resolved.toLowerCase();
+        }
+        _syncDefaultPassword(resolved);
+      }
+    } catch (_) {
+      // Keep base if network query fails
+    }
+  }
+
+  void _syncDefaultPassword(String uname) {
     if (_isRegistering && uname.isNotEmpty) {
       final currentPw = _passwordController.text;
       final shouldUpdatePw = currentPw.isEmpty ||
           currentPw.endsWith('@S.edu') ||
-          currentPw.endsWith('@T.edu');
+          currentPw.endsWith('@T.edu') ||
+          currentPw.endsWith('@A.edu');
       if (shouldUpdatePw) {
         final defaultPw = defaultRolePassword(
           usernameOrFullName: uname,

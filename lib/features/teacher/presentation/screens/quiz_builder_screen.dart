@@ -21,6 +21,7 @@ class _QuizBuilderScreenState extends ConsumerState<QuizBuilderScreen> {
   final _questionController = TextEditingController();
   final _correctAnswerController = TextEditingController();
   final _explanationController = TextEditingController();
+  final _diagramUrlController = TextEditingController();
   final _customSectionController = TextEditingController();
   final _optionControllers = List.generate(4, (_) => TextEditingController());
 
@@ -44,7 +45,12 @@ class _QuizBuilderScreenState extends ConsumerState<QuizBuilderScreen> {
   bool _questionsSaved = false;
   String? _error;
 
-  static const _standardGrades = ['Grade 9', 'Grade 10', 'Grade 11', 'Grade 12'];
+  static const _standardGrades = [
+    'Grade 9',
+    'Grade 10',
+    'Grade 11',
+    'Grade 12',
+  ];
   static const _standardSections = [
     'Section A',
     'Section B',
@@ -69,6 +75,7 @@ class _QuizBuilderScreenState extends ConsumerState<QuizBuilderScreen> {
     _questionController.dispose();
     _correctAnswerController.dispose();
     _explanationController.dispose();
+    _diagramUrlController.dispose();
     _customSectionController.dispose();
     for (final controller in _optionControllers) {
       controller.dispose();
@@ -164,7 +171,12 @@ class _QuizBuilderScreenState extends ConsumerState<QuizBuilderScreen> {
 
   void _addQuestion() {
     final questionText = _questionController.text.trim();
-    final hasMissingChoice = _questionType == 'multiple_choice' &&
+    final diagramUrl = _diagramUrlController.text.trim();
+    final effectiveText = diagramUrl.isNotEmpty
+        ? '$questionText\n[diagram: $diagramUrl]'
+        : questionText;
+    final hasMissingChoice =
+        _questionType == 'multiple_choice' &&
         _optionControllers.any((c) => c.text.trim().isEmpty);
 
     if (questionText.isEmpty || hasMissingChoice) {
@@ -185,13 +197,15 @@ class _QuizBuilderScreenState extends ConsumerState<QuizBuilderScreen> {
 
     final expectedAnswer = _correctAnswerController.text.trim();
     final effectiveCorrectAnswer = _questionType == 'short_answer'
-        ? (expectedAnswer.isNotEmpty ? expectedAnswer : 'Teacher manual evaluation')
+        ? (expectedAnswer.isNotEmpty
+              ? expectedAnswer
+              : 'Teacher manual evaluation')
         : null;
 
     setState(() {
       _error = null;
       _questions.add({
-        'text': questionText,
+        'text': effectiveText,
         'type': _questionType,
         'points': 1,
         'order': _questions.length,
@@ -212,6 +226,7 @@ class _QuizBuilderScreenState extends ConsumerState<QuizBuilderScreen> {
       });
 
       _questionController.clear();
+      _diagramUrlController.clear();
       _correctAnswerController.clear();
       _explanationController.clear();
       for (final controller in _optionControllers) {
@@ -268,10 +283,10 @@ class _QuizBuilderScreenState extends ConsumerState<QuizBuilderScreen> {
           try {
             final newGrade = await client
                 .from('school_grades')
-                .upsert(
-                  {'school_id': schoolId, 'name': _selectedGradeName},
-                  onConflict: 'school_id, name',
-                )
+                .upsert({
+                  'school_id': schoolId,
+                  'name': _selectedGradeName,
+                }, onConflict: 'school_id, name')
                 .select('id')
                 .single();
             gradeId = newGrade['id'] as String;
@@ -280,11 +295,14 @@ class _QuizBuilderScreenState extends ConsumerState<QuizBuilderScreen> {
           }
         }
 
-        // 2. Resolve Section
+        // 2. Resolve Section matching BOTH grade_id and section name
         final matchingSection = _existingSections.firstWhere(
-          (s) =>
-              (s['name'] as String).toLowerCase() ==
-              effectiveSectionName.toLowerCase(),
+          (s) {
+            final matchesName = (s['name'] as String).trim().toLowerCase() ==
+                effectiveSectionName.toLowerCase();
+            final matchesGrade = gradeId != null ? s['grade_id'] == gradeId : true;
+            return matchesName && matchesGrade;
+          },
           orElse: () => {},
         );
 
@@ -305,9 +323,17 @@ class _QuizBuilderScreenState extends ConsumerState<QuizBuilderScreen> {
             sectionId = newSection['id'] as String;
           } catch (e) {
             debugPrint('Section resolution note: $e');
-            // Try matching section again
-            if (_existingSections.isNotEmpty) {
-              sectionId = _existingSections.first['id'] as String;
+            // Try matching section again with grade awareness
+            final fallback = _existingSections.firstWhere(
+              (s) =>
+                  (s['name'] as String).trim().toLowerCase() ==
+                      effectiveSectionName.toLowerCase() &&
+                  (gradeId == null || s['grade_id'] == gradeId),
+              orElse: () =>
+                  _existingSections.isNotEmpty ? _existingSections.first : {},
+            );
+            if (fallback.isNotEmpty) {
+              sectionId = fallback['id'] as String;
             }
           }
         }
@@ -346,31 +372,47 @@ class _QuizBuilderScreenState extends ConsumerState<QuizBuilderScreen> {
 
       final timeLimit = int.tryParse(_timeLimitController.text.trim()) ?? 30;
 
-      // 4. Create Quiz
+      // 4. Create Quiz with targeted grade and class
       if (_savedQuizId == null) {
-        final quiz = await client
-            .from('quizzes')
-            .insert({
-              'teacher_id': user.id,
-              'course_id': courseId,
-              'section_id': sectionId,
-              'title': _titleController.text.trim(),
-              'description': _descriptionController.text.trim(),
-              'time_limit_minutes': timeLimit,
-              'total_points': _questions.length,
-              'is_published': false,
-            })
-            .select('id')
-            .single();
+        final quizPayload = {
+          'teacher_id': user.id,
+          'course_id': courseId,
+          'section_id': sectionId,
+          'target_grade': _selectedGradeName,
+          'target_section': effectiveSectionName,
+          'title': _titleController.text.trim(),
+          'description': _descriptionController.text.trim(),
+          'time_limit_minutes': timeLimit,
+          'total_points': _questions.length,
+          'is_published': false,
+        };
+
+        Map<String, dynamic> quiz;
+        try {
+          quiz = await client
+              .from('quizzes')
+              .insert(quizPayload)
+              .select('id')
+              .single();
+        } catch (_) {
+          // Fallback if target_grade / target_section columns are not yet applied
+          quizPayload.remove('target_grade');
+          quizPayload.remove('target_section');
+          quiz = await client
+              .from('quizzes')
+              .insert(quizPayload)
+              .select('id')
+              .single();
+        }
         _savedQuizId = quiz['id'] as String;
       }
 
       // 5. Insert Questions
       if (!_questionsSaved && _savedQuizId != null) {
-        await client.from('questions').insert(
-              _questions
-                  .map((q) => {...q, 'quiz_id': _savedQuizId})
-                  .toList(),
+        await client
+            .from('questions')
+            .insert(
+              _questions.map((q) => {...q, 'quiz_id': _savedQuizId}).toList(),
             );
         _questionsSaved = true;
       }
@@ -384,7 +426,9 @@ class _QuizBuilderScreenState extends ConsumerState<QuizBuilderScreen> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Quiz published successfully! Students can now take it.'),
+          content: Text(
+            'Quiz published successfully! Students can now take it.',
+          ),
           backgroundColor: Colors.green,
           behavior: SnackBarBehavior.floating,
         ),
@@ -439,8 +483,8 @@ class _QuizBuilderScreenState extends ConsumerState<QuizBuilderScreen> {
                                 readOnly: _questionsSaved,
                                 validator: (value) =>
                                     value == null || value.trim().isEmpty
-                                        ? 'Enter a title'
-                                        : null,
+                                    ? 'Enter a title'
+                                    : null,
                               ),
                               const SizedBox(height: 12),
                               TextFormField(
@@ -463,8 +507,8 @@ class _QuizBuilderScreenState extends ConsumerState<QuizBuilderScreen> {
                                         prefixIcon: Icon(Icons.subject_rounded),
                                       ),
                                       readOnly: _questionsSaved,
-                                      validator: (value) => value == null ||
-                                              value.trim().isEmpty
+                                      validator: (value) =>
+                                          value == null || value.trim().isEmpty
                                           ? 'Enter subject'
                                           : null,
                                     ),
@@ -512,8 +556,10 @@ class _QuizBuilderScreenState extends ConsumerState<QuizBuilderScreen> {
                               ),
                               const SizedBox(height: 16),
 
-                              if (_role == AppRoles.admin && _schools.isNotEmpty) ...[
+                              if (_role == AppRoles.admin &&
+                                  _schools.isNotEmpty) ...[
                                 DropdownButtonFormField<String>(
+                                  isExpanded: true,
                                   initialValue: _selectedSchoolId,
                                   decoration: const InputDecoration(
                                     labelText: 'School',
@@ -532,7 +578,9 @@ class _QuizBuilderScreenState extends ConsumerState<QuizBuilderScreen> {
                                       ? null
                                       : (schoolId) {
                                           if (schoolId == null) return;
-                                          setState(() => _selectedSchoolId = schoolId);
+                                          setState(
+                                            () => _selectedSchoolId = schoolId,
+                                          );
                                           _loadSchoolMetadata(schoolId);
                                         },
                                 ),
@@ -541,6 +589,7 @@ class _QuizBuilderScreenState extends ConsumerState<QuizBuilderScreen> {
 
                               // Grade Picker
                               DropdownButtonFormField<String>(
+                                isExpanded: true,
                                 initialValue: _selectedGradeName,
                                 decoration: const InputDecoration(
                                   labelText: 'Choose Grade (Grade 9 - 12)',
@@ -563,7 +612,9 @@ class _QuizBuilderScreenState extends ConsumerState<QuizBuilderScreen> {
                                     ? null
                                     : (grade) {
                                         if (grade != null) {
-                                          setState(() => _selectedGradeName = grade);
+                                          setState(
+                                            () => _selectedGradeName = grade,
+                                          );
                                         }
                                       },
                               ),
@@ -571,6 +622,7 @@ class _QuizBuilderScreenState extends ConsumerState<QuizBuilderScreen> {
 
                               // Section Picker
                               DropdownButtonFormField<String>(
+                                isExpanded: true,
                                 initialValue: _selectedSectionName,
                                 decoration: const InputDecoration(
                                   labelText: 'Choose Section (A, B, C, etc.)',
@@ -606,12 +658,14 @@ class _QuizBuilderScreenState extends ConsumerState<QuizBuilderScreen> {
                                 TextFormField(
                                   controller: _customSectionController,
                                   decoration: const InputDecoration(
-                                    labelText: 'Custom Section Name (e.g. Section F)',
+                                    labelText:
+                                        'Custom Section Name (e.g. Section F)',
                                     hintText: 'Enter section letter or name',
                                     prefixIcon: Icon(Icons.edit_note_rounded),
                                   ),
                                   textCapitalization: TextCapitalization.words,
-                                  validator: (v) => _useCustomSection &&
+                                  validator: (v) =>
+                                      _useCustomSection &&
                                           (v == null || v.trim().isEmpty)
                                       ? 'Enter a section name'
                                       : null,
@@ -675,24 +729,29 @@ class _QuizBuilderScreenState extends ConsumerState<QuizBuilderScreen> {
                           shrinkWrap: true,
                           physics: const NeverScrollableScrollPhysics(),
                           itemCount: _questions.length,
-                          separatorBuilder: (context, index) => const SizedBox(height: 6),
+                          separatorBuilder: (context, index) =>
+                              const SizedBox(height: 6),
                           itemBuilder: (context, index) {
                             final q = _questions[index];
                             return Card(
                               child: ListTile(
                                 leading: CircleAvatar(
-                                  backgroundColor: theme.colorScheme.primaryContainer,
+                                  backgroundColor:
+                                      theme.colorScheme.primaryContainer,
                                   child: Text(
                                     '${index + 1}',
                                     style: TextStyle(
-                                      color: theme.colorScheme.onPrimaryContainer,
+                                      color:
+                                          theme.colorScheme.onPrimaryContainer,
                                       fontWeight: FontWeight.bold,
                                     ),
                                   ),
                                 ),
                                 title: Text(
                                   q['text'] as String,
-                                  style: const TextStyle(fontWeight: FontWeight.w600),
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.w600,
+                                  ),
                                 ),
                                 subtitle: Text(
                                   '${_questionTypeLabel(q['type'] as String)} · 1 pt'
@@ -700,10 +759,15 @@ class _QuizBuilderScreenState extends ConsumerState<QuizBuilderScreen> {
                                 ),
                                 trailing: IconButton(
                                   tooltip: 'Remove',
-                                  icon: const Icon(Icons.delete_outline, color: Colors.red),
+                                  icon: const Icon(
+                                    Icons.delete_outline,
+                                    color: Colors.red,
+                                  ),
                                   onPressed: _isSaving || _questionsSaved
                                       ? null
-                                      : () => setState(() => _questions.removeAt(index)),
+                                      : () => setState(
+                                          () => _questions.removeAt(index),
+                                        ),
                                 ),
                               ),
                             );
@@ -733,11 +797,23 @@ class _QuizBuilderScreenState extends ConsumerState<QuizBuilderScreen> {
                                   labelText: 'Question Text',
                                   prefixIcon: Icon(Icons.help_outline_rounded),
                                 ),
-                                textCapitalization: TextCapitalization.sentences,
+                                textCapitalization:
+                                    TextCapitalization.sentences,
+                                readOnly: _questionsSaved,
+                              ),
+                              const SizedBox(height: 12),
+                              TextFormField(
+                                controller: _diagramUrlController,
+                                decoration: const InputDecoration(
+                                  labelText: 'Question Diagram / Graph / Reference URL (optional)',
+                                  prefixIcon: Icon(Icons.insert_chart_outlined),
+                                  hintText: 'https://... image link or graph',
+                                ),
                                 readOnly: _questionsSaved,
                               ),
                               const SizedBox(height: 12),
                               DropdownButtonFormField<String>(
+                                isExpanded: true,
                                 initialValue: _questionType,
                                 decoration: const InputDecoration(
                                   labelText: 'Question Type',
@@ -754,7 +830,9 @@ class _QuizBuilderScreenState extends ConsumerState<QuizBuilderScreen> {
                                   ),
                                   DropdownMenuItem(
                                     value: 'short_answer',
-                                    child: Text('Descriptive / Short Answer (allows text & image)'),
+                                    child: Text(
+                                      'Descriptive / Short Answer (allows text & image)',
+                                    ),
                                   ),
                                 ],
                                 onChanged: _questionsSaved
@@ -777,7 +855,9 @@ class _QuizBuilderScreenState extends ConsumerState<QuizBuilderScreen> {
                                     labelText: 'Expected Answer / Model solution (optional)',
                                     hintText: 'Enter sample answer or leave blank for manual grading',
                                     helperText: 'Students will be able to type written explanations and attach photos/diagrams.',
-                                    prefixIcon: Icon(Icons.check_circle_outline),
+                                    prefixIcon: Icon(
+                                      Icons.check_circle_outline,
+                                    ),
                                   ),
                                   readOnly: _questionsSaved,
                                 ),
@@ -798,32 +878,42 @@ class _QuizBuilderScreenState extends ConsumerState<QuizBuilderScreen> {
                                   },
                                   child: Column(
                                     children: [
-                                      for (var index = 0;
-                                          index <
-                                              (_questionType == 'true_false'
-                                                  ? 2
-                                                  : _optionControllers.length);
-                                          index++)
+                                      for (
+                                        var index = 0;
+                                        index <
+                                            (_questionType == 'true_false'
+                                                ? 2
+                                                : _optionControllers.length);
+                                        index++
+                                      )
                                         Padding(
-                                          padding: const EdgeInsets.only(bottom: 8),
+                                          padding: const EdgeInsets.only(
+                                            bottom: 8,
+                                          ),
                                           child: Row(
                                             children: [
-                                              Radio<int>(
-                                                value: index,
-                                              ),
+                                              Radio<int>(value: index),
                                               Expanded(
-                                                child: _questionType == 'true_false'
+                                                child:
+                                                    _questionType ==
+                                                        'true_false'
                                                     ? Text(
-                                                        index == 0 ? 'True' : 'False',
+                                                        index == 0
+                                                            ? 'True'
+                                                            : 'False',
                                                         style: const TextStyle(
-                                                          fontWeight: FontWeight.bold,
+                                                          fontWeight:
+                                                              FontWeight.bold,
                                                         ),
                                                       )
                                                     : TextFormField(
-                                                        controller: _optionControllers[index],
-                                                        readOnly: _questionsSaved,
+                                                        controller:
+                                                            _optionControllers[index],
+                                                        readOnly:
+                                                            _questionsSaved,
                                                         decoration: InputDecoration(
-                                                          labelText: 'Option ${String.fromCharCode(65 + index)}',
+                                                          labelText:
+                                                              'Option ${String.fromCharCode(65 + index)}',
                                                           isDense: true,
                                                         ),
                                                       ),
@@ -842,7 +932,9 @@ class _QuizBuilderScreenState extends ConsumerState<QuizBuilderScreen> {
                                 decoration: const InputDecoration(
                                   labelText: 'Explanation (Optional)',
                                   hintText: 'Explains why this answer is correct after submission',
-                                  prefixIcon: Icon(Icons.lightbulb_outline_rounded),
+                                  prefixIcon: Icon(
+                                    Icons.lightbulb_outline_rounded,
+                                  ),
                                 ),
                                 maxLines: 2,
                                 readOnly: _questionsSaved,
@@ -874,8 +966,10 @@ class _QuizBuilderScreenState extends ConsumerState<QuizBuilderScreen> {
                           ),
                           child: Row(
                             children: [
-                              Icon(Icons.error_outline,
-                                  color: theme.colorScheme.onErrorContainer),
+                              Icon(
+                                Icons.error_outline,
+                                color: theme.colorScheme.onErrorContainer,
+                              ),
                               const SizedBox(width: 12),
                               Expanded(
                                 child: Text(
@@ -928,8 +1022,8 @@ class _QuizBuilderScreenState extends ConsumerState<QuizBuilderScreen> {
   }
 
   String _questionTypeLabel(String type) => switch (type) {
-        'true_false' => 'True or false',
-        'short_answer' => 'Description / Short answer',
-        _ => 'Multiple choice',
-      };
+    'true_false' => 'True or false',
+    'short_answer' => 'Description / Short answer',
+    _ => 'Multiple choice',
+  };
 }

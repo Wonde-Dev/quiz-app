@@ -42,9 +42,8 @@ class _QuizResultsScreenState extends ConsumerState<QuizResultsScreen> {
           'quiz:quizzes!grades_quiz_id_fkey(id, title, description, teacher_id, total_points)',
         );
 
-    // If teacher, only load their own quizzes
+    // If teacher, only load submissions for their own quizzes
     if (!isAdmin && currentUser != null) {
-      // Filter quizzes by teacher_id
       final teacherQuizzes = await client
           .from('quizzes')
           .select('id')
@@ -54,6 +53,8 @@ class _QuizResultsScreenState extends ConsumerState<QuizResultsScreen> {
           .toList();
       if (quizIds.isNotEmpty) {
         query = query.inFilter('quiz_id', quizIds);
+      } else {
+        return [];
       }
     }
 

@@ -38,6 +38,7 @@ class Question {
   final int points;
   final int order;
   final String? explanation;
+  final String? imageUrl;
 
   const Question({
     required this.id,
@@ -49,14 +50,36 @@ class Question {
     this.points = 1,
     this.order = 0,
     this.explanation,
+    this.imageUrl,
   });
+
+  String get cleanText {
+    return text.replaceAll(RegExp(r'\[diagram:\s*[^\]]+\]'), '').trim();
+  }
 
   factory Question.fromMap(Map<String, dynamic> map) {
     final optionsRaw = map['options'] as List<dynamic>?;
+    final rawText = map['text'] as String? ?? '';
+    final rawExplanation = map['explanation'] as String?;
+    String? imgUrl = map['image_url'] as String?;
+    if (imgUrl == null || imgUrl.isEmpty) {
+      final match = RegExp(r'\[diagram:\s*(https?://[^\s\]]+|data:image[^\s\]]+)\]')
+          .firstMatch(rawText);
+      if (match != null) {
+        imgUrl = match.group(1);
+      } else if (rawExplanation != null) {
+        final expMatch = RegExp(r'\[diagram:\s*(https?://[^\s\]]+|data:image[^\s\]]+)\]')
+            .firstMatch(rawExplanation);
+        if (expMatch != null) {
+          imgUrl = expMatch.group(1);
+        }
+      }
+    }
+
     return Question(
       id: map['id'] as String,
       quizId: map['quiz_id'] as String? ?? '',
-      text: map['text'] as String? ?? '',
+      text: rawText,
       type: map['type'] as String? ?? 'multiple_choice',
       options: optionsRaw
           ?.map((e) => Option.fromMap(e as Map<String, dynamic>))
@@ -65,7 +88,8 @@ class Question {
       correctAnswer: map['correct_answer'] as String?,
       points: map['points'] as int? ?? 1,
       order: map['order'] as int? ?? 0,
-      explanation: map['explanation'] as String?,
+      explanation: rawExplanation,
+      imageUrl: imgUrl,
     );
   }
 
@@ -80,6 +104,7 @@ class Question {
       'points': points,
       'order': order,
       'explanation': explanation,
+      'image_url': imageUrl,
     };
   }
 }

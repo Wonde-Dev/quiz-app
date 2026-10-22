@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:quiz_app/core/services/audit_log_service.dart';
 import 'package:quiz_app/core/services/quiz_attempt_service.dart';
 import 'package:quiz_app/core/services/security/copy_paste_blocker.dart';
 import 'package:quiz_app/shared/widgets/secure_screen_wrapper.dart';
@@ -45,14 +46,18 @@ class _QuizAttemptScreenState extends State<QuizAttemptScreen> {
   void _startTimer(QuizAttemptData data) {
     if (_data != null) return;
     _data = data;
-    final minutes = data.quiz.timeLimitMinutes;
-    if (minutes == null || minutes <= 0) return;
+    final minutes = (data.quiz.timeLimitMinutes != null &&
+            data.quiz.timeLimitMinutes! > 0)
+        ? data.quiz.timeLimitMinutes!
+        : 30;
     _secondsRemaining = minutes * 60;
     _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
       if (!mounted || _secondsRemaining == null) return;
       if (_secondsRemaining! <= 1) {
         timer.cancel();
-        unawaited(_submit());
+        if (!_isSubmitting) {
+          unawaited(_submit());
+        }
       } else {
         setState(() => _secondsRemaining = _secondsRemaining! - 1);
       }
@@ -165,10 +170,53 @@ class _QuizAttemptScreenState extends State<QuizAttemptScreen> {
           }
 
           final data = snapshot.data!;
+          if (data.questions.isEmpty) {
+            return Scaffold(
+              appBar: AppBar(
+                title: Text(data.quiz.title),
+                automaticallyImplyLeading: false,
+              ),
+              body: Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(24),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.quiz_outlined, size: 64, color: Colors.grey),
+                      const SizedBox(height: 16),
+                      Text(
+                        'No questions found in this quiz',
+                        style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                              fontWeight: FontWeight.bold,
+                            ),
+                      ),
+                      const SizedBox(height: 8),
+                      const Text(
+                        'This quiz does not have any questions available yet or questions are being set up. Please contact your instructor.',
+                        textAlign: TextAlign.center,
+                      ),
+                      const SizedBox(height: 24),
+                      FilledButton.icon(
+                        onPressed: () => context.go('/student/dashboard'),
+                        icon: const Icon(Icons.arrow_back_rounded, size: 18),
+                        label: const Text('Back to Dashboard'),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          }
           _startTimer(data);
           final question = data.questions[_currentIndex];
           return SecureScreenWrapper(
             onAutoSubmit: () => unawaited(_submit()),
+            onScreenshotLog: (event) {
+              unawaited(AuditLogService().logForCurrentUser(
+                action: 'screen_capture_blocked',
+                details: {'quiz_id': widget.quizId, 'event': event},
+              ));
+            },
             child: Scaffold(
               appBar: AppBar(
                 title: Text(data.quiz.title),
@@ -263,13 +311,15 @@ class _QuizAttemptScreenState extends State<QuizAttemptScreen> {
                   const SizedBox(height: 12),
                   CopyPasteBlocker(
                     child: Text(
-                      question.text,
+                      question.cleanText,
                       style: Theme.of(context).textTheme.headlineSmall?.copyWith(
                             fontSize: 20,
                             fontWeight: FontWeight.w600,
                           ),
                     ),
                   ),
+                  if (question.imageUrl != null && question.imageUrl!.isNotEmpty)
+                    _buildQuestionDiagramWidget(question.imageUrl!),
                   const SizedBox(height: 20),
                   if (question.type == 'short_answer')
                     _DescriptionQuestionInput(
@@ -280,12 +330,29 @@ class _QuizAttemptScreenState extends State<QuizAttemptScreen> {
                         _answers[question.id] = newAnswer;
                       },
                     )
-                  else
+                  else ...[
                     RadioGroup<String>(
-                      groupValue: _answers[question.id] as String?,
+                      groupValue: _selectedOptionFor(_answers[question.id]),
                       onChanged: (value) {
                         if (_isSubmitting) return;
-                        setState(() => _answers[question.id] = value);
+                        final currentRaw = _answers[question.id];
+                        String? img;
+                        if (currentRaw is String && currentRaw.trim().startsWith('{')) {
+                          try {
+                            final parsed = jsonDecode(currentRaw) as Map<String, dynamic>;
+                            img = parsed['image_url'] as String?;
+                          } catch (_) {}
+                        } else if (currentRaw is Map) {
+                          img = currentRaw['image_url']?.toString();
+                        }
+                        if (img != null && img.isNotEmpty) {
+                          setState(() => _answers[question.id] = jsonEncode({
+                            'option_id': value,
+                            'image_url': img,
+                          }));
+                        } else {
+                          setState(() => _answers[question.id] = value);
+                        }
                       },
                       child: Column(
                         children: [
@@ -297,6 +364,16 @@ class _QuizAttemptScreenState extends State<QuizAttemptScreen> {
                         ],
                       ),
                     ),
+                    const SizedBox(height: 12),
+                    _ChoiceWorkAttachment(
+                      key: ValueKey('work_${question.id}'),
+                      questionId: question.id,
+                      currentAnswer: _answers[question.id],
+                      onAnswerChanged: (newAnswer) {
+                        setState(() => _answers[question.id] = newAnswer);
+                      },
+                    ),
+                  ],
                   if (_submitError != null) ...[
                     const SizedBox(height: 16),
                     Text(
@@ -347,6 +424,114 @@ class _QuizAttemptScreenState extends State<QuizAttemptScreen> {
             ),
           );
         },
+      ),
+    );
+  }
+
+  String? _selectedOptionFor(dynamic raw) {
+    if (raw is String) {
+      if (raw.trim().startsWith('{') && raw.trim().endsWith('}')) {
+        try {
+          final parsed = jsonDecode(raw) as Map<String, dynamic>;
+          return parsed['option_id'] as String? ?? parsed['selected'] as String?;
+        } catch (_) {
+          return raw;
+        }
+      }
+      return raw;
+    } else if (raw is Map) {
+      return raw['option_id'] as String? ?? raw['selected'] as String?;
+    }
+    return null;
+  }
+
+  Widget _buildQuestionDiagramWidget(String imageUrl) {
+    return Container(
+      margin: const EdgeInsets.only(top: 14, bottom: 4),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.35),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFFE2E8F0)),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+            child: Row(
+              children: [
+                Icon(
+                  Icons.insert_chart_outlined,
+                  size: 16,
+                  color: Theme.of(context).colorScheme.primary,
+                ),
+                const SizedBox(width: 8),
+                const Text(
+                  'Question Reference Diagram / Graph',
+                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                ),
+              ],
+            ),
+          ),
+          InkWell(
+            onTap: () => _showDiagramPreview(imageUrl),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxHeight: 280),
+              child: _buildCommonImage(imageUrl),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showDiagramPreview(String url) {
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => Dialog(
+        insetPadding: const EdgeInsets.all(16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            AppBar(
+              title: const Text('Diagram / Graph Reference'),
+              leading: IconButton(
+                icon: const Icon(Icons.close),
+                onPressed: () => Navigator.of(ctx).pop(),
+              ),
+            ),
+            Flexible(
+              child: SingleChildScrollView(
+                child: InteractiveViewer(
+                  maxScale: 4.0,
+                  child: _buildCommonImage(url),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCommonImage(String url) {
+    if (url.startsWith('data:image')) {
+      final parts = url.split(',');
+      if (parts.length > 1) {
+        return Image.memory(
+          base64Decode(parts[1]),
+          fit: BoxFit.contain,
+        );
+      }
+    }
+    return Image.network(
+      url,
+      fit: BoxFit.contain,
+      errorBuilder: (context, error, stackTrace) => const Padding(
+        padding: EdgeInsets.all(24),
+        child: Center(child: Text('Could not load image reference.')),
       ),
     );
   }
@@ -717,6 +902,330 @@ class _DescriptionQuestionInputState extends State<_DescriptionQuestionInput> {
             ),
           ),
         ],
+      ],
+    );
+  }
+}
+
+/// Allows attaching handwritten calculations, graphs, or diagrams to multiple choice
+/// and true/false questions as requested.
+class _ChoiceWorkAttachment extends StatefulWidget {
+  const _ChoiceWorkAttachment({
+    required this.questionId,
+    required this.currentAnswer,
+    required this.onAnswerChanged,
+    super.key,
+  });
+
+  final String questionId;
+  final dynamic currentAnswer;
+  final ValueChanged<dynamic> onAnswerChanged;
+
+  @override
+  State<_ChoiceWorkAttachment> createState() => _ChoiceWorkAttachmentState();
+}
+
+class _ChoiceWorkAttachmentState extends State<_ChoiceWorkAttachment> {
+  String? _imageUrl;
+  bool _uploading = false;
+  final _picker = ImagePicker();
+
+  @override
+  void initState() {
+    super.initState();
+    _extractImage();
+  }
+
+  @override
+  void didUpdateWidget(covariant _ChoiceWorkAttachment oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.currentAnswer != oldWidget.currentAnswer) {
+      _extractImage();
+    }
+  }
+
+  void _extractImage() {
+    final raw = widget.currentAnswer;
+    if (raw is String && raw.trim().startsWith('{') && raw.trim().endsWith('}')) {
+      try {
+        final parsed = jsonDecode(raw) as Map<String, dynamic>;
+        _imageUrl = parsed['image_url'] as String?;
+      } catch (_) {}
+    } else if (raw is Map) {
+      _imageUrl = raw['image_url']?.toString();
+    }
+  }
+
+  String? _currentOptionId() {
+    final raw = widget.currentAnswer;
+    if (raw is String) {
+      if (raw.trim().startsWith('{') && raw.trim().endsWith('}')) {
+        try {
+          final parsed = jsonDecode(raw) as Map<String, dynamic>;
+          return parsed['option_id'] as String? ?? parsed['selected'] as String?;
+        } catch (_) {
+          return raw;
+        }
+      }
+      return raw;
+    } else if (raw is Map) {
+      return raw['option_id'] as String? ?? raw['selected'] as String?;
+    }
+    return null;
+  }
+
+  void _setImage(String? url) {
+    setState(() => _imageUrl = url);
+    final opt = _currentOptionId();
+    if (url != null && url.isNotEmpty) {
+      final map = <String, dynamic>{'image_url': url};
+      if (opt != null) map['option_id'] = opt;
+      widget.onAnswerChanged(jsonEncode(map));
+    } else {
+      widget.onAnswerChanged(opt);
+    }
+  }
+
+  Future<void> _pickImage(ImageSource source) async {
+    try {
+      final image = await _picker.pickImage(
+        source: source,
+        maxWidth: 1600,
+        maxHeight: 1600,
+        imageQuality: 85,
+      );
+      if (image == null) return;
+      setState(() => _uploading = true);
+      final bytes = await image.readAsBytes();
+      final ext = image.name.split('.').last.toLowerCase();
+      final mimeType = ext == 'png' ? 'image/png' : 'image/jpeg';
+
+      String url = '';
+      try {
+        final client = Supabase.instance.client;
+        final userId = client.auth.currentUser?.id ?? 'guest';
+        final path =
+            'quiz-attachments/$userId/${widget.questionId}_${DateTime.now().millisecondsSinceEpoch}.$ext';
+        await client.storage.from('profile-photos').uploadBinary(
+              path,
+              bytes,
+              fileOptions: FileOptions(contentType: mimeType, upsert: true),
+            );
+        url = client.storage.from('profile-photos').getPublicUrl(path);
+      } catch (_) {
+        url = 'data:$mimeType;base64,${base64Encode(bytes)}';
+      }
+
+      if (!mounted) return;
+      setState(() => _uploading = false);
+      _setImage(url);
+    } catch (e) {
+      if (mounted) {
+        setState(() => _uploading = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not attach image: $e')),
+        );
+      }
+    }
+  }
+
+  Future<void> _enterImageUrl() async {
+    final urlController = TextEditingController();
+    final url = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Enter image link'),
+        content: TextField(
+          controller: urlController,
+          autofocus: true,
+          decoration: const InputDecoration(
+            labelText: 'Image URL (http:// or https://)',
+            hintText: 'https://example.com/calculation.png',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(urlController.text.trim()),
+            child: const Text('Attach'),
+          ),
+        ],
+      ),
+    );
+    if (url != null && url.isNotEmpty) {
+      _setImage(url);
+    }
+  }
+
+  Widget _buildImageWidget(String url) {
+    if (url.startsWith('data:image')) {
+      final parts = url.split(',');
+      if (parts.length > 1) {
+        return Image.memory(
+          base64Decode(parts[1]),
+          fit: BoxFit.contain,
+        );
+      }
+    }
+    return Image.network(
+      url,
+      fit: BoxFit.contain,
+      errorBuilder: (context, error, stackTrace) => const Padding(
+        padding: EdgeInsets.all(24),
+        child: Center(child: Text('Could not load image.')),
+      ),
+    );
+  }
+
+  void _showFullImage(BuildContext context) {
+    if (_imageUrl == null) return;
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => Dialog(
+        insetPadding: const EdgeInsets.all(16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            AppBar(
+              title: const Text('Attached Work Preview'),
+              leading: IconButton(
+                icon: const Icon(Icons.close),
+                onPressed: () => Navigator.of(ctx).pop(),
+              ),
+            ),
+            Flexible(
+              child: SingleChildScrollView(
+                child: InteractiveViewer(
+                  maxScale: 4.0,
+                  child: _buildImageWidget(_imageUrl!),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (_uploading)
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 8),
+            child: Row(
+              children: [
+                SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+                SizedBox(width: 8),
+                Text('Attaching calculation / diagram...'),
+              ],
+            ),
+          )
+        else if (_imageUrl != null && _imageUrl!.isNotEmpty)
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.35),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: const Color(0xFFE2E8F0)),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    const Icon(Icons.check_circle_outline, size: 16, color: Colors.green),
+                    const SizedBox(width: 6),
+                    const Expanded(
+                      child: Text(
+                        'Calculation / Diagram work attached',
+                        style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                      ),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.delete_outline, size: 18),
+                      tooltip: 'Remove attached work',
+                      onPressed: () => _setImage(null),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                GestureDetector(
+                  onTap: () => _showFullImage(context),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(10),
+                    child: Container(
+                      height: 140,
+                      width: double.infinity,
+                      color: Colors.black12,
+                      child: Stack(
+                        alignment: Alignment.center,
+                        children: [
+                          _buildImageWidget(_imageUrl!),
+                          Positioned(
+                            bottom: 6,
+                            right: 6,
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                              decoration: BoxDecoration(
+                                color: Colors.black54,
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                              child: const Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(Icons.zoom_in, color: Colors.white, size: 14),
+                                  SizedBox(width: 4),
+                                  Text(
+                                    'View Full',
+                                    style: TextStyle(color: Colors.white, fontSize: 11),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          )
+        else
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              OutlinedButton.icon(
+                icon: const Icon(Icons.camera_alt_outlined, size: 16),
+                label: const Text('Take photo of work'),
+                onPressed: () => _pickImage(ImageSource.camera),
+              ),
+              OutlinedButton.icon(
+                icon: const Icon(Icons.photo_library_outlined, size: 16),
+                label: const Text('Upload calculation/graph'),
+                onPressed: () => _pickImage(ImageSource.gallery),
+              ),
+              TextButton.icon(
+                icon: const Icon(Icons.link_rounded, size: 16),
+                label: const Text('Image link'),
+                onPressed: _enterImageUrl,
+              ),
+            ],
+          ),
       ],
     );
   }

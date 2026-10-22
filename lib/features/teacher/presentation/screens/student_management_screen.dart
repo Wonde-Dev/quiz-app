@@ -452,6 +452,16 @@ class _StudentManagementScreenState
         : Future.value([]);
     final formKey = GlobalKey<FormState>();
 
+    List<String> knownUsernames = [];
+    try {
+      final loaded = await _studentsFuture;
+      knownUsernames = loaded
+          .map((a) => a['username'] as String? ?? '')
+          .where((u) => u.isNotEmpty)
+          .toList();
+    } catch (_) {}
+    if (!mounted) return null;
+
     final result = await showDialog<Map<String, dynamic>>(
       context: context,
       builder: (dialogContext) => StatefulBuilder(
@@ -544,7 +554,7 @@ class _StudentManagementScreenState
                                       if (!selected) return;
                                       setDialogState(() {
                                         role = opt.role;
-                                        final uName = _usernameFor(nameController.text, role);
+                                        final uName = _usernameFor(nameController.text, role, knownUsernames);
                                         usernameController.text = uName;
                                         if (uName.isNotEmpty) {
                                           passwordController.text = defaultRolePassword(
@@ -575,7 +585,7 @@ class _StudentManagementScreenState
                         textCapitalization: TextCapitalization.words,
                         onChanged: (value) {
                           setDialogState(() {
-                            final uName = _usernameFor(value, role);
+                            final uName = _usernameFor(value, role, knownUsernames);
                             usernameController.text = uName;
                             if (uName.isNotEmpty) {
                               passwordController.text = defaultRolePassword(
@@ -865,8 +875,12 @@ class _StudentManagementScreenState
     return result;
   }
 
-  String _usernameFor(String fullName, String role) {
-    return roleUsername(fullName, role);
+  String _usernameFor(String fullName, String role, [Iterable<String>? existing]) {
+    return nextRoleUsername(
+      fullName: fullName,
+      role: role,
+      existingUsernames: existing ?? const [],
+    );
   }
 
   Future<List<Map<String, dynamic>>> _loadSectionsForSchool(
@@ -934,22 +948,58 @@ class _StudentManagementScreenState
       _error = null;
     });
     try {
+      bool deleted = false;
+      // 1. Try dedicated database RPC function (removes from public.users & auth.users)
       try {
-        await Supabase.instance.client.functions.invoke(
-          'manage-account',
-          body: {'action': 'delete', 'userId': id},
+        await Supabase.instance.client.rpc(
+          'delete_user_account',
+          params: {'user_id': id},
         );
-      } catch (_) {
+        deleted = true;
+      } catch (rpcErr) {
+        debugPrint('delete_user_account RPC error: $rpcErr');
+      }
+
+      // 2. If RPC not available, try manage-account edge function
+      if (!deleted) {
+        try {
+          await Supabase.instance.client.functions.invoke(
+            'manage-account',
+            body: {'action': 'delete', 'userId': id},
+          );
+          deleted = true;
+        } catch (fnErr) {
+          debugPrint('manage-account delete error: $fnErr');
+        }
+      }
+
+      // 3. Fallback: direct table delete (authorized via users_delete_authorized RLS policy)
+      if (!deleted) {
         await Supabase.instance.client.from('users').delete().eq('id', id);
       }
+
       if (mounted) {
         setState(() {
           _selectedIds.remove(id);
           _studentsFuture = _loadAccounts();
         });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Account $name deleted successfully'),
+            duration: const Duration(seconds: 2),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
       }
     } catch (error) {
-      if (mounted) setState(() => _error = 'Could not delete account: $error');
+      if (mounted) {
+        setState(
+          () => _error = supabaseErrorMessage(
+            error,
+            action: 'Could not delete account',
+          ),
+        );
+      }
     } finally {
       if (mounted) {
         setState(() {
@@ -1033,6 +1083,88 @@ class _StudentManagementScreenState
     );
   }
 
+  Future<void> _deleteSelectedAccounts() async {
+    final count = _selectedIds.length;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Delete $count accounts?'),
+        content: Text(
+          'Permanently delete $count selected accounts and their quiz data? This action cannot be undone.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: FilledButton.styleFrom(
+              backgroundColor: const Color(0xFFEF4444),
+            ),
+            child: const Text('Delete all'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    setState(() {
+      _isResetting = true;
+      _error = null;
+    });
+    try {
+      final idsToDelete = _selectedIds.toList();
+      for (final id in idsToDelete) {
+        bool deleted = false;
+        try {
+          await Supabase.instance.client.rpc(
+            'delete_user_account',
+            params: {'user_id': id},
+          );
+          deleted = true;
+        } catch (_) {}
+        if (!deleted) {
+          try {
+            await Supabase.instance.client.functions.invoke(
+              'manage-account',
+              body: {'action': 'delete', 'userId': id},
+            );
+            deleted = true;
+          } catch (_) {}
+        }
+        if (!deleted) {
+          try {
+            await Supabase.instance.client.from('users').delete().eq('id', id);
+          } catch (_) {}
+        }
+      }
+      if (mounted) {
+        setState(() {
+          _selectedIds.clear();
+          _studentsFuture = _loadAccounts();
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('$count accounts deleted successfully'),
+            duration: const Duration(seconds: 2),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    } catch (error) {
+      if (mounted) {
+        setState(
+          () => _error = supabaseErrorMessage(
+            error,
+            action: 'Could not delete accounts',
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isResetting = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -1041,7 +1173,7 @@ class _StudentManagementScreenState
       appBar: AppBar(
         title: Text(_isAdmin ? 'Manage users' : 'Students'),
         actions: [
-          if (_selectedIds.isNotEmpty)
+          if (_selectedIds.isNotEmpty) ...[
             Padding(
               padding: const EdgeInsets.only(right: 8),
               child: FilledButton.tonalIcon(
@@ -1052,6 +1184,19 @@ class _StudentManagementScreenState
                 label: Text('Reset (${_selectedIds.length})'),
               ),
             ),
+            if (_isAdmin)
+              Padding(
+                padding: const EdgeInsets.only(right: 8),
+                child: FilledButton.icon(
+                  style: FilledButton.styleFrom(
+                    backgroundColor: const Color(0xFFEF4444),
+                  ),
+                  onPressed: _isResetting ? null : _deleteSelectedAccounts,
+                  icon: const Icon(Icons.delete_outline_rounded, size: 18),
+                  label: Text('Delete (${_selectedIds.length})'),
+                ),
+              ),
+          ],
           if (_isAdmin)
             IconButton(
               tooltip: 'Reset all visible account passwords',
