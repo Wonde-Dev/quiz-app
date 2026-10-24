@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:quiz_app/features/auth/presentation/providers/auth_provider.dart';
 import 'package:quiz_app/shared/widgets/dashboard_shell.dart';
 
@@ -162,6 +163,14 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
         ? 'Student · ${user.requestedRole} access requested'
         : user.role[0].toUpperCase() + user.role.substring(1);
 
+    final resolvedAvatar = user.avatarUrl == null || user.avatarUrl!.isEmpty
+        ? null
+        : (user.avatarUrl!.startsWith('http://') || user.avatarUrl!.startsWith('https://'))
+            ? user.avatarUrl
+            : Supabase.instance.client.storage
+                .from('profile-photos')
+                .getPublicUrl(user.avatarUrl!);
+
     return DashboardShell(
       title: 'My profile',
       body: Center(
@@ -182,10 +191,13 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                           children: [
                             CircleAvatar(
                               radius: 38,
-                              backgroundImage: user.avatarUrl == null
+                              backgroundImage: resolvedAvatar == null
                                   ? null
-                                  : NetworkImage(user.avatarUrl!),
-                              child: user.avatarUrl == null
+                                  : NetworkImage(resolvedAvatar),
+                              onBackgroundImageError: resolvedAvatar == null
+                                  ? null
+                                  : (_, _) {},
+                              child: resolvedAvatar == null
                                   ? Text(
                                       initial,
                                       style: Theme.of(context)
@@ -350,6 +362,74 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                               ? 'Changing password…'
                               : 'Change password',
                         ),
+                      ),
+                      const Divider(height: 40),
+                      Text(
+                        'Account session',
+                        style: Theme.of(context).textTheme.titleLarge,
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        'Sign out of your account on this device. You will need your login credentials to sign back in.',
+                        style: Theme.of(context).textTheme.bodyMedium,
+                      ),
+                      const SizedBox(height: 16),
+                      OutlinedButton.icon(
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: Theme.of(context).colorScheme.error,
+                          side: BorderSide(
+                            color: Theme.of(context)
+                                .colorScheme
+                                .error
+                                .withValues(alpha: 0.5),
+                          ),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 20,
+                            vertical: 12,
+                          ),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                        onPressed: () async {
+                          final confirmed = await showDialog<bool>(
+                            context: context,
+                            builder: (ctx) => AlertDialog(
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(16),
+                              ),
+                              title: const Row(
+                                children: [
+                                  Icon(Icons.logout_rounded, color: Colors.red),
+                                  SizedBox(width: 8),
+                                  Text('Sign Out'),
+                                ],
+                              ),
+                              content: const Text(
+                                'Are you sure you want to sign out of Ciro High Schools portal?',
+                              ),
+                              actions: [
+                                TextButton(
+                                  onPressed: () => Navigator.pop(ctx, false),
+                                  child: const Text('Cancel'),
+                                ),
+                                FilledButton(
+                                  style: FilledButton.styleFrom(
+                                    backgroundColor: Colors.red,
+                                    foregroundColor: Colors.white,
+                                  ),
+                                  onPressed: () => Navigator.pop(ctx, true),
+                                  child: const Text('Sign Out'),
+                                ),
+                              ],
+                            ),
+                          );
+                          if (confirmed == true) {
+                            await ref.read(authStateProvider.notifier).signOut();
+                          }
+                        },
+                        icon: const Icon(Icons.logout_rounded),
+                        label: const Text('Sign Out of Account'),
                       ),
                     ],
                   ),

@@ -40,6 +40,7 @@ class _TeacherManagementScreenState
         .from('users')
         .select('id, full_name, username, email, school_id, approval_status, is_active, created_at, schools(name)')
         .eq('role', AppRoles.teacher)
+        .neq('is_active', false)
         .order('full_name', ascending: true);
     return List<Map<String, dynamic>>.from(rows);
   }
@@ -182,6 +183,97 @@ class _TeacherManagementScreenState
     }
   }
 
+  Future<void> _deleteTeacher(Map<String, dynamic> teacher) async {
+    final id = teacher['id'] as String;
+    final name = teacher['full_name'] as String? ??
+        teacher['username'] as String? ??
+        'Teacher';
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete Teacher Account?'),
+        content: Text(
+          'Are you sure you want to permanently remove $name from the system? '
+          'This will revoke their faculty access and remove their account.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: const Color(0xFFEF4444),
+            ),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Delete Account'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true || !mounted) return;
+
+    setState(() {
+      _isResetting = true;
+      _error = null;
+    });
+
+    try {
+      bool deleted = false;
+      try {
+        await Supabase.instance.client
+            .rpc('delete_user_account', params: {'user_id': id, 'p_user_id': id});
+        deleted = true;
+      } catch (_) {}
+
+      if (!deleted) {
+        try {
+          await Supabase.instance.client.functions
+              .invoke('manage-account', body: {'action': 'delete', 'userId': id});
+          deleted = true;
+        } catch (_) {}
+      }
+
+      if (!deleted) {
+        try {
+          await Supabase.instance.client.from('teacher_courses').delete().eq('teacher_id', id);
+        } catch (_) {}
+        try {
+          await Supabase.instance.client.from('courses').delete().eq('teacher_id', id);
+        } catch (_) {}
+        try {
+          await Supabase.instance.client.from('users').delete().eq('id', id);
+          deleted = true;
+        } catch (_) {
+          try {
+            await Supabase.instance.client.from('users').update({
+              'is_active': false,
+              'approval_status': 'rejected',
+            }).eq('id', id);
+            deleted = true;
+          } catch (_) {}
+        }
+      }
+
+      if (!mounted) return;
+      setState(() => _teachersFuture = _loadTeachers());
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Faculty account for $name removed successfully'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } catch (e) {
+      if (mounted) {
+        setState(() => _error = 'Could not delete teacher account: $e');
+      }
+    } finally {
+      if (mounted) setState(() => _isResetting = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -217,15 +309,29 @@ class _TeacherManagementScreenState
               child: Row(
                 children: [
                   Container(
-                    padding: const EdgeInsets.all(12),
+                    width: 56,
+                    height: 56,
                     decoration: BoxDecoration(
-                      color: isDark ? const Color(0xFF334155) : const Color(0xFFF1F5F9),
-                      borderRadius: BorderRadius.circular(14),
+                      borderRadius: BorderRadius.circular(16),
+                      boxShadow: [
+                        BoxShadow(
+                          color: const Color(0xFF10B981).withValues(alpha: 0.15),
+                          blurRadius: 10,
+                          offset: const Offset(0, 4),
+                        ),
+                      ],
                     ),
-                    child: const Icon(
-                      Icons.co_present_rounded,
-                      color: Color(0xFF10B981),
-                      size: 28,
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(16),
+                      child: Image.asset(
+                        'assets/images/teachers.jpeg',
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, _, _) => const Icon(
+                          Icons.co_present_rounded,
+                          color: Color(0xFF10B981),
+                          size: 28,
+                        ),
+                      ),
                     ),
                   ),
                   const SizedBox(width: 16),
@@ -333,6 +439,7 @@ class _TeacherManagementScreenState
                         teacher: teacher,
                         isResetting: _isResetting,
                         onResetPassword: () => _resetTeacherPassword(teacher),
+                        onDelete: () => _deleteTeacher(teacher),
                       ),
                       const SizedBox(height: 10),
                     ],
@@ -352,11 +459,13 @@ class _TeacherDirectoryCard extends StatelessWidget {
     required this.teacher,
     required this.isResetting,
     required this.onResetPassword,
+    required this.onDelete,
   });
 
   final Map<String, dynamic> teacher;
   final bool isResetting;
   final VoidCallback onResetPassword;
+  final VoidCallback onDelete;
 
   @override
   Widget build(BuildContext context) {
@@ -433,14 +542,30 @@ class _TeacherDirectoryCard extends StatelessWidget {
                     ],
                   ),
                   const SizedBox(height: 10),
-                  FilledButton.tonalIcon(
-                    style: FilledButton.styleFrom(
-                      minimumSize: const Size(0, 34),
-                      padding: const EdgeInsets.symmetric(horizontal: 12),
-                    ),
-                    onPressed: isResetting ? null : onResetPassword,
-                    icon: const Icon(Icons.lock_reset_rounded, size: 16),
-                    label: const Text('Reset Teacher Password', style: TextStyle(fontSize: 12)),
+                  Row(
+                    children: [
+                      FilledButton.tonalIcon(
+                        style: FilledButton.styleFrom(
+                          minimumSize: const Size(0, 34),
+                          padding: const EdgeInsets.symmetric(horizontal: 12),
+                        ),
+                        onPressed: isResetting ? null : onResetPassword,
+                        icon: const Icon(Icons.lock_reset_rounded, size: 16),
+                        label: const Text('Reset Password', style: TextStyle(fontSize: 12)),
+                      ),
+                      const SizedBox(width: 8),
+                      IconButton.outlined(
+                        tooltip: 'Delete faculty account',
+                        style: IconButton.styleFrom(
+                          foregroundColor: const Color(0xFFEF4444),
+                          side: const BorderSide(color: Color(0xFFFECACA)),
+                          minimumSize: const Size(34, 34),
+                          padding: const EdgeInsets.all(6),
+                        ),
+                        onPressed: isResetting ? null : onDelete,
+                        icon: const Icon(Icons.delete_outline_rounded, size: 16),
+                      ),
+                    ],
                   ),
                 ],
               ),

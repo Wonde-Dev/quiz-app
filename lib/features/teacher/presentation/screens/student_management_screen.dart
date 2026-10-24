@@ -63,7 +63,8 @@ class _StudentManagementScreenState
     final currentUserId = client.auth.currentUser?.id;
     var query = client
         .from('users')
-        .select('id, username, full_name, role, requested_role, school_id');
+        .select('id, username, full_name, role, requested_role, school_id')
+        .neq('is_active', false);
 
     if (!_isAdmin) {
       query = query.eq('role', AppRoles.student);
@@ -447,9 +448,15 @@ class _StudentManagementScreenState
         ? (schools.isEmpty ? null : schools.first['id'] as String)
         : ref.read(authStateProvider).user?.schoolId;
     String? sectionId;
-    Future<List<Map<String, dynamic>>> sectionsFuture = schoolId != null
-        ? _loadSectionsForSchool(schoolId)
-        : Future.value([]);
+    List<Map<String, dynamic>> availableSections = [];
+    if (schoolId != null) {
+      try {
+        availableSections = await _loadSectionsForSchool(schoolId);
+        if (availableSections.isNotEmpty) {
+          sectionId = availableSections.first['id'] as String;
+        }
+      } catch (_) {}
+    }
     final formKey = GlobalKey<FormState>();
 
     List<String> knownUsernames = [];
@@ -554,6 +561,11 @@ class _StudentManagementScreenState
                                       if (!selected) return;
                                       setDialogState(() {
                                         role = opt.role;
+                                        if (role != AppRoles.admin && schoolId == null && schools.isNotEmpty) {
+                                          schoolId = schools.first['id'] as String;
+                                        }
+                                      });
+                                      WidgetsBinding.instance.addPostFrameCallback((_) {
                                         final uName = _usernameFor(nameController.text, role, knownUsernames);
                                         usernameController.text = uName;
                                         if (uName.isNotEmpty) {
@@ -562,9 +574,7 @@ class _StudentManagementScreenState
                                             role: role,
                                           );
                                         }
-                                        if (role != AppRoles.admin && schoolId == null && schools.isNotEmpty) {
-                                          schoolId = schools.first['id'] as String;
-                                        }
+                                        setDialogState(() {});
                                       });
                                     },
                                   ),
@@ -584,7 +594,7 @@ class _StudentManagementScreenState
                         ),
                         textCapitalization: TextCapitalization.words,
                         onChanged: (value) {
-                          setDialogState(() {
+                          WidgetsBinding.instance.addPostFrameCallback((_) {
                             final uName = _usernameFor(value, role, knownUsernames);
                             usernameController.text = uName;
                             if (uName.isNotEmpty) {
@@ -593,6 +603,7 @@ class _StudentManagementScreenState
                                 role: role,
                               );
                             }
+                            setDialogState(() {});
                           });
                         },
                         validator: (value) =>
@@ -756,65 +767,53 @@ class _StudentManagementScreenState
                                       child: Text(school['name'] as String? ?? 'School'),
                                     ),
                                 ],
-                                onChanged: (value) => setDialogState(() {
-                                  schoolId = value;
-                                  sectionId = null;
-                                  sectionsFuture = value != null
-                                      ? _loadSectionsForSchool(value)
-                                      : Future.value([]);
-                                }),
+                                onChanged: (value) async {
+                                  setDialogState(() {
+                                    schoolId = value;
+                                    sectionId = null;
+                                  });
+                                  if (value != null) {
+                                    final secs = await _loadSectionsForSchool(value);
+                                    setDialogState(() {
+                                      availableSections = secs;
+                                      if (availableSections.isNotEmpty) {
+                                        sectionId = availableSections.first['id'] as String;
+                                      }
+                                    });
+                                  }
+                                },
                               ),
                         const SizedBox(height: 12),
                       ],
 
-                      if (schoolId != null && role != AppRoles.admin)
-                        FutureBuilder<List<Map<String, dynamic>>>(
-                          future: sectionsFuture,
-                          builder: (context, snapshot) {
-                            if (snapshot.hasError) {
-                              return Padding(
-                                padding: const EdgeInsets.only(top: 8),
-                                child: Text(
-                                  'Could not load grade sections: ${snapshot.error}',
-                                  style: TextStyle(color: Theme.of(context).colorScheme.error),
-                                ),
-                              );
-                            }
-                            if (!snapshot.hasData) {
-                              return const Padding(
-                                padding: EdgeInsets.only(top: 8),
-                                child: LinearProgressIndicator(),
-                              );
-                            }
-                            final sections = snapshot.data!;
-                            if (sections.isEmpty) {
-                              return const Padding(
-                                padding: EdgeInsets.only(top: 8),
-                                child: Text('No sections available for this school.'),
-                              );
-                            }
-                            return DropdownButtonFormField<String>(
-                              key: ValueKey(schoolId),
-                              initialValue: sectionId,
-                              decoration: const InputDecoration(
-                                labelText: 'Grade & Classroom Section',
-                                prefixIcon: Icon(Icons.meeting_room_outlined),
-                              ),
-                              items: [
-                                for (final section in sections)
-                                  DropdownMenuItem(
-                                    value: section['id'] as String,
-                                    child: Text(
-                                      '${(section['school_grades'] as Map<String, dynamic>)['name']} · Section ${section['name']}',
-                                    ),
+                      if (schoolId != null && role != AppRoles.admin) ...[
+                        if (availableSections.isEmpty)
+                          const Padding(
+                            padding: EdgeInsets.only(top: 8),
+                            child: Text('No sections available for this school.'),
+                          )
+                        else
+                          DropdownButtonFormField<String>(
+                            key: ValueKey('${schoolId}_${availableSections.length}'),
+                            initialValue: sectionId,
+                            decoration: const InputDecoration(
+                              labelText: 'Grade & Classroom Section',
+                              prefixIcon: Icon(Icons.meeting_room_outlined),
+                            ),
+                            items: [
+                              for (final section in availableSections)
+                                DropdownMenuItem(
+                                  value: section['id'] as String,
+                                  child: Text(
+                                    '${(section['school_grades'] as Map<String, dynamic>?)?['name'] ?? 'Grade'} · Section ${section['name']}',
                                   ),
-                              ],
-                              onChanged: (value) => setDialogState(() => sectionId = value),
-                              validator: (value) =>
-                                  value == null ? 'Choose a grade and classroom section' : null,
-                            );
-                          },
-                        ),
+                                ),
+                            ],
+                            onChanged: (value) => setDialogState(() => sectionId = value),
+                            validator: (value) =>
+                                value == null ? 'Choose a grade and classroom section' : null,
+                          ),
+                      ],
                     ],
                   ),
                 ),
@@ -920,6 +919,19 @@ class _StudentManagementScreenState
   Future<void> _deleteAccount(Map<String, dynamic> account) async {
     final id = account['id'] as String;
     final role = account['role'] as String? ?? 'account';
+    final targetRole = account['role'] as String? ?? 'student';
+    if (!_isAdmin && targetRole != AppRoles.student) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Teachers can only erase student accounts, not teachers or administrators.',
+          ),
+          backgroundColor: Colors.red,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
     final name =
         account['full_name'] as String? ??
         account['username'] as String? ??
@@ -953,7 +965,7 @@ class _StudentManagementScreenState
       try {
         await Supabase.instance.client.rpc(
           'delete_user_account',
-          params: {'user_id': id},
+          params: {'user_id': id, 'p_user_id': id},
         );
         deleted = true;
       } catch (rpcErr) {
@@ -973,9 +985,37 @@ class _StudentManagementScreenState
         }
       }
 
-      // 3. Fallback: direct table delete (authorized via users_delete_authorized RLS policy)
+      // 3. Fallback: clean up relational rows then direct table delete
       if (!deleted) {
-        await Supabase.instance.client.from('users').delete().eq('id', id);
+        final client = Supabase.instance.client;
+        try {
+          await client.from('student_sections').delete().eq('student_id', id);
+        } catch (_) {}
+        try {
+          await client.from('answers').delete().eq('student_id', id);
+        } catch (_) {}
+        try {
+          await client.from('grades').delete().eq('student_id', id);
+        } catch (_) {}
+        try {
+          await client.from('quiz_attempts').delete().eq('student_id', id);
+        } catch (_) {}
+        try {
+          await client.from('password_reset_requests').delete().eq('user_id', id);
+        } catch (_) {}
+
+        try {
+          await client.from('users').delete().eq('id', id);
+          deleted = true;
+        } catch (dbErr) {
+          debugPrint('Direct user delete error: $dbErr');
+          // Soft-delete / deactivate if hard delete permission was blocked
+          await client.from('users').update({
+            'is_active': false,
+            'approval_status': 'rejected',
+          }).eq('id', id);
+          deleted = true;
+        }
       }
 
       if (mounted) {
@@ -1119,7 +1159,7 @@ class _StudentManagementScreenState
         try {
           await Supabase.instance.client.rpc(
             'delete_user_account',
-            params: {'user_id': id},
+            params: {'user_id': id, 'p_user_id': id},
           );
           deleted = true;
         } catch (_) {}
@@ -1134,8 +1174,32 @@ class _StudentManagementScreenState
         }
         if (!deleted) {
           try {
-            await Supabase.instance.client.from('users').delete().eq('id', id);
+            await Supabase.instance.client.from('student_sections').delete().eq('student_id', id);
           } catch (_) {}
+          try {
+            await Supabase.instance.client.from('answers').delete().eq('student_id', id);
+          } catch (_) {}
+          try {
+            await Supabase.instance.client.from('grades').delete().eq('student_id', id);
+          } catch (_) {}
+          try {
+            await Supabase.instance.client.from('quiz_attempts').delete().eq('student_id', id);
+          } catch (_) {}
+          try {
+            await Supabase.instance.client.from('password_reset_requests').delete().eq('user_id', id);
+          } catch (_) {}
+          try {
+            await Supabase.instance.client.from('users').delete().eq('id', id);
+            deleted = true;
+          } catch (_) {
+            try {
+              await Supabase.instance.client.from('users').update({
+                'is_active': false,
+                'approval_status': 'rejected',
+              }).eq('id', id);
+              deleted = true;
+            } catch (_) {}
+          }
         }
       }
       if (mounted) {

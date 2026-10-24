@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist>
+  <schema gettext-domain="gnome-settings-daemon" id="org.gnome.settings-daemon.plugins.xsettings" path="/org/gnome/settings-daemon/plugins/xsettings/">
+    <key name="antialiasing" enum="org.gnome.settings-daemon.GsdFontAntialiasingMode">
+      <default>'grayscale'</default>
+      <summary>Antialiasing</summary>
+      <description>The type of antialiasing to use when rendering fonts.</description>
+    </key>
+    <key name="hinting" enum="org.gnome.settings-daemon.GsdFontHinting">
+      <default>'slight'</default>
+      <summary>Hinting</summary>
+      <description>The type of hinting to use when rendering fonts.</description>
+    </key>
+    <key name="rgba-order" enum="org.gnome.settings-daemon.GsdFontRgbaOrder">
+      <default>'rgb'</default>
+      <summary>RGBA order</summary>
+      <description>The order of subpixel elements on an LCD screen.</description>
+    </key>
+    <key name="disabled-gtk-modules" type="as">
+      <default>[]</default>
+      <summary>List of explicitly disabled GTK+ modules</summary>
+      <description>A list of strings representing the GTK+ modules that will not be loaded, even if enabled by default in their configuration.</description>
+    </key>
+    <key name="enabled-gtk-modules" type="as">
+      <default>[]</default>
+      <summary>List of explicitly enabled GTK+ modules</summary>
+      <description>A list of strings representing the GTK+ modules that will be loaded, usually in addition to conditional and forcibly disabled ones.</description>
+    </key>
+    <key type="a{sv}" name="overrides">
+      <default>{}</default>
+      <summary>A dictionary of XSETTINGS to override</summary>
+      <description>This dictionary maps XSETTINGS names to overrides values.</description>
+    </key>
+  </schema>
+</schemalist>
+

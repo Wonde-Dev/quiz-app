@@ -118,9 +118,14 @@ class QuizAttemptService {
           feedbackRaw.any((entry) => entry is! Map<String, dynamic>)) {
         throw const FormatException('Quiz service returned invalid feedback');
       }
+      final enriched = await _enrichFeedback(
+        quizId,
+        answers,
+        feedbackRaw.cast<Map<String, dynamic>>(),
+      );
       return QuizSubmissionResult(
         grade: Grade.fromMap(grade),
-        feedback: feedbackRaw.cast<Map<String, dynamic>>(),
+        feedback: enriched,
       );
     } catch (_) {
       return _fallbackSubmit(quizId, answers);
@@ -210,10 +215,28 @@ class QuizAttemptService {
       } else {
         incorrectAnswers++;
       }
+      final options = q['options'] as List?;
+      final correctOpt = (options != null)
+          ? options.firstWhere(
+              (o) => o is Map && o['is_correct'] == true,
+              orElse: () => null,
+            )
+          : null;
       feedback.add({
+        'questionId': q['id'],
         'question': q['text'] ?? 'Question',
+        'type': q['type'],
+        'options': q['options'],
+        'selectedAnswer': rawAns,
+        'correctAnswer': q['type'] == 'short_answer'
+            ? q['correct_answer']
+            : correctOpt?['id'],
+        'correctAnswerText': q['type'] == 'short_answer'
+            ? q['correct_answer']
+            : correctOpt?['text'],
         'explanation': q['explanation'],
         'isCorrect': isCorrect,
+        'points': points,
       });
     }
 
@@ -275,6 +298,55 @@ class QuizAttemptService {
       grade: Grade.fromMap(gradeRow),
       feedback: feedback,
     );
+  }
+
+  Future<List<Map<String, dynamic>>> _enrichFeedback(
+    String quizId,
+    Map<String, dynamic> answers,
+    List<Map<String, dynamic>> rawFeedback,
+  ) async {
+    try {
+      final qRows = await _client
+          .from('questions')
+          .select('id, text, type, options, correct_answer, points, explanation')
+          .eq('quiz_id', quizId)
+          .order('order', ascending: true);
+      final questions = List<Map<String, dynamic>>.from(qRows);
+      if (questions.isEmpty) return rawFeedback;
+
+      return questions.map((q) {
+        final rawAns = answers[q['id']];
+        final fb = rawFeedback.firstWhere(
+          (f) => f['question'] == q['text'] || f['questionId'] == q['id'],
+          orElse: () => <String, dynamic>{},
+        );
+        final options = q['options'] as List?;
+        final correctOpt = (options != null)
+            ? options.firstWhere(
+                (o) => o is Map && o['is_correct'] == true,
+                orElse: () => null,
+              )
+            : null;
+        return {
+          'questionId': q['id'],
+          'question': q['text'] ?? 'Question',
+          'type': q['type'],
+          'options': q['options'],
+          'selectedAnswer': rawAns,
+          'correctAnswer': q['type'] == 'short_answer'
+              ? q['correct_answer']
+              : correctOpt?['id'],
+          'correctAnswerText': q['type'] == 'short_answer'
+              ? q['correct_answer']
+              : correctOpt?['text'],
+          'explanation': q['explanation'] ?? fb['explanation'],
+          'isCorrect': fb['isCorrect'] ?? false,
+          'points': (q['points'] as num?)?.toInt() ?? 1,
+        };
+      }).toList();
+    } catch (_) {
+      return rawFeedback;
+    }
   }
 
   Map<String, dynamic> _requireMap(dynamic value) {

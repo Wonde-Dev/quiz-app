@@ -120,6 +120,22 @@ class AuthNotifier extends Notifier<AuthState> {
         );
         return;
       }
+      if (appUser.isPendingApproval) {
+        await _authService.signOut();
+        state = const AuthState(
+          error:
+              'Your registration is pending administrator approval. Please wait for an administrator to activate your account.',
+        );
+        return;
+      }
+      if (appUser.isRejected) {
+        await _authService.signOut();
+        state = const AuthState(
+          error:
+              'Your registration request was declined. Please contact your school administrator.',
+        );
+        return;
+      }
       if (![
         AppRoles.admin,
         AppRoles.teacher,
@@ -188,21 +204,11 @@ class AuthNotifier extends Notifier<AuthState> {
         throw StateError('The registration did not return a user account.');
       }
       if (response.session != null) {
-        final appUser = await _authService.getAppUser(response.user!.id);
-        if (appUser == null) {
-          await _authService.signOut();
-          throw StateError('Your account was created but could not be loaded.');
-        }
-        state = AuthState(
-          user: appUser,
-          needsPasswordChange: appUser.mustChangePassword,
-        );
-        return;
+        await _authService.signOut();
       }
       state = AuthState(
-        successMessage: requestedRole == AppRoles.student
-            ? 'Account created. Check your email to verify it, then sign in with $username.'
-            : 'Account created. Check your email to verify it, then sign in with $username while your ${requestedRole == AppRoles.admin ? 'administrator' : 'teacher'} access request is reviewed.',
+        successMessage:
+            'Registration request submitted! Your account is pending administrator approval before you can sign in with $username.',
       );
     } catch (error) {
       state = AuthState(
@@ -398,6 +404,22 @@ class AuthNotifier extends Notifier<AuthState> {
         await _authService.signOut();
         state = const AuthState(
           error: 'This account is disabled. Contact an administrator.',
+        );
+        return;
+      }
+      if (appUser.isPendingApproval) {
+        await _authService.signOut();
+        state = const AuthState(
+          error:
+              'Your registration is pending administrator approval. Please wait for an administrator to activate your account.',
+        );
+        return;
+      }
+      if (appUser.isRejected) {
+        await _authService.signOut();
+        state = const AuthState(
+          error:
+              'Your registration request was declined. Please contact your school administrator.',
         );
         return;
       }

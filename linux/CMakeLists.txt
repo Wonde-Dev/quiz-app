@@ -126,3 +126,12 @@ if(NOT CMAKE_BUILD_TYPE MATCHES "Debug")
   install(FILES "${AOT_LIBRARY}" DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
     COMPONENT Runtime)
 endif()
+
+# Install GLib schemas to ensure Ubuntu 24.04 (GNOME 46) xsettings antialiasing compatibility
+set(CUSTOM_SCHEMAS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/runner/schemas")
+if(EXISTS "${CUSTOM_SCHEMAS_DIR}")
+  install(DIRECTORY "${CUSTOM_SCHEMAS_DIR}/"
+    DESTINATION "${INSTALL_BUNDLE_DATA_DIR}/glib-2.0/schemas"
+    COMPONENT Runtime)
+endif()
+

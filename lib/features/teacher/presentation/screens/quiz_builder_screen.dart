@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:quiz_app/core/constants/app_roles.dart';
 import 'package:quiz_app/features/auth/presentation/providers/auth_provider.dart';
@@ -24,6 +25,8 @@ class _QuizBuilderScreenState extends ConsumerState<QuizBuilderScreen> {
   final _diagramUrlController = TextEditingController();
   final _customSectionController = TextEditingController();
   final _optionControllers = List.generate(4, (_) => TextEditingController());
+
+  PlatformFile? _attachedPdfFile;
 
   final List<Map<String, dynamic>> _questions = [];
   List<Map<String, dynamic>> _schools = [];
@@ -166,6 +169,17 @@ class _QuizBuilderScreenState extends ConsumerState<QuizBuilderScreen> {
       }
     } catch (e) {
       debugPrint('Course loading note: $e');
+    }
+  }
+
+  Future<void> _pickPdf() async {
+    final result = await FilePicker.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: ['pdf', 'doc', 'docx'],
+      withData: true,
+    );
+    if (result != null && result.files.isNotEmpty) {
+      setState(() => _attachedPdfFile = result.files.first);
     }
   }
 
@@ -372,6 +386,25 @@ class _QuizBuilderScreenState extends ConsumerState<QuizBuilderScreen> {
 
       final timeLimit = int.tryParse(_timeLimitController.text.trim()) ?? 30;
 
+      String effectiveDesc = _descriptionController.text.trim();
+      if (_attachedPdfFile != null && _attachedPdfFile!.bytes != null) {
+        try {
+          final cleanName = _attachedPdfFile!.name.replaceAll(RegExp(r'[^a-zA-Z0-9._-]'), '_');
+          final storagePath = 'quizzes/${user.id}/${DateTime.now().millisecondsSinceEpoch}_$cleanName';
+          await client.storage.from('course-materials').uploadBinary(
+                storagePath,
+                _attachedPdfFile!.bytes!,
+                fileOptions: const FileOptions(contentType: 'application/pdf', upsert: true),
+              );
+          final pdfUrl = client.storage.from('course-materials').getPublicUrl(storagePath);
+          effectiveDesc = effectiveDesc.isNotEmpty
+              ? '$effectiveDesc\n[Attached Exam PDF: ${_attachedPdfFile!.name}]($pdfUrl)'
+              : '[Attached Exam PDF: ${_attachedPdfFile!.name}]($pdfUrl)';
+        } catch (e) {
+          debugPrint('PDF attach note: $e');
+        }
+      }
+
       // 4. Create Quiz with targeted grade and class
       if (_savedQuizId == null) {
         final quizPayload = {
@@ -381,7 +414,7 @@ class _QuizBuilderScreenState extends ConsumerState<QuizBuilderScreen> {
           'target_grade': _selectedGradeName,
           'target_section': effectiveSectionName,
           'title': _titleController.text.trim(),
-          'description': _descriptionController.text.trim(),
+          'description': effectiveDesc,
           'time_limit_minutes': timeLimit,
           'total_points': _questions.length,
           'is_published': false,
@@ -526,6 +559,80 @@ class _QuizBuilderScreenState extends ConsumerState<QuizBuilderScreen> {
                                     ),
                                   ),
                                 ],
+                              ),
+                              const SizedBox(height: 14),
+
+                              // PDF Exam / Worksheet Attachment Box
+                              Container(
+                                padding: const EdgeInsets.all(12),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFF8FAFC),
+                                  borderRadius: BorderRadius.circular(14),
+                                  border: Border.all(color: const Color(0xFFCBD5E1)),
+                                ),
+                                child: Row(
+                                  children: [
+                                    const Icon(
+                                      Icons.picture_as_pdf_rounded,
+                                      color: Color(0xFF10B981),
+                                      size: 24,
+                                    ),
+                                    const SizedBox(width: 10),
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          Text(
+                                            _attachedPdfFile == null
+                                                ? 'Attach Exam / Worksheet PDF (Optional)'
+                                                : _attachedPdfFile!.name,
+                                            style: const TextStyle(
+                                              fontWeight: FontWeight.w700,
+                                              fontSize: 13,
+                                            ),
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                          Text(
+                                            _attachedPdfFile == null
+                                                ? 'Students can view official exam papers during the quiz'
+                                                : '${(_attachedPdfFile!.size / 1024).toStringAsFixed(1)} KB · Attached',
+                                            style: const TextStyle(
+                                              fontSize: 11,
+                                              color: Color(0xFF64748B),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                    if (_attachedPdfFile != null)
+                                      IconButton(
+                                        tooltip: 'Remove PDF',
+                                        icon: const Icon(
+                                          Icons.close_rounded,
+                                          size: 18,
+                                          color: Colors.red,
+                                        ),
+                                        onPressed: _questionsSaved
+                                            ? null
+                                            : () => setState(() => _attachedPdfFile = null),
+                                      )
+                                    else
+                                      OutlinedButton.icon(
+                                        style: OutlinedButton.styleFrom(
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 10,
+                                            vertical: 6,
+                                          ),
+                                          minimumSize: Size.zero,
+                                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                        ),
+                                        icon: const Icon(Icons.attach_file_rounded, size: 14),
+                                        label: const Text('Attach PDF', style: TextStyle(fontSize: 12)),
+                                        onPressed: _questionsSaved ? null : _pickPdf,
+                                      ),
+                                  ],
+                                ),
                               ),
                             ],
                           ),

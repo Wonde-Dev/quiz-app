@@ -322,11 +322,25 @@ class _QuizResultsScreenState extends ConsumerState<QuizResultsScreen> {
                       child: Center(
                         child: Column(
                           children: [
-                            Icon(
-                              Icons.fact_check_outlined,
-                              size: 48,
-                              color: theme.colorScheme.onSurfaceVariant,
-                            ),
+                            allResults.isEmpty
+                                ? ClipRRect(
+                                    borderRadius: BorderRadius.circular(16),
+                                    child: Image.asset(
+                                      'assets/images/diploma.jpeg',
+                                      height: 100,
+                                      fit: BoxFit.cover,
+                                      errorBuilder: (_, _, _) => Icon(
+                                        Icons.fact_check_outlined,
+                                        size: 48,
+                                        color: theme.colorScheme.onSurfaceVariant,
+                                      ),
+                                    ),
+                                  )
+                                : Icon(
+                                    Icons.fact_check_outlined,
+                                    size: 48,
+                                    color: theme.colorScheme.onSurfaceVariant,
+                                  ),
                             const SizedBox(height: 12),
                             Text(
                               allResults.isEmpty

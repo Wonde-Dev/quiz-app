@@ -17,6 +17,7 @@ class AdminDashboardScreen extends ConsumerStatefulWidget {
 
 class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen>
     with SingleTickerProviderStateMixin {
+  int _totalUsersCount = 0;
   int _studentCount = 0;
   int _teacherCount = 0;
   int _quizCount = 0;
@@ -24,6 +25,7 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen>
   List<AuditLog> _recentLogs = [];
   bool _loading = true;
   late final AnimationController _pulseController;
+  RealtimeChannel? _realtimeChannel;
 
   @override
   void initState() {
@@ -33,11 +35,33 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen>
       duration: const Duration(seconds: 2),
     )..repeat(reverse: true);
     _loadStats();
+    _setupRealtime();
+  }
+
+  void _setupRealtime() {
+    try {
+      _realtimeChannel = Supabase.instance.client
+          .channel('public:users_stats_changes')
+          .onPostgresChanges(
+            event: PostgresChangeEvent.all,
+            schema: 'public',
+            table: 'users',
+            callback: (payload) {
+              if (mounted) _loadStats();
+            },
+          )
+          .subscribe();
+    } catch (e) {
+      debugPrint('Realtime user subscription notice: $e');
+    }
   }
 
   @override
   void dispose() {
     _pulseController.dispose();
+    if (_realtimeChannel != null) {
+      Supabase.instance.client.removeChannel(_realtimeChannel!);
+    }
     super.dispose();
   }
 
@@ -48,8 +72,17 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen>
 
     try {
       final results = await Future.wait<dynamic>([
-        client.from('users').select('id').eq('role', 'student'),
-        client.from('users').select('id').eq('role', 'teacher'),
+        client
+            .from('users')
+            .select('id')
+            .eq('role', 'student')
+            .neq('is_active', false),
+        client
+            .from('users')
+            .select('id')
+            .eq('role', 'teacher')
+            .neq('is_active', false),
+        client.from('users').select('id').neq('is_active', false),
         client.from('quizzes').select('id').eq('is_published', true),
         client.from('users').select('id').eq('approval_status', 'pending'),
         auditService.fetchLogs(limit: 5),
@@ -59,9 +92,10 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen>
       setState(() {
         _studentCount = (results[0] as List).length;
         _teacherCount = (results[1] as List).length;
-        _quizCount = (results[2] as List).length;
-        _pendingCount = (results[3] as List).length;
-        _recentLogs = results[4] as List<AuditLog>;
+        _totalUsersCount = (results[2] as List).length;
+        _quizCount = (results[3] as List).length;
+        _pendingCount = (results[4] as List).length;
+        _recentLogs = results[5] as List<AuditLog>;
         _loading = false;
       });
     } catch (e) {
@@ -247,8 +281,11 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen>
                           ),
                         ),
                         icon: const Icon(Icons.person_add_rounded, size: 18),
-                        label: const Text('Create User Account'),
-                        onPressed: () => context.push('/teacher/students'),
+                        label: const Text('Register User (Admin/Staff/Student)'),
+                        onPressed: () async {
+                          await context.push('/admin/register-user');
+                          if (mounted) _loadStats();
+                        },
                       ),
                       OutlinedButton.icon(
                         style: OutlinedButton.styleFrom(
@@ -267,7 +304,10 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen>
                         ),
                         icon: const Icon(Icons.history_rounded, size: 18),
                         label: const Text('Audit Logs'),
-                        onPressed: () => context.push('/admin/audit-logs'),
+                        onPressed: () async {
+                          await context.push('/admin/audit-logs');
+                          if (mounted) _loadStats();
+                        },
                       ),
                     ],
                   ),
@@ -290,6 +330,18 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen>
               children: [
                 Expanded(
                   child: _MetricCard(
+                    title: 'Total Users',
+                    count: _totalUsersCount,
+                    loading: _loading,
+                    icon: Icons.groups_rounded,
+                    color: isDark
+                        ? const Color(0xFF38BDF8)
+                        : const Color(0xFF0F172A),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: _MetricCard(
                     title: 'Students',
                     count: _studentCount,
                     loading: _loading,
@@ -297,7 +349,11 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen>
                     color: const Color(0xFF6366F1),
                   ),
                 ),
-                const SizedBox(width: 10),
+              ],
+            ),
+            const SizedBox(height: 10),
+            Row(
+              children: [
                 Expanded(
                   child: _MetricCard(
                     title: 'Teachers',
@@ -355,7 +411,10 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen>
                     style: FilledButton.styleFrom(
                       backgroundColor: const Color(0xFFD97706),
                     ),
-                    onPressed: () => context.push('/admin/approvals'),
+                    onPressed: () async {
+                      await context.push('/admin/approvals');
+                      if (mounted) _loadStats();
+                    },
                     child: const Text('Review'),
                   ),
                 ),
@@ -375,7 +434,10 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen>
                   ),
                 ),
                 TextButton(
-                  onPressed: () => context.push('/admin/audit-logs'),
+                  onPressed: () async {
+                    await context.push('/admin/audit-logs');
+                    if (mounted) _loadStats();
+                  },
                   child: const Text('View All Logs'),
                 ),
               ],
@@ -437,13 +499,30 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen>
 
             // Main Action Cards
             _ActionTile(
+              icon: Icons.person_add_alt_1_rounded,
+              color: const Color(0xFF10B981),
+              title: 'Register New User (Admin, Teacher, Student)',
+              subtitle:
+                  'Directly create and activate Administrator, Teacher, or Student accounts with instant institutional credentials.',
+              buttonText: 'Register User',
+              onTap: () async {
+                await context.push('/admin/register-user');
+                if (mounted) _loadStats();
+              },
+            ),
+            const SizedBox(height: 10),
+
+            _ActionTile(
               icon: Icons.manage_accounts_rounded,
               color: const Color(0xFF6366F1),
-              title: 'Register & Manage Users',
+              title: 'User Rosters & Deletion',
               subtitle:
-                  'Register any student, teacher, or admin account, reset passwords, and remove accounts.',
+                  'Browse registered student and teacher directories, view profiles, or delete user accounts.',
               buttonText: 'Manage Users',
-              onTap: () => context.push('/teacher/students'),
+              onTap: () async {
+                await context.push('/teacher/students');
+                if (mounted) _loadStats();
+              },
             ),
             const SizedBox(height: 10),
 
@@ -454,7 +533,52 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen>
               subtitle:
                   'Instant password resets with generated temporary credentials matching institution format.',
               buttonText: 'Reset Tool',
-              onTap: () => context.push('/teacher/reset-passwords'),
+              onTap: () async {
+                await context.push('/teacher/reset-passwords');
+                if (mounted) _loadStats();
+              },
+            ),
+            const SizedBox(height: 10),
+
+            _ActionTile(
+              icon: Icons.how_to_reg_rounded,
+              color: const Color(0xFF10B981),
+              title: 'Review Registration Requests',
+              subtitle:
+                  'Review, approve, or reject new student and teacher registration applications.',
+              buttonText: 'Registration Approvals',
+              onTap: () async {
+                await context.push('/admin/approvals');
+                if (mounted) _loadStats();
+              },
+            ),
+            const SizedBox(height: 10),
+
+            _ActionTile(
+              icon: Icons.co_present_rounded,
+              color: const Color(0xFF059669),
+              title: 'Faculty Directory & Passwords',
+              subtitle:
+                  'View approved teachers, assign subjects, and reset faculty passwords directly.',
+              buttonText: 'Teachers Directory',
+              onTap: () async {
+                await context.push('/admin/teachers');
+                if (mounted) _loadStats();
+              },
+            ),
+            const SizedBox(height: 10),
+
+            _ActionTile(
+              icon: Icons.class_outlined,
+              color: const Color(0xFF0D9488),
+              title: 'Class & Section Assignments',
+              subtitle:
+                  'Manage school grades, classroom sections, and course allocations.',
+              buttonText: 'Class Management',
+              onTap: () async {
+                await context.push('/admin/classes');
+                if (mounted) _loadStats();
+              },
             ),
             const SizedBox(height: 10),
 
@@ -463,64 +587,12 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen>
               color: const Color(0xFF0F172A),
               title: 'System Activity & Audit Logs',
               subtitle:
-                  'Chronological activity feed tracking accounts, password resets, and exam actions.',
+                  'Chronological activity feed tracking accounts, password resets, and audit actions.',
               buttonText: 'Audit Surveillance',
-              onTap: () => context.push('/admin/audit-logs'),
-            ),
-            const SizedBox(height: 10),
-
-            _ActionTile(
-              icon: Icons.add_circle_outline_rounded,
-              color: const Color(0xFF8B5CF6),
-              title: 'Create & Publish Quiz',
-              subtitle:
-                  'Build exams selecting Grade 9 to 12 and Section A, B, C (or custom section).',
-              buttonText: 'Create Quiz',
-              onTap: () => context.push('/teacher/quizzes/new'),
-            ),
-            const SizedBox(height: 10),
-
-            _ActionTile(
-              icon: Icons.fact_check_rounded,
-              color: const Color(0xFF10B981),
-              title: 'Evaluate Quizzes & Results',
-              subtitle:
-                  'Review student attempts, evaluate questions, adjust scores, and inspect images.',
-              buttonText: 'Evaluate',
-              onTap: () => context.push('/teacher/results'),
-            ),
-            const SizedBox(height: 10),
-
-            _ActionTile(
-              icon: Icons.co_present_rounded,
-              color: const Color(0xFF10B981),
-              title: 'Faculty Directory & Passwords',
-              subtitle:
-                  'View approved teachers, assign subjects, and reset faculty passwords directly.',
-              buttonText: 'Teachers',
-              onTap: () => context.push('/admin/teachers'),
-            ),
-            const SizedBox(height: 10),
-
-            _ActionTile(
-              icon: Icons.class_outlined,
-              color: const Color(0xFFF59E0B),
-              title: 'Class & Section Assignments',
-              subtitle:
-                  'Manage school grades, classroom sections, and course allocations.',
-              buttonText: 'Classes',
-              onTap: () => context.push('/admin/classes'),
-            ),
-            const SizedBox(height: 10),
-
-            _ActionTile(
-              icon: Icons.verified_user_outlined,
-              color: const Color(0xFF14B8A6),
-              title: 'Review Role Requests',
-              subtitle:
-                  'Approve or decline elevated access requests from newly registered accounts.',
-              buttonText: 'Approvals',
-              onTap: () => context.push('/admin/approvals'),
+              onTap: () async {
+                await context.push('/admin/audit-logs');
+                if (mounted) _loadStats();
+              },
             ),
             const SizedBox(height: 32),
           ],

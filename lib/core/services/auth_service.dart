@@ -181,7 +181,58 @@ class AuthService {
     final body = <String, String>{};
     if (fullName != null) body['fullName'] = fullName.trim();
     if (avatarPath != null) body['avatarPath'] = avatarPath;
-    await _supabase.functions.invoke('update-profile', body: body);
+
+    bool updatedViaFn = false;
+    try {
+      final res = await _supabase.functions.invoke('update-profile', body: body);
+      if (res.status == 200 || res.status == 204) {
+        updatedViaFn = true;
+      }
+    } catch (e) {
+      debugPrint('update-profile edge function fallback note: $e');
+    }
+
+    if (!updatedViaFn) {
+      final uid = _supabase.auth.currentUser?.id;
+      if (uid != null) {
+        // 1. Try dedicated security definer RPC (bypasses restrictive RLS on table users)
+        bool updatedViaRpc = false;
+        final rpcParams = <String, dynamic>{};
+        if (fullName != null) rpcParams['p_full_name'] = fullName.trim();
+        if (avatarPath != null) rpcParams['p_avatar_url'] = avatarPath;
+        try {
+          await _supabase.rpc(
+            'update_own_profile',
+            params: rpcParams,
+          );
+          updatedViaRpc = true;
+        } catch (rpcErr) {
+          debugPrint('update_own_profile RPC note: $rpcErr');
+        }
+
+        if (!updatedViaRpc) {
+          if (avatarPath != null) {
+            try {
+              await _supabase.rpc(
+                'update_user_avatar',
+                params: {'p_user_id': uid, 'p_avatar_url': avatarPath},
+              );
+            } catch (_) {}
+          }
+
+          final updateMap = <String, dynamic>{};
+          if (fullName != null) updateMap['full_name'] = fullName.trim();
+          if (avatarPath != null) updateMap['avatar_url'] = avatarPath;
+          if (updateMap.isNotEmpty) {
+            try {
+              await _supabase.from('users').update(updateMap).eq('id', uid);
+            } catch (e) {
+              debugPrint('Direct user profile update note: $e');
+            }
+          }
+        }
+      }
+    }
   }
 
   Future<String> uploadAvatar({
@@ -210,7 +261,8 @@ class AuthService {
           await image.readAsBytes(),
           fileOptions: FileOptions(contentType: contentType, upsert: true),
         );
-    return path;
+    final publicUrl = _supabase.storage.from('profile-photos').getPublicUrl(path);
+    return publicUrl;
   }
 
   Future<void> sendPasswordReset(String email) async {
@@ -262,7 +314,7 @@ class AuthService {
         'role': role,
         'school_id': current.userMetadata?['school_id'] as String?,
         'is_active': true,
-        'approval_status': 'approved',
+        'approval_status': role == 'admin' ? 'approved' : 'pending',
         'must_change_password': false,
         'created_at': DateTime.now().toIso8601String(),
       };

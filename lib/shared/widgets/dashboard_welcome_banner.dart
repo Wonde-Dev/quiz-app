@@ -178,10 +178,17 @@ class _DashboardWelcomeBannerState extends State<DashboardWelcomeBanner>
                             ),
                           ],
                         ),
-                        child: const Icon(
-                          Icons.auto_stories_rounded,
-                          color: Color(0xFF0F172A),
-                          size: 30,
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(18),
+                          child: Image.asset(
+                            'assets/images/logo.png',
+                            fit: BoxFit.cover,
+                            errorBuilder: (_, _, _) => const Icon(
+                              Icons.school_rounded,
+                              color: Color(0xFF10B981),
+                              size: 30,
+                            ),
+                          ),
                         ),
                       ),
                     ),

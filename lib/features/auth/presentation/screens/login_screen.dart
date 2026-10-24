@@ -81,7 +81,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     final notifier = ref.read(authStateProvider.notifier);
 
     if (_isRegistering) {
-      final username = _usernameController.text.trim();
+      var username = _usernameController.text.trim();
       if (!isRoleUsername(username, _requestedRole)) {
         notifier.setMessage(
           error:
@@ -89,9 +89,70 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
         );
         return;
       }
-      final emailToUse = _emailController.text.trim().isNotEmpty
+      var emailToUse = _emailController.text.trim().isNotEmpty
           ? _emailController.text.trim().toLowerCase()
           : username.toLowerCase();
+
+      // Proactively check for duplicate email or username in database
+      try {
+        final checkRes = await Supabase.instance.client.rpc(
+          'check_user_exists',
+          params: {'p_email': emailToUse, 'p_username': username},
+        );
+        if (checkRes is Map) {
+          final bool emailTaken = checkRes['email_taken'] == true;
+          final bool usernameTaken = checkRes['username_taken'] == true;
+
+          if (usernameTaken) {
+            // Retrieve all matching usernames to automatically advance to the next number
+            final namePart = username.split('@').first;
+            final existingList = <String>[username];
+            try {
+              final rpcMatches = await Supabase.instance.client.rpc(
+                'get_matching_usernames',
+                params: {'p_prefix': namePart},
+              );
+              if (rpcMatches is List) {
+                existingList.addAll(
+                  rpcMatches
+                      .map((r) => (r is Map ? r['username'] : r) as String? ?? '')
+                      .where((u) => u.isNotEmpty),
+                );
+              }
+            } catch (_) {}
+
+            final nextUname = nextRoleUsername(
+              fullName: _nameController.text.trim(),
+              role: _requestedRole,
+              existingUsernames: existingList,
+            );
+
+            if (nextUname.isNotEmpty && nextUname != username) {
+              username = nextUname;
+              emailToUse = nextUname.toLowerCase();
+              _usernameController.text = username;
+              _emailController.text = emailToUse;
+              _syncDefaultPassword(username);
+              notifier.setMessage(
+                error:
+                    'Username was already taken. Automatically updated to your next unique identifier: $username. Please verify and tap Register.',
+              );
+              return;
+            }
+          }
+
+          if (emailTaken) {
+            notifier.setMessage(
+              error:
+                  'An account with email "$emailToUse" is already registered. Please sign in or use a different email address.',
+            );
+            return;
+          }
+        }
+      } catch (checkErr) {
+        debugPrint('check_user_exists note: $checkErr');
+      }
+
       await notifier.register(
         fullName: _nameController.text.trim(),
         username: username,
@@ -266,37 +327,41 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                           child: Column(
                             children: [
                               Container(
-                                width: 54,
-                                height: 54,
+                                width: 72,
+                                height: 72,
                                 decoration: BoxDecoration(
-                                  color: isDark
-                                      ? const Color(0xFF334155)
-                                      : const Color(0xFF0F172A),
-                                  borderRadius: BorderRadius.circular(16),
+                                  shape: BoxShape.circle,
+                                  color: Colors.white,
                                   boxShadow: [
                                     BoxShadow(
-                                      color: const Color(0xFF0F172A).withValues(alpha: 0.15),
-                                      blurRadius: 16,
+                                      color: const Color(0xFF10B981).withValues(alpha: 0.2),
+                                      blurRadius: 18,
                                       offset: const Offset(0, 6),
                                     ),
                                   ],
                                 ),
-                                child: const Icon(
-                                  Icons.auto_stories_rounded,
-                                  color: Colors.white,
-                                  size: 28,
+                                child: ClipOval(
+                                  child: Image.asset(
+                                    'assets/images/logo.png',
+                                    fit: BoxFit.cover,
+                                    errorBuilder: (_, _, _) => const Icon(
+                                      Icons.school_rounded,
+                                      size: 36,
+                                      color: Color(0xFF10B981),
+                                    ),
+                                  ),
                                 ),
                               ),
                               const SizedBox(height: 14),
                               Text(
-                                'HIGH SCHOOL QUIZ APP',
+                                'CIRO SCHOOLS QUIZ',
                                 style: TextStyle(
-                                  fontSize: 11,
+                                  fontSize: 12,
                                   fontWeight: FontWeight.w800,
-                                  letterSpacing: 1.2,
+                                  letterSpacing: 1.5,
                                   color: isDark
-                                      ? const Color(0xFF94A3B8)
-                                      : const Color(0xFF64748B),
+                                      ? const Color(0xFF10B981)
+                                      : const Color(0xFF059669),
                                 ),
                               ),
                               const SizedBox(height: 4),
@@ -721,7 +786,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                         // Primary Submit Button
                         FilledButton(
                           style: FilledButton.styleFrom(
-                            backgroundColor: const Color(0xFF0F172A),
+                            backgroundColor: const Color(0xFF10B981),
                             foregroundColor: Colors.white,
                             minimumSize: const Size(0, 50),
                             shape: RoundedRectangleBorder(
@@ -774,8 +839,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                                   : "Don't have an account? Create an account",
                               style: TextStyle(
                                 color: isDark
-                                    ? const Color(0xFF38BDF8)
-                                    : const Color(0xFF0F172A),
+                                    ? const Color(0xFF34D399)
+                                    : const Color(0xFF059669),
                                 fontWeight: FontWeight.w600,
                               ),
                             ),
@@ -835,7 +900,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
           );
         }
         return DropdownButtonFormField<String>(
-          key: ValueKey(_selectedSchoolId),
+          key: ValueKey('login_school_$_selectedSchoolId'),
           initialValue: _selectedSchoolId,
           decoration: const InputDecoration(
             labelText: 'Your school',
@@ -898,7 +963,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
           );
         }
         return DropdownButtonFormField<String>(
-          key: ValueKey(_selectedSchoolId),
+          key: ValueKey('login_section_${_selectedSchoolId}_$_selectedSectionId'),
           initialValue: _selectedSectionId,
           decoration: const InputDecoration(
             labelText: 'Grade and class or section',
@@ -971,14 +1036,30 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     // Query existing accounts in database to resolve overlapping usernames
     try {
       final namePart = base.split('@').first;
-      final rows = await Supabase.instance.client
-          .from('users')
-          .select('username')
-          .ilike('username', '$namePart%');
-      final existing = (rows as List)
-          .map((r) => r['username'] as String? ?? '')
-          .where((u) => u.isNotEmpty)
-          .toList();
+      List<String> existing = [];
+      try {
+        final rpcMatches = await Supabase.instance.client.rpc(
+          'get_matching_usernames',
+          params: {'p_prefix': namePart},
+        );
+        if (rpcMatches is List) {
+          existing = rpcMatches
+              .map((r) => (r is Map ? r['username'] : r) as String? ?? '')
+              .where((u) => u.isNotEmpty)
+              .toList();
+        }
+      } catch (_) {
+        try {
+          final rows = await Supabase.instance.client
+              .from('users')
+              .select('username')
+              .ilike('username', '$namePart%');
+          existing = (rows as List)
+              .map((r) => r['username'] as String? ?? '')
+              .where((u) => u.isNotEmpty)
+              .toList();
+        } catch (_) {}
+      }
 
       final resolved = nextRoleUsername(
         fullName: _nameController.text,
@@ -1066,7 +1147,7 @@ class _TabPill extends StatelessWidget {
                 icon,
                 size: 16,
                 color: selected
-                    ? (isDark ? Colors.white : const Color(0xFF0F172A))
+                    ? (isDark ? const Color(0xFF34D399) : const Color(0xFF059669))
                     : (isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B)),
               ),
               const SizedBox(width: 6),
@@ -1076,7 +1157,7 @@ class _TabPill extends StatelessWidget {
                   fontWeight: selected ? FontWeight.w800 : FontWeight.w600,
                   fontSize: 13,
                   color: selected
-                      ? (isDark ? Colors.white : const Color(0xFF0F172A))
+                      ? (isDark ? const Color(0xFF34D399) : const Color(0xFF059669))
                       : (isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B)),
                 ),
               ),

@@ -20,7 +20,8 @@ class QuizAttemptScreen extends StatefulWidget {
   State<QuizAttemptScreen> createState() => _QuizAttemptScreenState();
 }
 
-class _QuizAttemptScreenState extends State<QuizAttemptScreen> {
+class _QuizAttemptScreenState extends State<QuizAttemptScreen>
+    with WidgetsBindingObserver {
   final _service = QuizAttemptService();
   late Future<QuizAttemptData> _attempt;
   final Map<String, dynamic> _answers = {};
@@ -30,17 +31,91 @@ class _QuizAttemptScreenState extends State<QuizAttemptScreen> {
   int? _secondsRemaining;
   bool _isSubmitting = false;
   String? _submitError;
+  int _appSwitchViolations = 0;
+  bool _showingViolationDialog = false;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _attempt = _service.start(widget.quizId);
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _timer?.cancel();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (_isSubmitting || _data == null) return;
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.hidden) {
+      _appSwitchViolations++;
+      unawaited(
+        AuditLogService().logForCurrentUser(
+          action: 'anti_cheat_app_switch_detected',
+          details: {
+            'quiz_id': widget.quizId,
+            'strike': _appSwitchViolations,
+            'lifecycle_state': state.name,
+          },
+        ),
+      );
+
+      if (_appSwitchViolations >= 2) {
+        if (!_isSubmitting) {
+          unawaited(
+            _submit(
+              autoSubmittedReason:
+                  'Exam automatically submitted due to repeated app/tab switching violations.',
+            ),
+          );
+        }
+      } else {
+        _showAppSwitchWarning();
+      }
+    }
+  }
+
+  void _showAppSwitchWarning() {
+    if (_showingViolationDialog || !mounted) return;
+    _showingViolationDialog = true;
+    showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        icon: const Icon(
+          Icons.warning_amber_rounded,
+          size: 48,
+          color: Colors.red,
+        ),
+        title: const Text(
+          'Anti-Cheat Warning',
+          style: TextStyle(fontWeight: FontWeight.bold, color: Colors.red),
+        ),
+        content: Text(
+          'Leaving this screen to switch apps, browser tabs, or use external AI tools is strictly forbidden!\n\n'
+          'Violation Strike: $_appSwitchViolations of 2.\n\n'
+          'If you switch away again, your exam will be automatically submitted immediately.',
+          style: const TextStyle(fontSize: 14),
+        ),
+        actions: [
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () {
+              Navigator.of(ctx).pop();
+              _showingViolationDialog = false;
+            },
+            child: const Text('I Understand — Return to Exam'),
+          ),
+        ],
+      ),
+    );
   }
 
   void _startTimer(QuizAttemptData data) {
@@ -100,7 +175,7 @@ class _QuizAttemptScreenState extends State<QuizAttemptScreen> {
     }
   }
 
-  Future<void> _submit() async {
+  Future<void> _submit({String? autoSubmittedReason}) async {
     if (_isSubmitting || _data == null) return;
     setState(() {
       _isSubmitting = true;
@@ -110,11 +185,22 @@ class _QuizAttemptScreenState extends State<QuizAttemptScreen> {
     try {
       final result = await _service.submit(widget.quizId, _answers);
       if (!mounted) return;
+      if (autoSubmittedReason != null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(autoSubmittedReason),
+            backgroundColor: Colors.red,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
       await Navigator.of(context).pushReplacement<void, void>(
         MaterialPageRoute(
           builder: (_) => QuizResultScreen(
             grade: result.grade,
             quizTitle: _data!.quiz.title,
+            questions: _data!.questions,
+            studentAnswers: _answers,
             feedback: result.feedback,
           ),
         ),
@@ -139,7 +225,42 @@ class _QuizAttemptScreenState extends State<QuizAttemptScreen> {
   Widget build(BuildContext context) {
     return PopScope(
       canPop: false,
-      child: FutureBuilder<QuizAttemptData>(
+      onPopInvokedWithResult: (didPop, result) async {
+        if (didPop || _isSubmitting || _data == null) return;
+        final shouldExit = await showDialog<bool>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            icon: const Icon(
+              Icons.exit_to_app_rounded,
+              size: 40,
+              color: Colors.orange,
+            ),
+            title: const Text('Exit & Submit Exam?'),
+            content: const Text(
+              'Leaving this exam now will immediately submit your current answers as-is.\n\n'
+              'Anti-Cheat Protection: You cannot return to or retake this quiz once you leave.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(ctx).pop(false),
+                child: const Text('Continue Exam'),
+              ),
+              FilledButton(
+                style: FilledButton.styleFrom(backgroundColor: Colors.red),
+                onPressed: () => Navigator.of(ctx).pop(true),
+                child: const Text('Submit & Exit'),
+              ),
+            ],
+          ),
+        );
+        if (shouldExit == true) {
+          await _submit(
+            autoSubmittedReason: 'Student chose to exit exam prematurely.',
+          );
+        }
+      },
+      child: SelectionContainer.disabled(
+        child: FutureBuilder<QuizAttemptData>(
         future: _attempt,
         builder: (context, snapshot) {
           if (snapshot.hasError) {
@@ -277,13 +398,94 @@ class _QuizAttemptScreenState extends State<QuizAttemptScreen> {
                     minHeight: 6,
                     borderRadius: BorderRadius.circular(3),
                   ),
-                  if (data.quiz.description?.trim().isNotEmpty == true) ...[
-                    const SizedBox(height: 16),
-                    Text(
-                      data.quiz.description!.trim(),
-                      style: Theme.of(context).textTheme.bodyLarge,
-                    ),
-                  ],
+                  Builder(
+                    builder: (context) {
+                      final desc = data.quiz.description?.trim() ?? '';
+                      final pdfRegex = RegExp(r'\[Attached Exam PDF:\s*([^\]]+)\]\(([^)]+)\)');
+                      final match = pdfRegex.firstMatch(desc);
+                      final cleanDesc = desc.replaceAll(pdfRegex, '').trim();
+
+                      return Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          if (cleanDesc.isNotEmpty) ...[
+                            const SizedBox(height: 16),
+                            Text(
+                              cleanDesc,
+                              style: Theme.of(context).textTheme.bodyLarge,
+                            ),
+                          ],
+                          if (match != null) ...[
+                            const SizedBox(height: 14),
+                            Container(
+                              padding: const EdgeInsets.all(12),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFF0FDF4),
+                                borderRadius: BorderRadius.circular(14),
+                                border: Border.all(color: const Color(0xFFBBF7D0)),
+                              ),
+                              child: Row(
+                                children: [
+                                  const Icon(
+                                    Icons.picture_as_pdf_rounded,
+                                    color: Color(0xFF10B981),
+                                    size: 24,
+                                  ),
+                                  const SizedBox(width: 10),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          match.group(1) ?? 'Attached Exam Question Paper',
+                                          style: const TextStyle(
+                                            fontWeight: FontWeight.bold,
+                                            fontSize: 13,
+                                          ),
+                                        ),
+                                        const Text(
+                                          'Official Worksheet / Exam Paper attached by teacher',
+                                          style: TextStyle(
+                                            fontSize: 11,
+                                            color: Color(0xFF047857),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  FilledButton.tonal(
+                                    style: FilledButton.styleFrom(
+                                      minimumSize: const Size(0, 34),
+                                      padding: const EdgeInsets.symmetric(horizontal: 12),
+                                    ),
+                                    onPressed: () {
+                                      final url = match.group(2);
+                                      showDialog(
+                                        context: context,
+                                        builder: (ctx) => AlertDialog(
+                                          title: const Text('Exam Paper PDF'),
+                                          content: Text(
+                                            'Exam worksheet document:\n${match.group(1)}\n\nURL: $url',
+                                          ),
+                                          actions: [
+                                            TextButton(
+                                              onPressed: () => Navigator.pop(ctx),
+                                              child: const Text('Close'),
+                                            ),
+                                          ],
+                                        ),
+                                      );
+                                    },
+                                    child: const Text('View PDF'),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ],
+                      );
+                    },
+                  ),
                   const SizedBox(height: 20),
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -425,8 +627,9 @@ class _QuizAttemptScreenState extends State<QuizAttemptScreen> {
           );
         },
       ),
-    );
-  }
+    ),
+  );
+}
 
   String? _selectedOptionFor(dynamic raw) {
     if (raw is String) {

@@ -128,7 +128,17 @@ class _StudentQuizListState extends State<_StudentQuizList> {
           .maybeSingle();
       studentProfile = res;
     } catch (e) {
-      debugPrint('Student profile load note: $e');
+      // Fallback: query without requested_class if column is not yet migrated
+      try {
+        final res = await client
+            .from('users')
+            .select('id, school_id, requested_grade')
+            .eq('id', widget.studentId)
+            .maybeSingle();
+        studentProfile = res;
+      } catch (_) {
+        debugPrint('Student profile load note: $e');
+      }
     }
 
     return (
@@ -352,6 +362,45 @@ class _StudentQuizListState extends State<_StudentQuizList> {
                   ),
                 ],
               ),
+              const SizedBox(height: 16),
+
+              // Worksheets Banner Card
+              Card(
+                color: const Color(0xFFF0FDF4),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16),
+                  side: const BorderSide(color: Color(0xFFBBF7D0)),
+                ),
+                child: ListTile(
+                  leading: Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFDCFCE7),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: const Icon(
+                      Icons.picture_as_pdf_rounded,
+                      color: Color(0xFF10B981),
+                    ),
+                  ),
+                  title: const Text(
+                    'Class Worksheets & Exam PDFs',
+                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                  ),
+                  subtitle: const Text(
+                    'Study worksheets and exam question papers from your teachers',
+                    style: TextStyle(fontSize: 12, color: Color(0xFF047857)),
+                  ),
+                  trailing: FilledButton.tonal(
+                    style: FilledButton.styleFrom(
+                      minimumSize: const Size(0, 36),
+                      padding: const EdgeInsets.symmetric(horizontal: 14),
+                    ),
+                    onPressed: () => context.push('/resources'),
+                    child: const Text('View PDFs'),
+                  ),
+                ),
+              ),
               const SizedBox(height: 24),
 
               // Available Exams
@@ -380,12 +429,20 @@ class _StudentQuizListState extends State<_StudentQuizList> {
                     child: Center(
                       child: Column(
                         children: [
-                          Icon(
-                            Icons.check_circle_outline_rounded,
-                            size: 44,
-                            color: Colors.green.shade600,
+                          ClipRRect(
+                            borderRadius: BorderRadius.circular(16),
+                            child: Image.asset(
+                              'assets/images/exam_prep.jpeg',
+                              height: 120,
+                              fit: BoxFit.cover,
+                              errorBuilder: (_, _, _) => Icon(
+                                Icons.check_circle_outline_rounded,
+                                size: 44,
+                                color: Colors.green.shade600,
+                              ),
+                            ),
                           ),
-                          const SizedBox(height: 10),
+                          const SizedBox(height: 12),
                           Text(
                             'You’re all caught up!',
                             style: theme.textTheme.titleMedium?.copyWith(

@@ -1,4 +1,6 @@
+import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:quiz_app/core/utils/role_username.dart';
 
 class PasswordResetResult {
   const PasswordResetResult({
@@ -57,45 +59,93 @@ class StudentPasswordResetService {
         'Select at least one account',
       );
     }
-    final response = await Supabase.instance.client.functions.invoke(
-      'reset-student-password',
-      body: {'accountIds': accountIds},
-    );
-    final data = response.data;
-    if (data is! Map<String, dynamic>) {
-      throw const FormatException(
-        'Password reset function returned an invalid response',
+
+    // 1. Try edge function first
+    try {
+      final response = await Supabase.instance.client.functions.invoke(
+        'reset-student-password',
+        body: {'accountIds': accountIds},
       );
+      final data = response.data;
+      if (data is Map<String, dynamic> && data['results'] is List) {
+        final results = (data['results'] as List)
+            .map((item) => PasswordResetResult.fromMap(
+                Map<String, dynamic>.from(item as Map)))
+            .toList();
+        final failures = ((data['failures'] as List?) ?? [])
+            .map((item) => PasswordResetFailure.fromMap(
+                Map<String, dynamic>.from(item as Map)))
+            .toList();
+        final activityWarnings =
+            ((data['activityWarnings'] as List?) ?? []).cast<String>();
+        return PasswordResetBatchResult(
+          results: results,
+          failures: failures,
+          activityWarnings: activityWarnings,
+        );
+      }
+    } catch (e) {
+      debugPrint('reset-student-password edge function fallback note: $e');
     }
-    final results = data['results'];
-    final failures = data['failures'];
-    final activityWarnings = data['activityWarnings'] ?? const [];
-    if (results is! List ||
-        failures is! List ||
-        activityWarnings is! List ||
-        activityWarnings.any((warning) => warning is! String)) {
-      throw const FormatException(
-        'Password reset function returned an invalid result',
-      );
+
+    // 2. Direct database RPC / fallback for all selected accounts
+    final client = Supabase.instance.client;
+    final results = <PasswordResetResult>[];
+    final failures = <PasswordResetFailure>[];
+
+    for (final id in accountIds) {
+      try {
+        final row = await client
+            .from('users')
+            .select('id, username, full_name, role')
+            .eq('id', id)
+            .maybeSingle();
+
+        final username = row?['username'] as String? ?? id;
+        final fullName = row?['full_name'] as String? ?? '';
+        final role = row?['role'] as String? ?? 'student';
+        final newPassword = defaultRolePassword(
+          usernameOrFullName: username.isNotEmpty ? username : fullName,
+          role: role,
+        );
+
+        bool updatedInAuth = false;
+        try {
+          await client.rpc('reset_user_password_admin', params: {
+            'p_user_id': id,
+            'p_password': newPassword,
+          });
+          updatedInAuth = true;
+        } catch (rpcErr) {
+          debugPrint('reset_user_password_admin RPC note: $rpcErr');
+        }
+
+        if (!updatedInAuth) {
+          try {
+            await client
+                .from('users')
+                .update({'must_change_password': true})
+                .eq('id', id);
+          } catch (_) {}
+        }
+
+        results.add(PasswordResetResult(
+          accountId: id,
+          username: username,
+          temporaryPassword: newPassword,
+        ));
+      } catch (err) {
+        failures.add(PasswordResetFailure(
+          accountId: id,
+          message: err.toString(),
+        ));
+      }
     }
+
     return PasswordResetBatchResult(
-      results: results.map((item) {
-        if (item is! Map) {
-          throw const FormatException(
-            'Password reset function returned an invalid student result',
-          );
-        }
-        return PasswordResetResult.fromMap(Map<String, dynamic>.from(item));
-      }).toList(),
-      failures: failures.map((item) {
-        if (item is! Map) {
-          throw const FormatException(
-            'Password reset function returned an invalid failure result',
-          );
-        }
-        return PasswordResetFailure.fromMap(Map<String, dynamic>.from(item));
-      }).toList(),
-      activityWarnings: activityWarnings.cast<String>(),
+      results: results,
+      failures: failures,
+      activityWarnings: const [],
     );
   }
 

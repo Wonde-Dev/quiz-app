@@ -361,18 +361,29 @@ class _TeacherDashboardScreenState
             // Action Tiles
             _TeacherActionTile(
               icon: Icons.add_circle_outline_rounded,
-              color: const Color(0xFF8B5CF6),
-              title: 'Prepare a Quiz',
+              color: const Color(0xFF10B981),
+              title: 'Prepare & Publish a Quiz',
               subtitle:
-                  'Create exams choosing Grade 9 to 12 and Section A, B, C (or custom section).',
-              buttonText: 'Create Quiz',
+                  'Create exams choosing Grade 9 to 12 and Section A, B, C (or custom section) with question images.',
+              buttonText: 'Prepare Quiz',
               onTap: () => context.push('/teacher/quizzes/new'),
             ),
             const SizedBox(height: 10),
 
             _TeacherActionTile(
+              icon: Icons.upload_file_rounded,
+              color: const Color(0xFF0284C7),
+              title: 'Upload Worksheets & Exam PDFs',
+              subtitle:
+                  'Distribute official PDF worksheets, reference guides, and exam question papers directly to specific grades and sections.',
+              buttonText: 'Class Worksheets',
+              onTap: () => context.push('/resources'),
+            ),
+            const SizedBox(height: 10),
+
+            _TeacherActionTile(
               icon: Icons.fact_check_rounded,
-              color: const Color(0xFF10B981),
+              color: const Color(0xFF059669),
               title: 'Evaluate Quizzes & Results',
               subtitle:
                   'Review student answers question-by-question, evaluate responses, inspect images, and adjust scores.',
@@ -383,7 +394,7 @@ class _TeacherDashboardScreenState
 
             _TeacherActionTile(
               icon: Icons.person_add_alt_1_rounded,
-              color: const Color(0xFF6366F1),
+              color: const Color(0xFF0D9488),
               title: 'Register Students',
               subtitle:
                   'Register new students in your classes and school with their temporary credentials and auto-password formula.',
@@ -406,9 +417,9 @@ class _TeacherDashboardScreenState
             // Quizzes List Section
             Row(
               children: [
-                Icon(
+                const Icon(
                   Icons.quiz_rounded,
-                  color: const Color(0xFF8B5CF6),
+                  color: Color(0xFF10B981),
                   size: 22,
                 ),
                 const SizedBox(width: 8),
@@ -424,6 +435,9 @@ class _TeacherDashboardScreenState
                   onPressed: () => context.push('/teacher/quizzes/new'),
                   icon: const Icon(Icons.add, size: 16),
                   label: const Text('New Quiz'),
+                  style: TextButton.styleFrom(
+                    foregroundColor: const Color(0xFF10B981),
+                  ),
                 ),
               ],
             ),

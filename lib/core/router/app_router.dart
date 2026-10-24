@@ -6,13 +6,18 @@ import 'package:quiz_app/features/admin/presentation/screens/admin_dashboard_scr
 import 'package:quiz_app/features/auth/presentation/providers/auth_provider.dart';
 import 'package:quiz_app/features/auth/presentation/screens/force_change_password_screen.dart';
 import 'package:quiz_app/features/auth/presentation/screens/login_screen.dart';
+import 'package:quiz_app/features/auth/presentation/screens/splash_screen.dart';
 import 'package:quiz_app/features/auth/presentation/screens/account_status_screen.dart';
 import 'package:quiz_app/features/admin/presentation/screens/account_approvals_screen.dart';
+import 'package:quiz_app/features/admin/presentation/screens/admin_register_user_screen.dart';
 import 'package:quiz_app/features/admin/presentation/screens/course_assignment_screen.dart';
 import 'package:quiz_app/features/admin/presentation/screens/audit_log_screen.dart';
 import 'package:quiz_app/features/admin/presentation/screens/teacher_management_screen.dart';
+import 'package:quiz_app/features/about/presentation/screens/about_screen.dart';
+import 'package:quiz_app/features/functions/presentation/screens/functions_screen.dart';
 import 'package:quiz_app/features/profile/presentation/screens/profile_screen.dart';
 import 'package:quiz_app/features/profile/presentation/screens/activity_screen.dart';
+import 'package:quiz_app/features/student/presentation/screens/resources_screen.dart';
 import 'package:quiz_app/features/student/presentation/screens/student_dashboard_screen.dart';
 import 'package:quiz_app/features/student/presentation/screens/quiz_attempt_screen.dart';
 import 'package:quiz_app/features/teacher/presentation/screens/teacher_dashboard_screen.dart';
@@ -27,12 +32,14 @@ final routerProvider = Provider<GoRouter>((ref) {
     authRefresh.value++;
   });
   final router = GoRouter(
-    initialLocation: '/login',
+    initialLocation: '/splash',
     refreshListenable: authRefresh,
     redirect: (context, state) {
       final authState = ref.read(authStateProvider);
       final user = authState.user;
       final location = state.matchedLocation;
+
+      if (location == '/splash') return null;
 
       if (user == null) {
         return location == '/login' ||
@@ -45,7 +52,10 @@ final routerProvider = Provider<GoRouter>((ref) {
       if (authState.needsPasswordChange) {
         return location == '/change-password' ? null : '/change-password';
       }
-      if (location == '/account-status') {
+      if (location == '/account-status' ||
+          location == '/about' ||
+          location == '/functions' ||
+          location == '/resources') {
         return null;
       }
       if (location == '/login' ||
@@ -61,6 +71,13 @@ final routerProvider = Provider<GoRouter>((ref) {
         };
       }
 
+      // Quiz creation is strictly reserved for teachers:
+      if (location == '/teacher/quizzes/new' && user.role != AppRoles.teacher) {
+        return user.role == AppRoles.admin
+            ? '/admin/dashboard'
+            : '/student/dashboard';
+      }
+
       if (user.role == AppRoles.admin) return null;
       if (location.startsWith('/admin') ||
           (user.role == AppRoles.student && location.startsWith('/teacher')) ||
@@ -74,6 +91,7 @@ final routerProvider = Provider<GoRouter>((ref) {
       return null;
     },
     routes: [
+      GoRoute(path: '/splash', builder: (context, state) => const SplashScreen()),
       GoRoute(path: '/login', builder: (context, state) => const LoginScreen()),
       GoRoute(
         path: '/register',
@@ -100,6 +118,10 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/admin/dashboard',
         builder: (context, state) => const AdminDashboardScreen(),
+      ),
+      GoRoute(
+        path: '/admin/register-user',
+        builder: (context, state) => const AdminRegisterUserScreen(),
       ),
       GoRoute(
         path: '/admin/approvals',
@@ -145,6 +167,18 @@ final routerProvider = Provider<GoRouter>((ref) {
         path: '/student/quiz/:quizId',
         builder: (context, state) =>
             QuizAttemptScreen(quizId: state.pathParameters['quizId']!),
+      ),
+      GoRoute(
+        path: '/about',
+        builder: (context, state) => const AboutScreen(),
+      ),
+      GoRoute(
+        path: '/resources',
+        builder: (context, state) => const ResourcesScreen(),
+      ),
+      GoRoute(
+        path: '/functions',
+        builder: (context, state) => const FunctionsScreen(),
       ),
       GoRoute(
         path: '/profile',
