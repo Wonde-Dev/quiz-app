@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:quiz_app/core/constants/app_roles.dart';
+import 'package:quiz_app/core/constants/supabase_constants.dart';
 import 'package:quiz_app/core/utils/role_username.dart';
 import 'package:quiz_app/core/utils/supabase_error_message.dart';
 import 'package:quiz_app/shared/widgets/dashboard_shell.dart';
@@ -276,37 +277,46 @@ class _AdminRegisterUserScreenState
         }
       }
 
-      // 3. Direct Supabase Fallback if functions were unavailable
+      // 3. Isolated Supabase Fallback if functions were unavailable (prevents logging out the admin)
       if (!createdViaFunction) {
-        final client = Supabase.instance.client;
-        final authResponse = await client.auth.signUp(
-          email: email,
-          password: password,
-          data: {
-            'full_name': fullName,
-            'username': username,
-            'role': _selectedRole,
-            'approval_status': 'approved',
-            'is_active': true,
-            if (_selectedRole != AppRoles.admin) 'school_id': _selectedSchoolId,
-            if (_selectedRole != AppRoles.admin) 'section_id': _selectedSectionId,
-            if (_selectedRole == AppRoles.teacher) 'subject': subject,
-          },
+        final standaloneClient = SupabaseClient(
+          SupabaseConstants.supabaseUrl,
+          SupabaseConstants.supabasePublishableKey,
+          authOptions: const AuthClientOptions(authFlowType: AuthFlowType.implicit),
         );
+        try {
+          final authResponse = await standaloneClient.auth.signUp(
+            email: email,
+            password: password,
+            data: {
+              'full_name': fullName,
+              'username': username,
+              'role': _selectedRole,
+              'approval_status': 'approved',
+              'is_active': true,
+              if (_selectedRole != AppRoles.admin) 'school_id': _selectedSchoolId,
+              if (_selectedRole != AppRoles.admin) 'section_id': _selectedSectionId,
+              if (_selectedRole == AppRoles.teacher) 'subject': subject,
+            },
+          );
 
-        final newUserId = authResponse.user?.id;
-        if (newUserId != null) {
-          await client.from('users').upsert({
-            'id': newUserId,
-            'email': email,
-            'username': username,
-            'full_name': fullName,
-            'role': _selectedRole,
-            'approval_status': 'approved',
-            'is_active': true,
-            if (_selectedRole != AppRoles.admin) 'school_id': _selectedSchoolId,
-            if (_selectedRole != AppRoles.admin) 'section_id': _selectedSectionId,
-          });
+          final newUserId = authResponse.user?.id;
+          if (newUserId != null) {
+            await Supabase.instance.client.from('users').upsert({
+              'id': newUserId,
+              'email': email,
+              'username': username,
+              'full_name': fullName,
+              'role': _selectedRole,
+              'approval_status': 'approved',
+              'is_active': true,
+              if (_selectedRole != AppRoles.admin) 'school_id': _selectedSchoolId,
+              if (_selectedRole != AppRoles.admin) 'section_id': _selectedSectionId,
+            });
+            createdViaFunction = true;
+          }
+        } finally {
+          standaloneClient.dispose();
         }
       }
 

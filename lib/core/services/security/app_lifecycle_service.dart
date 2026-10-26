@@ -14,7 +14,7 @@ class AppLifecycleService {
     required VoidCallback onAutoSubmit,
   }) {
     _backgroundCount = 0;
-    _fgbgSub = FGBGEvents.stream.listen((event) {
+    _fgbgSub = FGBGEvents.instance.stream.listen((event) {
       if (event == FGBGType.background) {
         _backgroundCount++;
         if (_backgroundCount > maxWarnings) {

@@ -1050,6 +1050,145 @@ class _StudentManagementScreenState
     }
   }
 
+  Future<void> _editAccount(Map<String, dynamic> account) async {
+    final id = account['id'] as String;
+    final currentName = account['full_name'] as String? ?? '';
+    final currentEmail = account['email'] as String? ?? '';
+    final currentRole = account['role'] as String? ?? 'student';
+    final nameController = TextEditingController(text: currentName);
+    final emailController = TextEditingController(text: currentEmail);
+    String selectedRole = currentRole;
+    bool isActive = account['is_active'] != false;
+
+    final saved = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          title: const Row(
+            children: [
+              Icon(Icons.edit_rounded, color: Color(0xFF10B981)),
+              SizedBox(width: 8),
+              Text('Edit User Account'),
+            ],
+          ),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                TextField(
+                  controller: nameController,
+                  decoration: const InputDecoration(
+                    labelText: 'Full Name',
+                    prefixIcon: Icon(Icons.person_outline),
+                  ),
+                ),
+                const SizedBox(height: 14),
+                TextField(
+                  controller: emailController,
+                  decoration: const InputDecoration(
+                    labelText: 'Email Address',
+                    prefixIcon: Icon(Icons.email_outlined),
+                  ),
+                ),
+                const SizedBox(height: 14),
+                if (_isAdmin) ...[
+                  DropdownButtonFormField<String>(
+                    initialValue: selectedRole,
+                    decoration: const InputDecoration(
+                      labelText: 'Role',
+                      prefixIcon: Icon(Icons.shield_outlined),
+                    ),
+                    items: const [
+                      DropdownMenuItem(value: AppRoles.student, child: Text('Student')),
+                      DropdownMenuItem(value: AppRoles.teacher, child: Text('Teacher')),
+                      DropdownMenuItem(value: AppRoles.admin, child: Text('Administrator')),
+                    ],
+                    onChanged: (v) => setDialogState(() => selectedRole = v ?? selectedRole),
+                  ),
+                  const SizedBox(height: 14),
+                ],
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('Account Active', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
+                  subtitle: Text(
+                    isActive ? 'User can sign in and participate' : 'Account suspended / deactivated',
+                    style: const TextStyle(fontSize: 12),
+                  ),
+                  value: isActive,
+                  onChanged: (v) => setDialogState(() => isActive = v),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Save Changes'),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (saved != true || !mounted) return;
+
+    setState(() {
+      _isResetting = true;
+      _error = null;
+    });
+
+    try {
+      final newName = nameController.text.trim();
+      final newEmail = emailController.text.trim();
+      bool updated = false;
+
+      try {
+        await Supabase.instance.client.rpc(
+          'admin_update_user',
+          params: {
+            'p_user_id': id,
+            'p_full_name': newName,
+            'p_role': selectedRole,
+            'p_email': newEmail,
+            'p_is_active': isActive,
+          },
+        );
+        updated = true;
+      } catch (rpcErr) {
+        debugPrint('admin_update_user RPC note: $rpcErr');
+      }
+
+      if (!updated) {
+        await Supabase.instance.client.from('users').update({
+          'full_name': newName,
+          'role': selectedRole,
+          'email': newEmail,
+          'is_active': isActive,
+        }).eq('id', id);
+      }
+
+      if (!mounted) return;
+      setState(() => _studentsFuture = _loadAccounts());
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Account updated successfully!'),
+          backgroundColor: Color(0xFF10B981),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } catch (e) {
+      if (mounted) setState(() => _error = 'Could not update account: $e');
+    } finally {
+      if (mounted) setState(() => _isResetting = false);
+    }
+  }
+
   Future<void> _showCredentials(PasswordResetBatchResult result) async {
     final credentialText = result.results
         .map((item) => '${item.username}: ${item.temporaryPassword}')
@@ -1630,6 +1769,18 @@ class _StudentManagementScreenState
                                           icon: const Icon(
                                             Icons.lock_reset_rounded,
                                             size: 22,
+                                          ),
+                                        ),
+                                      if (_isAdmin)
+                                        IconButton(
+                                          tooltip: 'Edit / Update $displayName',
+                                          onPressed: _isResetting || _deletingId == id
+                                              ? null
+                                              : () => _editAccount(student),
+                                          icon: const Icon(
+                                            Icons.edit_outlined,
+                                            color: Color(0xFF10B981),
+                                            size: 20,
                                           ),
                                         ),
                                       if (_isAdmin || role == AppRoles.student)

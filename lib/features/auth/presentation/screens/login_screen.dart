@@ -289,13 +289,21 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
             : null,
         actions: [
           IconButton(
-            tooltip: 'Switch theme',
-            onPressed: () => ref.read(themeModeProvider.notifier).cycle(),
+            tooltip: 'App Tour & Features',
+            onPressed: () => context.go('/onboarding'),
+            icon: const Icon(Icons.help_outline_rounded),
+          ),
+          IconButton(
+            tooltip: isDark ? 'Switch to Light Theme' : 'Switch to Dark Theme',
+            onPressed: () {
+              final newMode = isDark ? ThemeMode.light : ThemeMode.dark;
+              ref.read(themeModeProvider.notifier).setMode(newMode);
+            },
             icon: Icon(
-              isDark ? Icons.light_mode_outlined : Icons.dark_mode_outlined,
+              isDark ? Icons.light_mode_rounded : Icons.dark_mode_rounded,
             ),
           ),
-          const SizedBox(width: 12),
+          const SizedBox(width: 8),
         ],
       ),
       body: SafeArea(
@@ -841,6 +849,19 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                                 color: isDark
                                     ? const Color(0xFF34D399)
                                     : const Color(0xFF059669),
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                        ),
+                        Center(
+                          child: TextButton.icon(
+                            onPressed: () => context.go('/onboarding'),
+                            icon: const Icon(Icons.explore_rounded, size: 16),
+                            label: const Text(
+                              'Explore App Tour & Features',
+                              style: TextStyle(
+                                fontSize: 12,
                                 fontWeight: FontWeight.w600,
                               ),
                             ),

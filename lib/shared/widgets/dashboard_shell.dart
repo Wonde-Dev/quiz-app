@@ -111,10 +111,33 @@ class DashboardShell extends ConsumerWidget {
         ),
         actions: [
           IconButton(
-            tooltip: 'Switch theme',
-            onPressed: () => ref.read(themeModeProvider.notifier).cycle(),
+            tooltip: isDark ? 'Switch to Light Theme' : 'Switch to Dark Theme',
+            onPressed: () {
+              final newMode = isDark ? ThemeMode.light : ThemeMode.dark;
+              ref.read(themeModeProvider.notifier).setMode(newMode);
+              ScaffoldMessenger.of(context).clearSnackBars();
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        isDark ? Icons.light_mode_rounded : Icons.dark_mode_rounded,
+                        color: Colors.white,
+                        size: 18,
+                      ),
+                      const SizedBox(width: 8),
+                      Text(isDark ? 'Switched to Light mode' : 'Switched to Dark mode'),
+                    ],
+                  ),
+                  duration: const Duration(seconds: 1),
+                  behavior: SnackBarBehavior.floating,
+                  width: 250,
+                ),
+              );
+            },
             icon: Icon(
-              isDark ? Icons.light_mode_outlined : Icons.dark_mode_outlined,
+              isDark ? Icons.light_mode_rounded : Icons.dark_mode_rounded,
               size: 20,
             ),
           ),

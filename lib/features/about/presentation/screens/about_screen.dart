@@ -21,6 +21,18 @@ class _AboutScreenState extends State<AboutScreen>
   final List<({String image, String title, String subtitle, IconData icon})>
       _slides = const [
     (
+      image: 'assets/images/about.jpeg',
+      title: 'Ciro Schools Academic Mission',
+      subtitle: 'Nurturing future leaders through modern digital education, high standards, and integrity.',
+      icon: Icons.auto_awesome_rounded,
+    ),
+    (
+      image: 'assets/images/home.jpeg',
+      title: 'Unified Digital Campus',
+      subtitle: 'Centralized high school portal for secure tests, practice sheets, and grade records.',
+      icon: Icons.school_rounded,
+    ),
+    (
       image: 'assets/images/school_building.jpeg',
       title: 'Main Academic Campus',
       subtitle: 'Modern educational infrastructure dedicated to student excellence.',

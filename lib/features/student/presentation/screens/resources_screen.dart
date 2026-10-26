@@ -235,81 +235,138 @@ class _ResourcesScreenState extends ConsumerState<ResourcesScreen> {
         child: ListView(
           padding: const EdgeInsets.all(20),
           children: [
-            // Welcome Header Card
+            // Welcome Header Card with Classroom Illustration
             Container(
-              padding: const EdgeInsets.all(22),
+              clipBehavior: Clip.antiAlias,
               decoration: BoxDecoration(
-                color: isDark ? const Color(0xFF1E293B) : Colors.white,
-                borderRadius: BorderRadius.circular(22),
+                borderRadius: BorderRadius.circular(24),
                 border: Border.all(
-                  color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0),
-                  width: 1.2,
+                  color: isDark
+                      ? const Color(0xFF334155)
+                      : const Color(0xFF10B981).withValues(alpha: 0.35),
+                  width: 1.5,
                 ),
                 boxShadow: [
                   BoxShadow(
-                    color: const Color(0xFF10B981).withValues(alpha: 0.05),
-                    blurRadius: 18,
-                    offset: const Offset(0, 6),
+                    color: const Color(0xFF10B981).withValues(alpha: 0.16),
+                    blurRadius: 24,
+                    offset: const Offset(0, 8),
+                  ),
+                  BoxShadow(
+                    color: isDark
+                        ? Colors.black.withValues(alpha: 0.4)
+                        : const Color(0xFF0F172A).withValues(alpha: 0.08),
+                    blurRadius: 16,
+                    offset: const Offset(0, 4),
                   ),
                 ],
               ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+              child: Stack(
                 children: [
-                  Row(
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFF10B981).withValues(alpha: 0.12),
-                          borderRadius: BorderRadius.circular(16),
-                        ),
-                        child: const Icon(
-                          Icons.picture_as_pdf_rounded,
-                          color: Color(0xFF10B981),
-                          size: 28,
+                  Positioned.fill(
+                    child: Image.asset(
+                      'assets/images/classroom.jpeg',
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, _, _) => Container(
+                        color: const Color(0xFF064E3B),
+                      ),
+                    ),
+                  ),
+                  Positioned.fill(
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                          colors: isDark
+                              ? [
+                                  const Color(0xF5064E3B),
+                                  const Color(0xF80F172A),
+                                  const Color(0xF0022C22),
+                                ]
+                              : [
+                                  const Color(0xEE064E3B),
+                                  const Color(0xEA0F172A),
+                                  const Color(0xDC047857),
+                                ],
                         ),
                       ),
-                      const SizedBox(width: 14),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.all(22),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
                           children: [
-                            Text(
-                              isTeacher
-                                  ? 'Teacher PDF & Worksheet Uploader'
-                                  : 'My Class Worksheets & Exams',
-                              style: theme.textTheme.titleMedium?.copyWith(
-                                fontWeight: FontWeight.w800,
+                            Container(
+                              padding: const EdgeInsets.all(12),
+                              decoration: BoxDecoration(
+                                color: Colors.white.withValues(alpha: 0.18),
+                                borderRadius: BorderRadius.circular(16),
+                                border: Border.all(
+                                  color: Colors.white.withValues(alpha: 0.3),
+                                ),
+                              ),
+                              child: const Icon(
+                                Icons.picture_as_pdf_rounded,
+                                color: Color(0xFF34D399),
+                                size: 28,
                               ),
                             ),
-                            const SizedBox(height: 4),
-                            Text(
-                              isTeacher
-                                  ? 'Upload exams, worksheets, and course materials targeted for Grade 9-12 and specific sections.'
-                                  : 'Access and download official worksheets and exams uploaded by your teachers for your grade and section.',
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                            const SizedBox(width: 14),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    isTeacher
+                                        ? 'Teacher PDF & Worksheet Uploader'
+                                        : 'My Class Worksheets & Exams',
+                                    style: theme.textTheme.titleMedium?.copyWith(
+                                      fontWeight: FontWeight.w900,
+                                      color: Colors.white,
+                                      letterSpacing: -0.2,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    isTeacher
+                                        ? 'Upload exams, worksheets, and course materials targeted for Grade 9-12 and specific sections.'
+                                        : 'Access and download official worksheets and exams uploaded by your teachers for your grade and section.',
+                                    style: const TextStyle(
+                                      fontSize: 12,
+                                      color: Color(0xFFE2E8F0),
+                                      height: 1.3,
+                                    ),
+                                  ),
+                                ],
                               ),
                             ),
                           ],
                         ),
-                      ),
-                    ],
-                  ),
-                  if (isTeacher) ...[
-                    const SizedBox(height: 16),
-                    FilledButton.icon(
-                      style: FilledButton.styleFrom(
-                        backgroundColor: const Color(0xFF10B981),
-                        foregroundColor: Colors.white,
-                      ),
-                      onPressed: _pickAndUploadResource,
-                      icon: const Icon(Icons.upload_file_rounded, size: 18),
-                      label: const Text('Upload Worksheet / Exam PDF'),
+                        if (isTeacher) ...[
+                          const SizedBox(height: 16),
+                          FilledButton.icon(
+                            style: FilledButton.styleFrom(
+                              backgroundColor: Colors.white,
+                              foregroundColor: const Color(0xFF0F172A),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                            ),
+                            onPressed: _pickAndUploadResource,
+                            icon: const Icon(Icons.upload_file_rounded, size: 18),
+                            label: const Text(
+                              'Upload Worksheet / Exam PDF',
+                              style: TextStyle(fontWeight: FontWeight.w700),
+                            ),
+                          ),
+                        ],
+                      ],
                     ),
-                  ],
+                  ),
                 ],
               ),
             ),

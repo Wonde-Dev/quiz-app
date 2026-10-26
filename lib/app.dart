@@ -245,21 +245,93 @@ class MyApp extends ConsumerWidget {
           useMaterial3: true,
           colorScheme: ColorScheme.fromSeed(
             seedColor: const Color(0xFF10B981),
+            primary: const Color(0xFF10B981),
+            secondary: const Color(0xFF059669),
+            surface: const Color(0xFF1E293B),
+            surfaceContainerHighest: const Color(0xFF334155),
+            surfaceContainerLow: const Color(0xFF0F172A),
             brightness: Brightness.dark,
           ),
+          scaffoldBackgroundColor: const Color(0xFF0F172A),
           cardTheme: CardThemeData(
+            color: const Color(0xFF1E293B),
             elevation: 0,
+            shadowColor: const Color(0x33000000),
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(20),
+              side: const BorderSide(color: Color(0xFF334155), width: 1.2),
+            ),
+          ),
+          appBarTheme: AppBarTheme(
+            backgroundColor: Colors.transparent,
+            elevation: 0,
+            scrolledUnderElevation: 0,
+            foregroundColor: Colors.white,
+            titleTextStyle: GoogleFonts.poppins(
+              textStyle: darkBase.titleLarge,
+              color: Colors.white,
+              fontSize: 18,
+              fontWeight: FontWeight.w700,
+              letterSpacing: -0.3,
             ),
           ),
           inputDecorationTheme: InputDecorationTheme(
             filled: true,
-            border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
+            fillColor: const Color(0xFF1E293B),
+            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 15),
+            labelStyle: GoogleFonts.poppins(
+              textStyle: darkBase.bodyMedium,
+              fontSize: 13,
+              fontWeight: FontWeight.w500,
+              color: const Color(0xFF94A3B8),
+            ),
+            hintStyle: GoogleFonts.poppins(
+              textStyle: darkBase.bodyMedium,
+              fontSize: 13,
+              color: const Color(0xFF64748B),
+            ),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(14),
+              borderSide: const BorderSide(color: Color(0xFF334155), width: 1.2),
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(14),
+              borderSide: const BorderSide(color: Color(0xFF334155), width: 1.2),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(14),
+              borderSide: const BorderSide(
+                color: Color(0xFF10B981),
+                width: 2.0,
+              ),
+            ),
           ),
           filledButtonTheme: FilledButtonThemeData(
             style: FilledButton.styleFrom(
+              backgroundColor: const Color(0xFF10B981),
+              foregroundColor: Colors.white,
               minimumSize: const Size(0, 50),
+              textStyle: GoogleFonts.poppins(
+                textStyle: darkBase.labelLarge,
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+                letterSpacing: 0.2,
+              ),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(14),
+              ),
+            ),
+          ),
+          outlinedButtonTheme: OutlinedButtonThemeData(
+            style: OutlinedButton.styleFrom(
+              minimumSize: const Size(0, 48),
+              side: const BorderSide(color: Color(0xFF475569), width: 1.2),
+              foregroundColor: Colors.white,
+              textStyle: GoogleFonts.poppins(
+                textStyle: darkBase.labelLarge,
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+              ),
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(14),
               ),
@@ -268,6 +340,7 @@ class MyApp extends ConsumerWidget {
           textTheme: darkTextTheme,
         ),
         themeMode: themeMode,
+        themeAnimationDuration: Duration.zero,
         routerConfig: router,
       ),
     );

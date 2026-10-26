@@ -72,30 +72,30 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen>
 
     try {
       final results = await Future.wait<dynamic>([
-        client
-            .from('users')
-            .select('id')
-            .eq('role', 'student')
-            .neq('is_active', false),
-        client
-            .from('users')
-            .select('id')
-            .eq('role', 'teacher')
-            .neq('is_active', false),
-        client.from('users').select('id').neq('is_active', false),
+        client.from('users').select('id, role, is_active, approval_status'),
         client.from('quizzes').select('id').eq('is_published', true),
-        client.from('users').select('id').eq('approval_status', 'pending'),
         auditService.fetchLogs(limit: 5),
       ]);
 
       if (!mounted) return;
+      final allUsers = (results[0] as List).cast<Map<String, dynamic>>();
+      final publishedQuizzes = results[1] as List;
+      final recentLogs = results[2] as List<AuditLog>;
+
+      // Active users: count anyone where is_active is not explicitly false
+      final activeUsers = allUsers.where((u) => u['is_active'] != false).toList();
+      final studentCount = activeUsers.where((u) => u['role'] == 'student').length;
+      final teacherCount = activeUsers.where((u) => u['role'] == 'teacher').length;
+      final totalUsers = activeUsers.length;
+      final pendingCount = allUsers.where((u) => u['approval_status'] == 'pending').length;
+
       setState(() {
-        _studentCount = (results[0] as List).length;
-        _teacherCount = (results[1] as List).length;
-        _totalUsersCount = (results[2] as List).length;
-        _quizCount = (results[3] as List).length;
-        _pendingCount = (results[4] as List).length;
-        _recentLogs = results[5] as List<AuditLog>;
+        _studentCount = studentCount;
+        _teacherCount = teacherCount;
+        _totalUsersCount = totalUsers;
+        _quizCount = publishedQuizzes.length;
+        _pendingCount = pendingCount;
+        _recentLogs = recentLogs;
         _loading = false;
       });
     } catch (e) {
@@ -120,154 +120,191 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen>
         child: ListView(
           padding: const EdgeInsets.all(20),
           children: [
-            // Welcome Header - Luxury White Card
+            // Welcome Header - Luxury Branded Card with Home Illustration
             Container(
-              padding: const EdgeInsets.all(22),
+              clipBehavior: Clip.antiAlias,
               decoration: BoxDecoration(
-                color: isDark ? const Color(0xFF1E293B) : Colors.white,
-                borderRadius: BorderRadius.circular(24),
+                borderRadius: BorderRadius.circular(26),
                 border: Border.all(
-                  color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0),
-                  width: 1.2,
+                  color: isDark
+                      ? const Color(0xFF334155)
+                      : const Color(0xFF10B981).withValues(alpha: 0.35),
+                  width: 1.5,
                 ),
                 boxShadow: [
                   BoxShadow(
+                    color: const Color(0xFF10B981).withValues(alpha: 0.16),
+                    blurRadius: 28,
+                    offset: const Offset(0, 10),
+                  ),
+                  BoxShadow(
                     color: isDark
-                        ? Colors.black.withValues(alpha: 0.3)
-                        : const Color(0xFF0F172A).withValues(alpha: 0.05),
-                    blurRadius: 26,
-                    offset: const Offset(0, 8),
+                        ? Colors.black.withValues(alpha: 0.4)
+                        : const Color(0xFF0F172A).withValues(alpha: 0.08),
+                    blurRadius: 18,
+                    offset: const Offset(0, 6),
                   ),
                 ],
               ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+              child: Stack(
                 children: [
-                  Row(
-                    children: [
-                      // Status Badge with pulsing green indicator
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 10,
-                          vertical: 4,
+                  // Illustration Background
+                  Positioned.fill(
+                    child: Image.asset(
+                      'assets/images/home.jpeg',
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, _, _) => Container(
+                        color: const Color(0xFF064E3B),
+                      ),
+                    ),
+                  ),
+                  // Luxury Gradient Tint
+                  Positioned.fill(
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                          colors: isDark
+                              ? [
+                                  const Color(0xF5064E3B),
+                                  const Color(0xF80F172A),
+                                  const Color(0xF2022C22),
+                                ]
+                              : [
+                                  const Color(0xEE064E3B),
+                                  const Color(0xEA0F172A),
+                                  const Color(0xDC047857),
+                                ],
                         ),
-                        decoration: BoxDecoration(
-                          color: isDark
-                              ? const Color(0xFF334155)
-                              : const Color(0xFFF1F5F9),
-                          borderRadius: BorderRadius.circular(20),
-                          border: Border.all(
-                            color: isDark
-                                ? const Color(0xFF475569)
-                                : const Color(0xFFE2E8F0),
-                          ),
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
+                      ),
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.all(22),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
                           children: [
-                            AnimatedBuilder(
-                              animation: _pulseController,
-                              builder: (context, _) => Container(
-                                width: 8,
-                                height: 8,
-                                decoration: BoxDecoration(
-                                  color: const Color(0xFF10B981),
-                                  shape: BoxShape.circle,
-                                  boxShadow: [
-                                    BoxShadow(
-                                      color: const Color(0xFF10B981).withValues(
-                                        alpha: 0.3 + (_pulseController.value * 0.5),
-                                      ),
-                                      blurRadius: 6,
-                                      spreadRadius: 2,
-                                    ),
-                                  ],
+                            // Status Badge with pulsing green indicator
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 10,
+                                vertical: 4,
+                              ),
+                              decoration: BoxDecoration(
+                                color: Colors.white.withValues(alpha: 0.16),
+                                borderRadius: BorderRadius.circular(20),
+                                border: Border.all(
+                                  color: Colors.white.withValues(alpha: 0.3),
                                 ),
                               ),
-                            ),
-                            const SizedBox(width: 8),
-                            Text(
-                              'SYSTEM ACTIVE · ENCRYPTED',
-                              style: TextStyle(
-                                fontSize: 10,
-                                fontWeight: FontWeight.w800,
-                                letterSpacing: 0.8,
-                                color: isDark
-                                    ? const Color(0xFF94A3B8)
-                                    : const Color(0xFF64748B),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  AnimatedBuilder(
+                                    animation: _pulseController,
+                                    builder: (context, _) => Container(
+                                      width: 8,
+                                      height: 8,
+                                      decoration: BoxDecoration(
+                                        color: const Color(0xFF34D399),
+                                        shape: BoxShape.circle,
+                                        boxShadow: [
+                                          BoxShadow(
+                                            color: const Color(0xFF34D399).withValues(
+                                              alpha: 0.4 + (_pulseController.value * 0.5),
+                                            ),
+                                            blurRadius: 6,
+                                            spreadRadius: 2,
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  const Text(
+                                    'SYSTEM ACTIVE · ENCRYPTED',
+                                    style: TextStyle(
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.w800,
+                                      letterSpacing: 0.8,
+                                      color: Colors.white,
+                                    ),
+                                  ),
+                                ],
                               ),
+                            ),
+                            const Spacer(),
+                            IconButton.filledTonal(
+                              style: IconButton.styleFrom(
+                                backgroundColor: Colors.white.withValues(alpha: 0.2),
+                                foregroundColor: Colors.white,
+                              ),
+                              tooltip: 'Refresh system stats',
+                              onPressed: _loading ? null : _loadStats,
+                              icon: _loading
+                                  ? const SizedBox(
+                                      width: 16,
+                                      height: 16,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                        color: Colors.white,
+                                      ),
+                                    )
+                                  : const Icon(Icons.refresh_rounded, size: 20),
                             ),
                           ],
                         ),
-                      ),
-                      const Spacer(),
-                      IconButton.filledTonal(
-                        tooltip: 'Refresh system stats',
-                        onPressed: _loading ? null : _loadStats,
-                        icon: _loading
-                            ? const SizedBox(
-                                width: 16,
-                                height: 16,
-                                child: CircularProgressIndicator(strokeWidth: 2),
-                              )
-                            : const Icon(Icons.refresh_rounded, size: 20),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 16),
-                  Row(
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                          color: isDark
-                              ? const Color(0xFF0F172A)
-                              : const Color(0xFFF8FAFC),
-                          borderRadius: BorderRadius.circular(16),
-                          border: Border.all(
-                            color: isDark
-                                ? const Color(0xFF334155)
-                                : const Color(0xFFE2E8F0),
-                          ),
-                        ),
-                        child: const Icon(
-                          Icons.shield_rounded,
-                          color: Color(0xFF0F172A),
-                          size: 32,
-                        ),
-                      ),
-                      const SizedBox(width: 16),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
+                        const SizedBox(height: 16),
+                        Row(
                           children: [
-                            Text(
-                              'Hello, $adminName',
-                              style: theme.textTheme.titleLarge?.copyWith(
-                                color: isDark ? Colors.white : const Color(0xFF0F172A),
-                                fontWeight: FontWeight.w900,
-                                letterSpacing: -0.4,
+                            Container(
+                              padding: const EdgeInsets.all(12),
+                              decoration: BoxDecoration(
+                                color: Colors.white.withValues(alpha: 0.15),
+                                borderRadius: BorderRadius.circular(16),
+                                border: Border.all(
+                                  color: Colors.white.withValues(alpha: 0.25),
+                                ),
+                              ),
+                              child: const Icon(
+                                Icons.shield_rounded,
+                                color: Color(0xFF34D399),
+                                size: 32,
                               ),
                             ),
-                            const SizedBox(height: 4),
-                            Text(
-                              'Full administrator access, role management, and audit surveillance.',
-                              style: theme.textTheme.bodyMedium?.copyWith(
-                                color: isDark
-                                    ? const Color(0xFF94A3B8)
-                                    : const Color(0xFF64748B),
+                            const SizedBox(width: 16),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    'Hello, $adminName',
+                                    style: theme.textTheme.titleLarge?.copyWith(
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.w900,
+                                      letterSpacing: -0.4,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    'Full administrator access, role management, and audit surveillance.',
+                                    style: theme.textTheme.bodyMedium?.copyWith(
+                                      color: const Color(0xFFE2E8F0),
+                                    ),
+                                  ),
+                                ],
                               ),
                             ),
                           ],
                         ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 18),
-                  Wrap(
-                    spacing: 10,
-                    runSpacing: 8,
-                    children: [
+                        const SizedBox(height: 18),
+                        Wrap(
+                          spacing: 10,
+                          runSpacing: 8,
+                          children: [
                       FilledButton.icon(
                         style: FilledButton.styleFrom(
                           backgroundColor: const Color(0xFF0F172A),
@@ -314,6 +351,9 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen>
                 ],
               ),
             ),
+          ],
+        ),
+      ),
             const SizedBox(height: 24),
 
             // Live Metrics Overview

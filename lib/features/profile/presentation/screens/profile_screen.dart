@@ -180,57 +180,185 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
             padding: const EdgeInsets.all(24),
             shrinkWrap: true,
             children: [
+              // Profile Hero Banner with Profile Illustration
+              Container(
+                clipBehavior: Clip.antiAlias,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(26),
+                  border: Border.all(
+                    color: Theme.of(context).brightness == Brightness.dark
+                        ? const Color(0xFF334155)
+                        : const Color(0xFF10B981).withValues(alpha: 0.35),
+                    width: 1.5,
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: const Color(0xFF10B981).withValues(alpha: 0.16),
+                      blurRadius: 28,
+                      offset: const Offset(0, 10),
+                    ),
+                    BoxShadow(
+                      color: Theme.of(context).brightness == Brightness.dark
+                          ? Colors.black.withValues(alpha: 0.4)
+                          : const Color(0xFF0F172A).withValues(alpha: 0.08),
+                      blurRadius: 18,
+                      offset: const Offset(0, 6),
+                    ),
+                  ],
+                ),
+                child: Stack(
+                  children: [
+                    // Illustration Backdrop
+                    Positioned.fill(
+                      child: Image.asset(
+                        'assets/images/profile.jpeg',
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, _, _) => Container(
+                          color: const Color(0xFF064E3B),
+                        ),
+                      ),
+                    ),
+                    // Luxury Gradient Tint
+                    Positioned.fill(
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            begin: Alignment.topCenter,
+                            end: Alignment.bottomCenter,
+                            colors: Theme.of(context).brightness == Brightness.dark
+                                ? [
+                                    const Color(0xF2064E3B),
+                                    const Color(0xF80F172A),
+                                  ]
+                                : [
+                                    const Color(0xEE064E3B),
+                                    const Color(0xEB0F172A),
+                                  ],
+                          ),
+                        ),
+                      ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 28),
+                      child: Center(
+                        child: Column(
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.all(4),
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                border: Border.all(
+                                  color: const Color(0xFF10B981),
+                                  width: 2.5,
+                                ),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: const Color(0xFF10B981).withValues(alpha: 0.4),
+                                    blurRadius: 20,
+                                    spreadRadius: 2,
+                                  ),
+                                ],
+                              ),
+                              child: CircleAvatar(
+                                radius: 46,
+                                backgroundColor: Colors.white,
+                                backgroundImage: resolvedAvatar == null
+                                    ? null
+                                    : NetworkImage(resolvedAvatar),
+                                onBackgroundImageError: resolvedAvatar == null
+                                    ? null
+                                    : (_, _) {},
+                                child: resolvedAvatar == null
+                                    ? Text(
+                                        initial,
+                                        style: const TextStyle(
+                                          fontSize: 36,
+                                          fontWeight: FontWeight.w900,
+                                          color: Color(0xFF10B981),
+                                        ),
+                                      )
+                                    : null,
+                              ),
+                            ),
+                            const SizedBox(height: 12),
+                            FilledButton.tonalIcon(
+                              style: FilledButton.styleFrom(
+                                backgroundColor: Colors.white.withValues(alpha: 0.2),
+                                foregroundColor: Colors.white,
+                                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                              ),
+                              onPressed: authState.isLoading
+                                  ? null
+                                  : _pickProfilePhoto,
+                              icon: const Icon(Icons.photo_camera_outlined, size: 16),
+                              label: const Text(
+                                'Change profile photo',
+                                style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+                              ),
+                            ),
+                            const SizedBox(height: 14),
+                            Text(
+                              displayName,
+                              style: const TextStyle(
+                                fontSize: 20,
+                                fontWeight: FontWeight.w900,
+                                color: Colors.white,
+                                letterSpacing: -0.3,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              user.email,
+                              style: const TextStyle(
+                                fontSize: 13,
+                                color: Color(0xFFCBD5E1),
+                              ),
+                            ),
+                            const SizedBox(height: 10),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFF10B981).withValues(alpha: 0.25),
+                                borderRadius: BorderRadius.circular(16),
+                                border: Border.all(
+                                  color: const Color(0xFF10B981).withValues(alpha: 0.5),
+                                ),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  const Icon(
+                                    Icons.verified_user_rounded,
+                                    size: 15,
+                                    color: Color(0xFF34D399),
+                                  ),
+                                  const SizedBox(width: 6),
+                                  Text(
+                                    role,
+                                    style: const TextStyle(
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w800,
+                                      letterSpacing: 0.6,
+                                      color: Colors.white,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 20),
               Card(
                 child: Padding(
                   padding: const EdgeInsets.all(28),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Center(
-                        child: Column(
-                          children: [
-                            CircleAvatar(
-                              radius: 38,
-                              backgroundImage: resolvedAvatar == null
-                                  ? null
-                                  : NetworkImage(resolvedAvatar),
-                              onBackgroundImageError: resolvedAvatar == null
-                                  ? null
-                                  : (_, _) {},
-                              child: resolvedAvatar == null
-                                  ? Text(
-                                      initial,
-                                      style: Theme.of(context)
-                                          .textTheme
-                                          .headlineMedium,
-                                    )
-                                  : null,
-                            ),
-                            TextButton.icon(
-                              onPressed: authState.isLoading
-                                  ? null
-                                  : _pickProfilePhoto,
-                              icon: const Icon(Icons.photo_camera_outlined),
-                              label: const Text('Change profile photo'),
-                            ),
-                            const SizedBox(height: 12),
-                            Text(
-                              displayName,
-                              style: Theme.of(context).textTheme.titleLarge,
-                            ),
-                            Text(user.email),
-                            const SizedBox(height: 8),
-                            Chip(
-                              avatar: const Icon(
-                                Icons.verified_user_outlined,
-                                size: 18,
-                              ),
-                              label: Text(role),
-                            ),
-                          ],
-                        ),
-                      ),
-                      const Divider(height: 36),
                       Text(
                         'Profile details',
                         style: Theme.of(context).textTheme.titleLarge,

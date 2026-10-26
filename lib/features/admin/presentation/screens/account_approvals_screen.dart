@@ -79,7 +79,20 @@ class _AccountApprovalsScreenState extends State<AccountApprovalsScreen> {
         );
         reviewed = true;
       } catch (rpcErr) {
-        debugPrint('review_user_registration RPC note: $rpcErr');
+        debugPrint('review_user_registration p_ RPC note: $rpcErr');
+        try {
+          await Supabase.instance.client.rpc(
+            'review_user_registration',
+            params: {
+              'user_id': id,
+              'decision': decision,
+              'school_id':? schoolId,
+            },
+          );
+          reviewed = true;
+        } catch (rpcErr2) {
+          debugPrint('review_user_registration fallback RPC note: $rpcErr2');
+        }
       }
 
       // 2. Try Edge Function if RPC was not defined

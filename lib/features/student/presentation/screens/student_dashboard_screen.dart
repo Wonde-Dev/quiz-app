@@ -21,16 +21,16 @@ class StudentDashboardScreen extends ConsumerWidget {
   }
 }
 
-class _StudentQuizList extends StatefulWidget {
+class _StudentQuizList extends ConsumerStatefulWidget {
   const _StudentQuizList({required this.studentId});
 
   final String studentId;
 
   @override
-  State<_StudentQuizList> createState() => _StudentQuizListState();
+  ConsumerState<_StudentQuizList> createState() => _StudentQuizListState();
 }
 
-class _StudentQuizListState extends State<_StudentQuizList> {
+class _StudentQuizListState extends ConsumerState<_StudentQuizList> {
   late Future<
     ({
       List<Map<String, dynamic>> quizzes,
@@ -152,6 +152,10 @@ class _StudentQuizListState extends State<_StudentQuizList> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final user = ref.watch(authStateProvider).user;
+    final studentName = user?.fullName?.isNotEmpty == true
+        ? user!.fullName!
+        : user?.username ?? 'Student';
 
     return RefreshIndicator(
       onRefresh: () async => setState(() => _dashboard = _loadDashboard()),
@@ -326,8 +330,10 @@ class _StudentQuizListState extends State<_StudentQuizList> {
             padding: const EdgeInsets.all(16),
             children: [
               DashboardWelcomeBanner(
+                title: 'Welcome, $studentName',
+                badgeText: 'STUDENT PORTAL',
                 subtitle:
-                    'Welcome! Ready for your next exam in $enrolledLabel?',
+                    'Ready for your next assessment in $enrolledLabel? Complete active quizzes and access worksheets below.',
               ),
               const SizedBox(height: 16),
 

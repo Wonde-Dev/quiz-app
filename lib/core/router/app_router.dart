@@ -6,6 +6,7 @@ import 'package:quiz_app/features/admin/presentation/screens/admin_dashboard_scr
 import 'package:quiz_app/features/auth/presentation/providers/auth_provider.dart';
 import 'package:quiz_app/features/auth/presentation/screens/force_change_password_screen.dart';
 import 'package:quiz_app/features/auth/presentation/screens/login_screen.dart';
+import 'package:quiz_app/features/auth/presentation/screens/onboarding_screen.dart';
 import 'package:quiz_app/features/auth/presentation/screens/splash_screen.dart';
 import 'package:quiz_app/features/auth/presentation/screens/account_status_screen.dart';
 import 'package:quiz_app/features/admin/presentation/screens/account_approvals_screen.dart';
@@ -39,13 +40,14 @@ final routerProvider = Provider<GoRouter>((ref) {
       final user = authState.user;
       final location = state.matchedLocation;
 
-      if (location == '/splash') return null;
+      if (location == '/splash' || location == '/onboarding') return null;
 
       if (user == null) {
         return location == '/login' ||
                 location.startsWith('/login/') ||
                 location == '/register' ||
-                location.startsWith('/register/')
+                location.startsWith('/register/') ||
+                location == '/onboarding'
             ? null
             : '/login';
       }
@@ -55,7 +57,8 @@ final routerProvider = Provider<GoRouter>((ref) {
       if (location == '/account-status' ||
           location == '/about' ||
           location == '/functions' ||
-          location == '/resources') {
+          location == '/resources' ||
+          location == '/onboarding') {
         return null;
       }
       if (location == '/login' ||
@@ -92,6 +95,7 @@ final routerProvider = Provider<GoRouter>((ref) {
     },
     routes: [
       GoRoute(path: '/splash', builder: (context, state) => const SplashScreen()),
+      GoRoute(path: '/onboarding', builder: (context, state) => const OnboardingScreen()),
       GoRoute(path: '/login', builder: (context, state) => const LoginScreen()),
       GoRoute(
         path: '/register',

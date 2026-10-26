@@ -242,10 +242,10 @@ packages:
     dependency: "direct main"
     description:
       name: flutter_fgbg
-      sha256: "98c5818864c6cce768481cae206a86a7377f3405eed29e4de0834125fd46a753"
+      sha256: "8e6707b853f8c3b8d8688f28836f2d34754b9084252eb2a9903491289eb97ba9"
       url: "https://pub.dev"
     source: hosted
-    version: "0.1.0"
+    version: "0.8.0"
   flutter_lints:
     dependency: "direct dev"
     description:
@@ -689,7 +689,7 @@ packages:
     source: hosted
     version: "6.1.0"
   shared_preferences:
-    dependency: transitive
+    dependency: "direct main"
     description:
       name: shared_preferences
       sha256: "1e85e0dccf5b4a016077fea7dfbb4a7cb39c759ac1596fcf60c06deadb7da91f"

@@ -23,6 +23,7 @@ class _TeacherDashboardScreenState
   List<Map<String, dynamic>> _myQuizzes = [];
   bool _loading = true;
   late final AnimationController _pulseController;
+  RealtimeChannel? _realtimeChannel;
 
   @override
   void initState() {
@@ -32,11 +33,41 @@ class _TeacherDashboardScreenState
       duration: const Duration(seconds: 2),
     )..repeat(reverse: true);
     _loadStats();
+    _setupRealtime();
+  }
+
+  void _setupRealtime() {
+    try {
+      _realtimeChannel = Supabase.instance.client
+          .channel('public:teacher_dashboard_stats')
+          .onPostgresChanges(
+            event: PostgresChangeEvent.all,
+            schema: 'public',
+            table: 'users',
+            callback: (_) {
+              if (mounted) _loadStats();
+            },
+          )
+          .onPostgresChanges(
+            event: PostgresChangeEvent.all,
+            schema: 'public',
+            table: 'quizzes',
+            callback: (_) {
+              if (mounted) _loadStats();
+            },
+          )
+          .subscribe();
+    } catch (e) {
+      debugPrint('Teacher realtime notice: $e');
+    }
   }
 
   @override
   void dispose() {
     _pulseController.dispose();
+    if (_realtimeChannel != null) {
+      Supabase.instance.client.removeChannel(_realtimeChannel!);
+    }
     super.dispose();
   }
 
@@ -53,7 +84,7 @@ class _TeacherDashboardScreenState
     try {
       var studentsQuery = client
           .from('users')
-          .select('id')
+          .select('id, is_active')
           .eq('role', AppRoles.student);
       if (user.schoolId != null) {
         studentsQuery = studentsQuery.eq('school_id', user.schoolId!);
@@ -70,7 +101,8 @@ class _TeacherDashboardScreenState
         teacherQuizzesQuery,
       ]);
 
-      final studentsList = results[0] as List;
+      final allStudents = (results[0] as List).cast<Map<String, dynamic>>();
+      final activeStudents = allStudents.where((s) => s['is_active'] != false).toList();
       final quizzesList = results[1] as List;
       final quizIds =
           quizzesList.map((q) => q['id'] as String).toList();
@@ -87,7 +119,7 @@ class _TeacherDashboardScreenState
       if (!mounted) return;
       setState(() {
         _myQuizzes = List<Map<String, dynamic>>.from(quizzesList);
-        _studentCount = studentsList.length;
+        _studentCount = activeStudents.length;
         _quizCount = quizzesList.length;
         _submissionCount = submissionCount;
         _loading = false;
@@ -114,190 +146,230 @@ class _TeacherDashboardScreenState
         child: ListView(
           padding: const EdgeInsets.all(20),
           children: [
-            // Welcome Header - Crisp White Aesthetic
+            // Welcome Header - Luxury Branded Card with Home Illustration
             Container(
-              padding: const EdgeInsets.all(22),
+              clipBehavior: Clip.antiAlias,
               decoration: BoxDecoration(
-                color: isDark ? const Color(0xFF1E293B) : Colors.white,
-                borderRadius: BorderRadius.circular(24),
+                borderRadius: BorderRadius.circular(26),
                 border: Border.all(
-                  color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0),
-                  width: 1.2,
+                  color: isDark
+                      ? const Color(0xFF334155)
+                      : const Color(0xFF10B981).withValues(alpha: 0.35),
+                  width: 1.5,
                 ),
                 boxShadow: [
                   BoxShadow(
+                    color: const Color(0xFF10B981).withValues(alpha: 0.16),
+                    blurRadius: 28,
+                    offset: const Offset(0, 10),
+                  ),
+                  BoxShadow(
                     color: isDark
-                        ? Colors.black.withValues(alpha: 0.3)
-                        : const Color(0xFF0F172A).withValues(alpha: 0.05),
-                    blurRadius: 26,
-                    offset: const Offset(0, 8),
+                        ? Colors.black.withValues(alpha: 0.4)
+                        : const Color(0xFF0F172A).withValues(alpha: 0.08),
+                    blurRadius: 18,
+                    offset: const Offset(0, 6),
                   ),
                 ],
               ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+              child: Stack(
                 children: [
-                  Row(
-                    children: [
-                      // Active Pulse Status Badge
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 10,
-                          vertical: 4,
+                  // Illustration Background
+                  Positioned.fill(
+                    child: Image.asset(
+                      'assets/images/home.jpeg',
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, _, _) => Container(
+                        color: const Color(0xFF064E3B),
+                      ),
+                    ),
+                  ),
+                  // Luxury Gradient Tint
+                  Positioned.fill(
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                          colors: isDark
+                              ? [
+                                  const Color(0xF5064E3B),
+                                  const Color(0xF80F172A),
+                                  const Color(0xF2022C22),
+                                ]
+                              : [
+                                  const Color(0xEE064E3B),
+                                  const Color(0xEA0F172A),
+                                  const Color(0xDC047857),
+                                ],
                         ),
-                        decoration: BoxDecoration(
-                          color: isDark
-                              ? const Color(0xFF334155)
-                              : const Color(0xFFF1F5F9),
-                          borderRadius: BorderRadius.circular(20),
-                          border: Border.all(
-                            color: isDark
-                                ? const Color(0xFF475569)
-                                : const Color(0xFFE2E8F0),
-                          ),
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
+                      ),
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.all(22),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
                           children: [
-                            AnimatedBuilder(
-                              animation: _pulseController,
-                              builder: (context, _) => Container(
-                                width: 8,
-                                height: 8,
-                                decoration: BoxDecoration(
-                                  color: const Color(0xFF10B981),
-                                  shape: BoxShape.circle,
-                                  boxShadow: [
-                                    BoxShadow(
-                                      color: const Color(0xFF10B981).withValues(
-                                        alpha: 0.3 + (_pulseController.value * 0.5),
-                                      ),
-                                      blurRadius: 6,
-                                      spreadRadius: 2,
-                                    ),
-                                  ],
+                            // Active Pulse Status Badge
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 10,
+                                vertical: 4,
+                              ),
+                              decoration: BoxDecoration(
+                                color: Colors.white.withValues(alpha: 0.16),
+                                borderRadius: BorderRadius.circular(20),
+                                border: Border.all(
+                                  color: Colors.white.withValues(alpha: 0.3),
                                 ),
                               ),
-                            ),
-                            const SizedBox(width: 8),
-                            Text(
-                              'TEACHER PORTAL · ACTIVE',
-                              style: TextStyle(
-                                fontSize: 10,
-                                fontWeight: FontWeight.w800,
-                                letterSpacing: 0.8,
-                                color: isDark
-                                    ? const Color(0xFF94A3B8)
-                                    : const Color(0xFF64748B),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  AnimatedBuilder(
+                                    animation: _pulseController,
+                                    builder: (context, _) => Container(
+                                      width: 8,
+                                      height: 8,
+                                      decoration: BoxDecoration(
+                                        color: const Color(0xFF34D399),
+                                        shape: BoxShape.circle,
+                                        boxShadow: [
+                                          BoxShadow(
+                                            color: const Color(0xFF34D399).withValues(
+                                              alpha: 0.4 + (_pulseController.value * 0.5),
+                                            ),
+                                            blurRadius: 6,
+                                            spreadRadius: 2,
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  const Text(
+                                    'TEACHER PORTAL · ACTIVE',
+                                    style: TextStyle(
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.w800,
+                                      letterSpacing: 0.8,
+                                      color: Colors.white,
+                                    ),
+                                  ),
+                                ],
                               ),
+                            ),
+                            const Spacer(),
+                            IconButton.filledTonal(
+                              style: IconButton.styleFrom(
+                                backgroundColor: Colors.white.withValues(alpha: 0.2),
+                                foregroundColor: Colors.white,
+                              ),
+                              tooltip: 'Refresh teaching stats',
+                              onPressed: _loading ? null : _loadStats,
+                              icon: _loading
+                                  ? const SizedBox(
+                                      width: 16,
+                                      height: 16,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                        color: Colors.white,
+                                      ),
+                                    )
+                                  : const Icon(Icons.refresh_rounded, size: 20),
                             ),
                           ],
                         ),
-                      ),
-                      const Spacer(),
-                      IconButton.filledTonal(
-                        tooltip: 'Refresh teaching stats',
-                        onPressed: _loading ? null : _loadStats,
-                        icon: _loading
-                            ? const SizedBox(
-                                width: 16,
-                                height: 16,
-                                child: CircularProgressIndicator(strokeWidth: 2),
-                              )
-                            : const Icon(Icons.refresh_rounded, size: 20),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 16),
-                  Row(
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                          color: isDark
-                              ? const Color(0xFF0F172A)
-                              : const Color(0xFFF8FAFC),
-                          borderRadius: BorderRadius.circular(16),
-                          border: Border.all(
-                            color: isDark
-                                ? const Color(0xFF334155)
-                                : const Color(0xFFE2E8F0),
-                          ),
-                        ),
-                        child: const Icon(
-                          Icons.school_rounded,
-                          color: Color(0xFF10B981),
-                          size: 32,
-                        ),
-                      ),
-                      const SizedBox(width: 16),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
+                        const SizedBox(height: 16),
+                        Row(
                           children: [
-                            Text(
-                              'Welcome, $teacherName',
-                              style: theme.textTheme.titleLarge?.copyWith(
-                                color: isDark ? Colors.white : const Color(0xFF0F172A),
-                                fontWeight: FontWeight.w900,
-                                letterSpacing: -0.4,
+                            Container(
+                              padding: const EdgeInsets.all(12),
+                              decoration: BoxDecoration(
+                                color: Colors.white.withValues(alpha: 0.15),
+                                borderRadius: BorderRadius.circular(16),
+                                border: Border.all(
+                                  color: Colors.white.withValues(alpha: 0.25),
+                                ),
+                              ),
+                              child: const Icon(
+                                Icons.school_rounded,
+                                color: Color(0xFF34D399),
+                                size: 32,
                               ),
                             ),
-                            const SizedBox(height: 4),
-                            Text(
-                              'Create engaging quizzes, evaluate submissions, and guide student success.',
-                              style: theme.textTheme.bodyMedium?.copyWith(
-                                color: isDark
-                                    ? const Color(0xFF94A3B8)
-                                    : const Color(0xFF64748B),
+                            const SizedBox(width: 16),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    'Welcome, $teacherName',
+                                    style: theme.textTheme.titleLarge?.copyWith(
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.w900,
+                                      letterSpacing: -0.4,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    'Create engaging quizzes, evaluate submissions, and guide student success.',
+                                    style: theme.textTheme.bodyMedium?.copyWith(
+                                      color: const Color(0xFFE2E8F0),
+                                    ),
+                                  ),
+                                ],
                               ),
                             ),
                           ],
                         ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 18),
-                  Wrap(
-                    spacing: 10,
-                    runSpacing: 8,
-                    children: [
-                      FilledButton.icon(
-                        style: FilledButton.styleFrom(
-                          backgroundColor: const Color(0xFF0F172A),
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 16,
-                            vertical: 12,
-                          ),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
+                        const SizedBox(height: 18),
+                        Wrap(
+                          spacing: 10,
+                          runSpacing: 8,
+                          children: [
+                            FilledButton.icon(
+                              style: FilledButton.styleFrom(
+                                backgroundColor: const Color(0xFF0F172A),
+                                foregroundColor: Colors.white,
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 16,
+                                  vertical: 12,
+                                ),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                              ),
+                              icon: const Icon(Icons.add_circle_outline_rounded, size: 18),
+                              label: const Text('Prepare New Quiz'),
+                              onPressed: () => context.push('/teacher/quizzes/new'),
+                            ),
+                            OutlinedButton.icon(
+                              style: OutlinedButton.styleFrom(
+                                backgroundColor: Colors.white.withValues(alpha: 0.15),
+                                foregroundColor: Colors.white,
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 16,
+                                  vertical: 12,
+                                ),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                side: const BorderSide(
+                                  color: Colors.white38,
+                                ),
+                              ),
+                              icon: const Icon(Icons.fact_check_rounded, size: 18),
+                              label: const Text('Evaluate Submissions'),
+                              onPressed: () => context.push('/teacher/results'),
+                            ),
+                          ],
                         ),
-                        icon: const Icon(Icons.add_circle_outline_rounded, size: 18),
-                        label: const Text('Prepare New Quiz'),
-                        onPressed: () => context.push('/teacher/quizzes/new'),
-                      ),
-                      OutlinedButton.icon(
-                        style: OutlinedButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 16,
-                            vertical: 12,
-                          ),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          side: BorderSide(
-                            color: isDark
-                                ? const Color(0xFF475569)
-                                : const Color(0xFFCBD5E1),
-                          ),
-                        ),
-                        icon: const Icon(Icons.fact_check_rounded, size: 18),
-                        label: const Text('Evaluate Submissions'),
-                        onPressed: () => context.push('/teacher/results'),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
                 ],
               ),

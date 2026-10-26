@@ -274,6 +274,123 @@ class _TeacherManagementScreenState
     }
   }
 
+  Future<void> _editTeacher(Map<String, dynamic> teacher) async {
+    final id = teacher['id'] as String;
+    final currentName = teacher['full_name'] as String? ?? '';
+    final currentEmail = teacher['email'] as String? ?? '';
+    final nameController = TextEditingController(text: currentName);
+    final emailController = TextEditingController(text: currentEmail);
+    bool isActive = teacher['is_active'] != false;
+
+    final saved = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          title: const Row(
+            children: [
+              Icon(Icons.edit_rounded, color: Color(0xFF10B981)),
+              SizedBox(width: 8),
+              Text('Edit Faculty Member'),
+            ],
+          ),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: nameController,
+                  decoration: const InputDecoration(
+                    labelText: 'Full Name',
+                    prefixIcon: Icon(Icons.person_outline),
+                  ),
+                ),
+                const SizedBox(height: 14),
+                TextField(
+                  controller: emailController,
+                  decoration: const InputDecoration(
+                    labelText: 'Email Address',
+                    prefixIcon: Icon(Icons.email_outlined),
+                  ),
+                ),
+                const SizedBox(height: 14),
+                SwitchListTile(
+                  title: const Text('Account Active', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
+                  subtitle: Text(
+                    isActive ? 'Teacher can sign in and manage quizzes' : 'Account suspended / deactivated',
+                    style: const TextStyle(fontSize: 12),
+                  ),
+                  value: isActive,
+                  onChanged: (v) => setDialogState(() => isActive = v),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Save Changes'),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (saved != true || !mounted) return;
+
+    setState(() {
+      _isResetting = true;
+      _error = null;
+    });
+
+    try {
+      final newName = nameController.text.trim();
+      final newEmail = emailController.text.trim();
+      bool updated = false;
+
+      try {
+        await Supabase.instance.client.rpc(
+          'admin_update_user',
+          params: {
+            'p_user_id': id,
+            'p_full_name': newName,
+            'p_email': newEmail,
+            'p_is_active': isActive,
+          },
+        );
+        updated = true;
+      } catch (rpcErr) {
+        debugPrint('admin_update_user RPC note: $rpcErr');
+      }
+
+      if (!updated) {
+        await Supabase.instance.client.from('users').update({
+          'full_name': newName,
+          'email': newEmail,
+          'is_active': isActive,
+        }).eq('id', id);
+      }
+
+      if (!mounted) return;
+      setState(() => _teachersFuture = _loadTeachers());
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Faculty account updated successfully!'),
+          backgroundColor: Color(0xFF10B981),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } catch (e) {
+      if (mounted) setState(() => _error = 'Could not update teacher: $e');
+    } finally {
+      if (mounted) setState(() => _isResetting = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -440,6 +557,7 @@ class _TeacherManagementScreenState
                         isResetting: _isResetting,
                         onResetPassword: () => _resetTeacherPassword(teacher),
                         onDelete: () => _deleteTeacher(teacher),
+                        onEdit: () => _editTeacher(teacher),
                       ),
                       const SizedBox(height: 10),
                     ],
@@ -460,12 +578,14 @@ class _TeacherDirectoryCard extends StatelessWidget {
     required this.isResetting,
     required this.onResetPassword,
     required this.onDelete,
+    required this.onEdit,
   });
 
   final Map<String, dynamic> teacher;
   final bool isResetting;
   final VoidCallback onResetPassword;
   final VoidCallback onDelete;
+  final VoidCallback onEdit;
 
   @override
   Widget build(BuildContext context) {
@@ -552,6 +672,18 @@ class _TeacherDirectoryCard extends StatelessWidget {
                         onPressed: isResetting ? null : onResetPassword,
                         icon: const Icon(Icons.lock_reset_rounded, size: 16),
                         label: const Text('Reset Password', style: TextStyle(fontSize: 12)),
+                      ),
+                      const SizedBox(width: 8),
+                      IconButton.outlined(
+                        tooltip: 'Edit faculty profile',
+                        style: IconButton.styleFrom(
+                          foregroundColor: const Color(0xFF10B981),
+                          side: const BorderSide(color: Color(0xFF6EE7B7)),
+                          minimumSize: const Size(34, 34),
+                          padding: const EdgeInsets.all(6),
+                        ),
+                        onPressed: isResetting ? null : onEdit,
+                        icon: const Icon(Icons.edit_outlined, size: 16),
                       ),
                       const SizedBox(width: 8),
                       IconButton.outlined(
