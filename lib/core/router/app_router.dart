@@ -67,7 +67,7 @@ final routerProvider = Provider<GoRouter>((ref) {
           location.startsWith('/register/') ||
           location == '/change-password') {
         return switch (user.role) {
-          AppRoles.admin => '/admin/dashboard',
+          AppRoles.admin || AppRoles.subadmin => '/admin/dashboard',
           AppRoles.teacher => '/teacher/dashboard',
           AppRoles.student => '/student/dashboard',
           _ => '/login',
@@ -76,12 +76,12 @@ final routerProvider = Provider<GoRouter>((ref) {
 
       // Quiz creation is strictly reserved for teachers:
       if (location == '/teacher/quizzes/new' && user.role != AppRoles.teacher) {
-        return user.role == AppRoles.admin
+        return (user.role == AppRoles.admin || user.role == AppRoles.subadmin)
             ? '/admin/dashboard'
             : '/student/dashboard';
       }
 
-      if (user.role == AppRoles.admin) return null;
+      if (user.role == AppRoles.admin || user.role == AppRoles.subadmin) return null;
       if (location.startsWith('/admin') ||
           (user.role == AppRoles.student && location.startsWith('/teacher')) ||
           (user.role == AppRoles.teacher && location.startsWith('/student'))) {

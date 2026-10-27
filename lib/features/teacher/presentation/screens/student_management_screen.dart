@@ -254,10 +254,40 @@ class _StudentManagementScreenState
       _isResetting = true;
     });
     try {
-      await Supabase.instance.client.functions.invoke(
-        'manage-account',
-        body: {'action': 'create', ...account},
-      );
+      final currentUser = ref.read(authStateProvider).user;
+      bool created = false;
+
+      // 1. Try dedicated database RPC function
+      try {
+        final rpcRes = await Supabase.instance.client.rpc(
+          'admin_create_user',
+          params: {
+            'p_full_name': account['fullName'],
+            'p_username': account['username'],
+            'p_email': account['email'],
+            'p_password': account['password'],
+            'p_role': account['role'] ?? AppRoles.student,
+            'p_school_id': account['schoolId'],
+            'p_section_id': account['sectionId'],
+            'p_subject': account['subject'],
+            'p_grade': currentUser?.attendanceGrade,
+            'p_class': currentUser?.attendanceClass,
+          },
+        );
+        if (rpcRes is Map && rpcRes['success'] == true) {
+          created = true;
+        }
+      } catch (rpcErr) {
+        debugPrint('admin_create_user in student management: $rpcErr');
+      }
+
+      // 2. Try Edge Function fallback
+      if (!created) {
+        await Supabase.instance.client.functions.invoke(
+          'manage-account',
+          body: {'action': 'create', ...account},
+        );
+      }
       if (!mounted) return;
       setState(() => _studentsFuture = _loadAccounts());
 
@@ -920,6 +950,25 @@ class _StudentManagementScreenState
     final id = account['id'] as String;
     final role = account['role'] as String? ?? 'account';
     final targetRole = account['role'] as String? ?? 'student';
+
+    final isSuperAdminAccount = account['is_super_admin'] == true ||
+        (account['email'] as String? ?? '').toLowerCase().contains('wondedev369@gmail.com') ||
+        (account['email'] as String? ?? '').toLowerCase().contains('wondeadmin@admin.edu') ||
+        account['role'] == 'admin';
+
+    if (isSuperAdminAccount) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'The Main Administrator account is protected and cannot be deleted.',
+          ),
+          backgroundColor: Colors.red,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
+
     if (!_isAdmin && targetRole != AppRoles.student) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(

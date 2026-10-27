@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:quiz_app/features/quiz/domain/calculate_result.dart';
 import 'package:quiz_app/shared/models/question.dart';
@@ -18,27 +19,74 @@ void main() {
       id: 'blank',
       quizId: 'quiz',
       text: 'The largest planet is ____.',
-      type: 'short_answer',
+      type: 'fill_in_blank',
       correctAnswer: 'Jupiter',
+    ),
+    Question(
+      id: 'choose',
+      quizId: 'quiz',
+      text: 'Which organelle is powerhouse of cell?',
+      type: 'multiple_choice',
+      options: [
+        Option(id: 'a', text: 'Nucleus'),
+        Option(id: 'b', text: 'Mitochondria', isCorrect: true),
+      ],
+    ),
+    Question(
+      id: 'desc',
+      quizId: 'quiz',
+      text: 'Describe photosynthesis.',
+      type: 'short_answer',
+      correctAnswer: 'Plants convert light into chemical energy',
     ),
   ];
 
-  test('scores true-false and fill-in-the-blank answers', () {
+  test('scores true-false, fill-in-the-blank, multiple-choice, and descriptive answers', () {
     final result = CalculateResult()(
       questions: questions,
-      answers: {'true-false': 'a', 'blank': ' jUpItEr '},
+      answers: {
+        'true-false': 'a',
+        'blank': ' jUpItEr. ',
+        'choose': 'b',
+        'desc': 'Plants convert light into chemical energy',
+      },
     );
 
-    expect(result['score'], 2);
-    expect(result['total_points'], 2);
+    expect(result['score'], 4);
+    expect(result['total_points'], 4);
     expect(result['percentage'], 100);
     expect(result['passed'], isTrue);
   });
 
-  test('marks an incorrect fill-in-the-blank answer wrong', () {
+  test('handles JSON-encoded answers with student attached work/image', () {
+    final jsonAnswer = jsonEncode({
+      'text': 'Jupiter',
+      'image_url': 'https://storage.supabase.com/handwritten_calc.jpg',
+    });
+
     final result = CalculateResult()(
       questions: questions,
-      answers: {'true-false': 'b', 'blank': 'Saturn'},
+      answers: {
+        'true-false': 'True',
+        'blank': jsonAnswer,
+        'choose': jsonEncode({'option_id': 'b', 'image_url': 'https://img.jpg'}),
+        'desc': 'Plants convert light into chemical energy.',
+      },
+    );
+
+    expect(result['score'], 4);
+    expect(result['percentage'], 100);
+  });
+
+  test('marks incorrect answers wrong', () {
+    final result = CalculateResult()(
+      questions: questions,
+      answers: {
+        'true-false': 'b',
+        'blank': 'Saturn',
+        'choose': 'a',
+        'desc': 'Wrong explanation',
+      },
     );
 
     expect(result['score'], 0);

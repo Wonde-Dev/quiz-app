@@ -11,9 +11,14 @@ class AppConstants {
 
 /// Role constants used throughout the app.
 class AppRoles {
-  static const admin = 'admin';
+  static const admin = 'admin'; // Super Administrator
+  static const subadmin = 'subadmin'; // Sub-Admin / Director
   static const teacher = 'teacher';
   static const student = 'student';
+
+  static bool isAdmin(String? role) => role == admin || role == subadmin;
+  static bool isTeacher(String? role) => role == teacher;
+  static bool isStudent(String? role) => role == student;
 }
 
 /// Supabase configuration.

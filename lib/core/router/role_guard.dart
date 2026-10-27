@@ -14,6 +14,7 @@ class RoleGuard {
       // Send each role to its own dashboard
       switch (user.role) {
         case AppRoles.admin:
+        case AppRoles.subadmin:
           return '/admin/dashboard';
         case AppRoles.teacher:
           return '/teacher/dashboard';

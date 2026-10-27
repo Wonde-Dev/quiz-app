@@ -83,6 +83,80 @@ class CourseResourceService {
     }
   }
 
+  Future<CourseResource> addVideoResource({
+    required String title,
+    String? description,
+    required String videoUrl,
+    String? customThumbnailUrl,
+    Uint8List? thumbnailBytes,
+    String? thumbnailFileName,
+    required String targetGrade,
+    required String targetSection,
+    required String teacherId,
+    required String teacherName,
+    String? schoolId,
+  }) async {
+    String finalThumbnailUrl = customThumbnailUrl ?? '';
+
+    // If custom thumbnail image bytes provided, upload it to storage
+    if (thumbnailBytes != null && thumbnailBytes.isNotEmpty) {
+      try {
+        final cleanName = (thumbnailFileName ?? 'thumb.jpg')
+            .replaceAll(RegExp(r'[^a-zA-Z0-9._-]'), '_');
+        final storagePath =
+            'thumbnails/$teacherId/${DateTime.now().millisecondsSinceEpoch}_$cleanName';
+        await _supabase.storage.from('course-materials').uploadBinary(
+              storagePath,
+              thumbnailBytes,
+              fileOptions:
+                  const FileOptions(contentType: 'image/jpeg', upsert: true),
+            );
+        finalThumbnailUrl =
+            _supabase.storage.from('course-materials').getPublicUrl(storagePath);
+      } catch (e) {
+        debugPrint('Thumbnail upload note: $e');
+      }
+    }
+
+    if (finalThumbnailUrl.isEmpty) {
+      finalThumbnailUrl = CourseResource.extractYoutubeThumbnail(videoUrl) ?? '';
+    }
+
+    final id = DateTime.now().microsecondsSinceEpoch.toString();
+    final resourceMap = {
+      'id': id,
+      'title': title.trim(),
+      'description': description?.trim(),
+      'file_name': 'Video: $title',
+      'file_url': videoUrl.trim(),
+      'file_type': 'video',
+      'video_url': videoUrl.trim(),
+      'thumbnail_url': finalThumbnailUrl.isNotEmpty ? finalThumbnailUrl : null,
+      'school_id': schoolId,
+      'teacher_id': teacherId,
+      'teacher_name': teacherName,
+      'target_grade': targetGrade,
+      'target_section': targetSection,
+      'created_at': DateTime.now().toIso8601String(),
+    };
+
+    try {
+      final inserted = await _supabase
+          .from('course_resources')
+          .insert(resourceMap)
+          .select()
+          .single();
+      final resource = CourseResource.fromMap(inserted);
+      _fallbackCache.insert(0, resource);
+      return resource;
+    } catch (e) {
+      debugPrint('course_resources video insert note: $e');
+      final fallbackResource = CourseResource.fromMap(resourceMap);
+      _fallbackCache.insert(0, fallbackResource);
+      return fallbackResource;
+    }
+  }
+
   Future<List<CourseResource>> getResourcesForStudent({
     String? targetGrade,
     String? targetSection,

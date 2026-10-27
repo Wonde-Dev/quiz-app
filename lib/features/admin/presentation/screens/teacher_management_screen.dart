@@ -38,7 +38,10 @@ class _TeacherManagementScreenState
     final client = Supabase.instance.client;
     final rows = await client
         .from('users')
-        .select('id, full_name, username, email, school_id, approval_status, is_active, created_at, schools(name)')
+        .select(
+          'id, full_name, username, email, school_id, approval_status, is_active, created_at, '
+          'is_attendance_teacher, attendance_grade, attendance_class, assigned_grade, assigned_class, assigned_subject, requested_subject, schools(name)',
+        )
         .eq('role', AppRoles.teacher)
         .neq('is_active', false)
         .order('full_name', ascending: true);
@@ -85,99 +88,95 @@ class _TeacherManagementScreenState
     });
 
     try {
-      final batch = await _resetService.resetAccounts([id]);
+      final username = teacher['username'] as String? ?? '';
+      final result = await _resetService.resetPasswordDirect(
+        accountId: id,
+        username: username,
+        role: AppRoles.teacher,
+      );
+
       if (!mounted) return;
-      setState(() => _teachersFuture = _loadTeachers());
 
-      if (batch.results.isEmpty) {
-        setState(() => _error = 'Could not reset password for this teacher.');
-        return;
-      }
-      final result = batch.results.first;
-
-      // Show credentials dialog
+      // Show temporary credential copy dialog
       await showDialog<void>(
         context: context,
         builder: (ctx) => AlertDialog(
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(24),
+            borderRadius: BorderRadius.circular(20),
             side: const BorderSide(color: Color(0xFFE2E8F0)),
+          ),
+          title: const Row(
+            children: [
+              Icon(Icons.check_circle_rounded, color: Color(0xFF10B981)),
+              SizedBox(width: 10),
+              Text('Password Reset Done'),
+            ],
           ),
           content: Column(
             mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Container(
-                width: 50,
-                height: 50,
-                decoration: BoxDecoration(
-                  color: const Color(0xFF10B981).withValues(alpha: 0.12),
-                  shape: BoxShape.circle,
-                ),
-                child: const Icon(Icons.check_circle_rounded, color: Color(0xFF10B981), size: 30),
-              ),
-              const SizedBox(height: 14),
-              const Text(
-                'Password Reset Successful',
-                style: TextStyle(fontWeight: FontWeight.w900, fontSize: 17),
-              ),
-              const SizedBox(height: 6),
-              Text(
-                'Temporary password for $name:',
-                style: const TextStyle(fontSize: 12, color: Color(0xFF64748B)),
-              ),
-              const SizedBox(height: 14),
+              Text('Faculty member: $name'),
+              const SizedBox(height: 12),
               Container(
                 width: double.infinity,
-                padding: const EdgeInsets.all(12),
+                padding: const EdgeInsets.all(14),
                 decoration: BoxDecoration(
                   color: const Color(0xFFF8FAFC),
                   borderRadius: BorderRadius.circular(12),
                   border: Border.all(color: const Color(0xFFE2E8F0)),
                 ),
-                child: SelectableText(
-                  result.temporaryPassword,
-                  style: const TextStyle(
-                    fontFamily: 'monospace',
-                    fontWeight: FontWeight.bold,
-                    fontSize: 15,
-                    color: Color(0xFF0F172A),
-                  ),
-                  textAlign: TextAlign.center,
-                ),
-              ),
-              const SizedBox(height: 18),
-              Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      icon: const Icon(Icons.copy_rounded, size: 16),
-                      label: const Text('Copy Password'),
-                      onPressed: () {
-                        Clipboard.setData(ClipboardData(text: result.temporaryPassword));
-                        ScaffoldMessenger.of(ctx).showSnackBar(
-                          const SnackBar(
-                            content: Text('Password copied to clipboard!'),
-                            duration: Duration(seconds: 2),
-                            behavior: SnackBarBehavior.floating,
-                          ),
-                        );
-                      },
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('TEMPORARY CREDENTIALS',
+                        style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF64748B))),
+                    const SizedBox(height: 6),
+                    Text('Username: $username', style: const TextStyle(fontWeight: FontWeight.w600)),
+                    const SizedBox(height: 4),
+                    SelectableText(
+                      'Password: ${result.temporaryPassword}',
+                      style: const TextStyle(
+                        fontFamily: 'monospace',
+                        fontWeight: FontWeight.bold,
+                        color: Color(0xFF0F172A),
+                        fontSize: 14,
+                      ),
                     ),
-                  ),
-                  const SizedBox(width: 8),
-                  FilledButton(
-                    style: FilledButton.styleFrom(backgroundColor: const Color(0xFF0F172A)),
-                    onPressed: () => Navigator.pop(ctx),
-                    child: const Text('Done'),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ],
           ),
+          actions: [
+            OutlinedButton.icon(
+              icon: const Icon(Icons.copy_rounded, size: 16),
+              label: const Text('Copy Info'),
+              onPressed: () {
+                Clipboard.setData(
+                  ClipboardData(text: 'Username: $username\nPassword: ${result.temporaryPassword}'),
+                );
+                ScaffoldMessenger.of(ctx).showSnackBar(
+                  const SnackBar(
+                    content: Text('Credentials copied to clipboard!'),
+                    duration: Duration(seconds: 2),
+                    behavior: SnackBarBehavior.floating,
+                  ),
+                );
+              },
+            ),
+            FilledButton(
+              style: FilledButton.styleFrom(backgroundColor: const Color(0xFF0F172A)),
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Close'),
+            ),
+          ],
         ),
       );
     } catch (e) {
-      if (mounted) setState(() => _error = 'Could not reset password: $e');
+      if (mounted) {
+        setState(() => _error = 'Could not reset password: $e');
+      }
     } finally {
       if (mounted) setState(() => _isResetting = false);
     }
@@ -185,17 +184,19 @@ class _TeacherManagementScreenState
 
   Future<void> _deleteTeacher(Map<String, dynamic> teacher) async {
     final id = teacher['id'] as String;
-    final name = teacher['full_name'] as String? ??
-        teacher['username'] as String? ??
-        'Teacher';
+    final name = teacher['full_name'] as String? ?? teacher['username'] as String? ?? 'Teacher';
 
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Delete Teacher Account?'),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(20),
+          side: const BorderSide(color: Color(0xFFE2E8F0)),
+        ),
+        title: const Text('Delete Faculty Account?'),
         content: Text(
-          'Are you sure you want to permanently remove $name from the system? '
-          'This will revoke their faculty access and remove their account.',
+          'Permanently remove $name from the institutional registry? '
+          'Their quizzes, answer sheets, and teaching records will be purged.',
         ),
         actions: [
           TextButton(
@@ -203,11 +204,9 @@ class _TeacherManagementScreenState
             child: const Text('Cancel'),
           ),
           FilledButton(
-            style: FilledButton.styleFrom(
-              backgroundColor: const Color(0xFFEF4444),
-            ),
+            style: FilledButton.styleFrom(backgroundColor: const Color(0xFFEF4444)),
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Delete Account'),
+            child: const Text('Delete Faculty'),
           ),
         ],
       ),
@@ -226,17 +225,24 @@ class _TeacherManagementScreenState
         await Supabase.instance.client
             .rpc('delete_user_account', params: {'user_id': id, 'p_user_id': id});
         deleted = true;
-      } catch (_) {}
+      } catch (rpcErr) {
+        debugPrint('delete_user_account RPC note: $rpcErr');
+      }
 
       if (!deleted) {
         try {
-          await Supabase.instance.client.functions
-              .invoke('manage-account', body: {'action': 'delete', 'userId': id});
+          await Supabase.instance.client.functions.invoke(
+            'manage-account',
+            body: {'action': 'delete', 'userId': id},
+          );
           deleted = true;
         } catch (_) {}
       }
 
       if (!deleted) {
+        try {
+          await Supabase.instance.client.from('course_resources').delete().eq('teacher_id', id);
+        } catch (_) {}
         try {
           await Supabase.instance.client.from('teacher_courses').delete().eq('teacher_id', id);
         } catch (_) {}
@@ -247,13 +253,11 @@ class _TeacherManagementScreenState
           await Supabase.instance.client.from('users').delete().eq('id', id);
           deleted = true;
         } catch (_) {
-          try {
-            await Supabase.instance.client.from('users').update({
-              'is_active': false,
-              'approval_status': 'rejected',
-            }).eq('id', id);
-            deleted = true;
-          } catch (_) {}
+          await Supabase.instance.client.from('users').update({
+            'is_active': false,
+            'approval_status': 'rejected',
+          }).eq('id', id);
+          deleted = true;
         }
       }
 
@@ -261,14 +265,13 @@ class _TeacherManagementScreenState
       setState(() => _teachersFuture = _loadTeachers());
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Faculty account for $name removed successfully'),
+          content: Text('Account for $name was removed.'),
+          backgroundColor: const Color(0xFFEF4444),
           behavior: SnackBarBehavior.floating,
         ),
       );
     } catch (e) {
-      if (mounted) {
-        setState(() => _error = 'Could not delete teacher account: $e');
-      }
+      if (mounted) setState(() => _error = 'Could not delete teacher: $e');
     } finally {
       if (mounted) setState(() => _isResetting = false);
     }
@@ -278,52 +281,136 @@ class _TeacherManagementScreenState
     final id = teacher['id'] as String;
     final currentName = teacher['full_name'] as String? ?? '';
     final currentEmail = teacher['email'] as String? ?? '';
+    final currentSubject = teacher['assigned_subject'] as String? ??
+        teacher['requested_subject'] as String? ??
+        '';
+    bool isAttendance = teacher['is_attendance_teacher'] == true;
+    String attendanceClass = teacher['attendance_class'] as String? ?? '9A';
+    String attendanceGrade = teacher['attendance_grade'] as String? ?? 'Grade 9';
+    bool isActive = teacher['is_active'] != false;
+
     final nameController = TextEditingController(text: currentName);
     final emailController = TextEditingController(text: currentEmail);
-    bool isActive = teacher['is_active'] != false;
+    final subjectController = TextEditingController(text: currentSubject);
+
+    final standardClasses = ['9A', '9B', '9C', '9D', '10A', '10B', '10C', '11A', '11B', '12A'];
 
     final saved = await showDialog<bool>(
       context: context,
       builder: (ctx) => StatefulBuilder(
-        builder: (context, setDialogState) => AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        builder: (ctx, setDialogState) => AlertDialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+            side: const BorderSide(color: Color(0xFFE2E8F0)),
+          ),
           title: const Row(
             children: [
-              Icon(Icons.edit_rounded, color: Color(0xFF10B981)),
+              Icon(Icons.edit_note_rounded, color: Color(0xFF10B981)),
               SizedBox(width: 8),
-              Text('Edit Faculty Member'),
+              Text('Edit Faculty Profile'),
             ],
           ),
           content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                TextField(
-                  controller: nameController,
-                  decoration: const InputDecoration(
-                    labelText: 'Full Name',
-                    prefixIcon: Icon(Icons.person_outline),
+            child: SizedBox(
+              width: 440,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  TextFormField(
+                    controller: nameController,
+                    decoration: const InputDecoration(
+                      labelText: 'Full Name',
+                      prefixIcon: Icon(Icons.person_outline_rounded),
+                    ),
                   ),
-                ),
-                const SizedBox(height: 14),
-                TextField(
-                  controller: emailController,
-                  decoration: const InputDecoration(
-                    labelText: 'Email Address',
-                    prefixIcon: Icon(Icons.email_outlined),
+                  const SizedBox(height: 12),
+                  TextFormField(
+                    controller: emailController,
+                    decoration: const InputDecoration(
+                      labelText: 'Email Address',
+                      prefixIcon: Icon(Icons.email_outlined),
+                    ),
                   ),
-                ),
-                const SizedBox(height: 14),
-                SwitchListTile(
-                  title: const Text('Account Active', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
-                  subtitle: Text(
-                    isActive ? 'Teacher can sign in and manage quizzes' : 'Account suspended / deactivated',
-                    style: const TextStyle(fontSize: 12),
+                  const SizedBox(height: 12),
+                  TextFormField(
+                    controller: subjectController,
+                    decoration: const InputDecoration(
+                      labelText: 'Teaching Subject',
+                      prefixIcon: Icon(Icons.menu_book_outlined),
+                    ),
                   ),
-                  value: isActive,
-                  onChanged: (v) => setDialogState(() => isActive = v),
-                ),
-              ],
+                  const SizedBox(height: 16),
+
+                  // Attendance Teacher Designation
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: isAttendance
+                          ? const Color(0xFF10B981).withValues(alpha: 0.1)
+                          : const Color(0xFFF8FAFC),
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(
+                        color: isAttendance
+                            ? const Color(0xFF10B981)
+                            : const Color(0xFFE2E8F0),
+                      ),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        SwitchListTile(
+                          contentPadding: EdgeInsets.zero,
+                          title: const Text(
+                            'Attendance Teacher / Homeroom Master',
+                            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                          ),
+                          subtitle: const Text(
+                            'Grants authority to register students and approve registrations for their class.',
+                            style: TextStyle(fontSize: 11),
+                          ),
+                          value: isAttendance,
+                          onChanged: (val) => setDialogState(() => isAttendance = val),
+                        ),
+                        if (isAttendance) ...[
+                          const SizedBox(height: 8),
+                          DropdownButtonFormField<String>(
+                            initialValue: attendanceClass,
+                            decoration: const InputDecoration(
+                              labelText: 'Designated Class (e.g. 9A, 9B)',
+                              prefixIcon: Icon(Icons.meeting_room_outlined),
+                            ),
+                            items: [
+                              for (final c in standardClasses)
+                                DropdownMenuItem(value: c, child: Text('Class $c')),
+                            ],
+                            onChanged: (val) {
+                              if (val != null) {
+                                setDialogState(() {
+                                  attendanceClass = val;
+                                  final numPart = val.replaceAll(RegExp(r'[^0-9]'), '');
+                                  attendanceGrade = 'Grade $numPart';
+                                });
+                              }
+                            },
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+
+                  SwitchListTile(
+                    title: const Text('Account Active', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
+                    subtitle: Text(
+                      isActive ? 'Teacher can sign in and manage quizzes' : 'Account suspended / deactivated',
+                      style: const TextStyle(fontSize: 12),
+                    ),
+                    value: isActive,
+                    onChanged: (v) => setDialogState(() => isActive = v),
+                  ),
+                ],
+              ),
             ),
           ),
           actions: [
@@ -332,6 +419,7 @@ class _TeacherManagementScreenState
               child: const Text('Cancel'),
             ),
             FilledButton(
+              style: FilledButton.styleFrom(backgroundColor: const Color(0xFF0F172A)),
               onPressed: () => Navigator.pop(ctx, true),
               child: const Text('Save Changes'),
             ),
@@ -350,6 +438,7 @@ class _TeacherManagementScreenState
     try {
       final newName = nameController.text.trim();
       final newEmail = emailController.text.trim();
+      final newSubject = subjectController.text.trim();
       bool updated = false;
 
       try {
@@ -360,6 +449,10 @@ class _TeacherManagementScreenState
             'p_full_name': newName,
             'p_email': newEmail,
             'p_is_active': isActive,
+            'p_is_attendance_teacher': isAttendance,
+            'p_attendance_class': isAttendance ? attendanceClass : null,
+            'p_attendance_grade': isAttendance ? attendanceGrade : null,
+            'p_assigned_subject': newSubject,
           },
         );
         updated = true;
@@ -372,6 +465,10 @@ class _TeacherManagementScreenState
           'full_name': newName,
           'email': newEmail,
           'is_active': isActive,
+          'is_attendance_teacher': isAttendance,
+          'attendance_class': isAttendance ? attendanceClass : null,
+          'attendance_grade': isAttendance ? attendanceGrade : null,
+          'assigned_subject': newSubject,
         }).eq('id', id);
       }
 
@@ -457,17 +554,19 @@ class _TeacherManagementScreenState
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          'Teacher Administration',
+                          'Faculty Management & Attendance Masters',
                           style: theme.textTheme.titleMedium?.copyWith(
-                            fontWeight: FontWeight.w800,
-                            color: isDark ? Colors.white : const Color(0xFF0F172A),
+                            fontWeight: FontWeight.w900,
                           ),
                         ),
-                        const SizedBox(height: 4),
+                        const SizedBox(height: 2),
                         Text(
-                          'View verified faculty members, manage institutional access, and reset passwords.',
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                          'Oversee faculty credentials, subject allocations, and appointed class attendance teachers.',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: isDark
+                                ? const Color(0xFF94A3B8)
+                                : const Color(0xFF64748B),
                           ),
                         ),
                       ],
@@ -476,14 +575,13 @@ class _TeacherManagementScreenState
                 ],
               ),
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 18),
 
-            // Search bar
+            // Search Bar
             TextField(
               controller: _searchController,
-              onChanged: (_) => setState(() {}),
               decoration: InputDecoration(
-                hintText: 'Search faculty by name or username...',
+                hintText: 'Search faculty by name, username, or subject...',
                 prefixIcon: const Icon(Icons.search_rounded),
                 suffixIcon: _searchController.text.isNotEmpty
                     ? IconButton(
@@ -495,44 +593,62 @@ class _TeacherManagementScreenState
                       )
                     : null,
               ),
+              onChanged: (_) => setState(() {}),
             ),
             const SizedBox(height: 16),
 
             if (_error != null) ...[
               Container(
-                padding: const EdgeInsets.all(14),
+                padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: theme.colorScheme.errorContainer,
+                  color: const Color(0xFFFEF2F2),
                   borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: const Color(0xFFFECACA)),
                 ),
-                child: Text(_error!, style: TextStyle(color: theme.colorScheme.onErrorContainer)),
+                child: Text(
+                  _error!,
+                  style: const TextStyle(color: Color(0xFF991B1B), fontSize: 13),
+                ),
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: 16),
             ],
 
             FutureBuilder<List<Map<String, dynamic>>>(
               future: _teachersFuture,
               builder: (context, snapshot) {
+                if (snapshot.connectionState == ConnectionState.waiting) {
+                  return const Center(child: Padding(
+                    padding: EdgeInsets.all(40),
+                    child: CircularProgressIndicator(),
+                  ));
+                }
+
                 if (snapshot.hasError) {
                   return Card(
                     child: Padding(
                       padding: const EdgeInsets.all(24),
-                      child: Text('Could not load faculty directory: ${snapshot.error}'),
+                      child: Column(
+                        children: [
+                          Text('Could not load teachers: ${snapshot.error}'),
+                          const SizedBox(height: 12),
+                          FilledButton(
+                            onPressed: () => setState(() => _teachersFuture = _loadTeachers()),
+                            child: const Text('Retry'),
+                          ),
+                        ],
+                      ),
                     ),
                   );
                 }
-                if (!snapshot.hasData) {
-                  return const Center(child: Padding(padding: EdgeInsets.all(40), child: CircularProgressIndicator()));
-                }
 
-                final teachers = snapshot.data!;
-                final q = _searchController.text.trim().toLowerCase();
+                final teachers = snapshot.data ?? [];
+                final query = _searchController.text.trim().toLowerCase();
                 final filtered = teachers.where((t) {
-                  if (q.isEmpty) return true;
-                  final name = t['full_name']?.toString().toLowerCase() ?? '';
-                  final username = t['username']?.toString().toLowerCase() ?? '';
-                  final email = t['email']?.toString().toLowerCase() ?? '';
-                  return name.contains(q) || username.contains(q) || email.contains(q);
+                  final name = (t['full_name'] as String? ?? '').toLowerCase();
+                  final uname = (t['username'] as String? ?? '').toLowerCase();
+                  final subject = (t['assigned_subject'] as String? ?? t['requested_subject'] as String? ?? '').toLowerCase();
+                  final attClass = (t['attendance_class'] as String? ?? '').toLowerCase();
+                  return name.contains(query) || uname.contains(query) || subject.contains(query) || attClass.contains(query);
                 }).toList();
 
                 if (filtered.isEmpty) {
@@ -594,6 +710,9 @@ class _TeacherDirectoryCard extends StatelessWidget {
     final school = (teacher['schools'] as Map<String, dynamic>?)?['name'] as String? ?? 'School';
     final status = teacher['approval_status'] as String? ?? 'approved';
     final isApproved = status == 'approved';
+    final isAttendanceTeacher = teacher['is_attendance_teacher'] == true;
+    final attendanceClass = teacher['attendance_class'] as String? ?? '';
+    final subject = teacher['assigned_subject'] as String? ?? teacher['requested_subject'] as String? ?? '';
 
     return Card(
       child: Padding(
@@ -651,6 +770,49 @@ class _TeacherDirectoryCard extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(height: 4),
+                  Wrap(
+                    spacing: 6,
+                    runSpacing: 4,
+                    children: [
+                      if (subject.isNotEmpty)
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFF1F5F9),
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: Text(
+                            'Subject: $subject',
+                            style: const TextStyle(fontSize: 11, color: Color(0xFF475569), fontWeight: FontWeight.w600),
+                          ),
+                        ),
+                      if (isAttendanceTeacher)
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF10B981).withValues(alpha: 0.15),
+                            borderRadius: BorderRadius.circular(6),
+                            border: Border.all(color: const Color(0xFF10B981).withValues(alpha: 0.4)),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Icon(Icons.star_rounded, size: 12, color: Color(0xFF059669)),
+                              const SizedBox(width: 4),
+                              Text(
+                                'Attendance Master: Class $attendanceClass',
+                                style: const TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.bold,
+                                  color: Color(0xFF047857),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
                   Row(
                     children: [
                       const Icon(Icons.location_city_rounded, size: 13, color: Color(0xFF94A3B8)),
@@ -675,7 +837,7 @@ class _TeacherDirectoryCard extends StatelessWidget {
                       ),
                       const SizedBox(width: 8),
                       IconButton.outlined(
-                        tooltip: 'Edit faculty profile',
+                        tooltip: 'Edit faculty profile & attendance assignment',
                         style: IconButton.styleFrom(
                           foregroundColor: const Color(0xFF10B981),
                           side: const BorderSide(color: Color(0xFF6EE7B7)),

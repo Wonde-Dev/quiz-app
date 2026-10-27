@@ -44,9 +44,10 @@ class AuthState {
   }
 
   bool get isLoggedIn => user != null;
-  bool get isAdmin => user?.role == 'admin';
-  bool get isTeacher => user?.role == 'teacher';
-  bool get isStudent => user?.role == 'student';
+  bool get isAdmin => AppRoles.isAdmin(user?.role);
+  bool get isSubAdmin => user?.role == AppRoles.subadmin;
+  bool get isTeacher => user?.role == AppRoles.teacher;
+  bool get isStudent => user?.role == AppRoles.student;
   bool get isPendingApproval => user?.isPendingApproval ?? false;
   bool get isRejected => user?.isRejected ?? false;
 }
@@ -122,9 +123,10 @@ class AuthNotifier extends Notifier<AuthState> {
       }
       if (appUser.isPendingApproval) {
         await _authService.signOut();
-        state = const AuthState(
-          error:
-              'Your registration is pending administrator approval. Please wait for an administrator to activate your account.',
+        state = AuthState(
+          error: appUser.role == 'teacher' || appUser.requestedRole == 'teacher'
+              ? 'Your teacher registration is pending approval by the School Administrator or Director. Please wait for activation before signing in.'
+              : 'Your student registration is pending approval by your class Attendance Teacher (${appUser.attendanceClass ?? appUser.assignedClass ?? "assigned class"}) or Administrator. Please wait for activation before signing in.',
         );
         return;
       }
@@ -138,6 +140,7 @@ class AuthNotifier extends Notifier<AuthState> {
       }
       if (![
         AppRoles.admin,
+        AppRoles.subadmin,
         AppRoles.teacher,
         AppRoles.student,
       ].contains(appUser.role)) {
@@ -207,8 +210,9 @@ class AuthNotifier extends Notifier<AuthState> {
         await _authService.signOut();
       }
       state = AuthState(
-        successMessage:
-            'Registration request submitted! Your account is pending administrator approval before you can sign in with $username.',
+        successMessage: requestedRole == 'teacher'
+            ? 'Registration submitted! Your teacher account is pending School Administrator or Director approval before you can sign in with $username.'
+            : 'Registration submitted! Your student account is pending approval by your class Attendance Teacher or School Administrator before you can sign in with $username.',
       );
     } catch (error) {
       state = AuthState(
@@ -409,9 +413,10 @@ class AuthNotifier extends Notifier<AuthState> {
       }
       if (appUser.isPendingApproval) {
         await _authService.signOut();
-        state = const AuthState(
-          error:
-              'Your registration is pending administrator approval. Please wait for an administrator to activate your account.',
+        state = AuthState(
+          error: appUser.role == 'teacher' || appUser.requestedRole == 'teacher'
+              ? 'Your teacher registration is pending approval by the School Administrator or Director. Please wait for activation before signing in.'
+              : 'Your student registration is pending approval by your class Attendance Teacher (${appUser.attendanceClass ?? appUser.assignedClass ?? "assigned class"}) or Administrator. Please wait for activation before signing in.',
         );
         return;
       }

@@ -763,6 +763,42 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                               return null;
                             },
                           ),
+                          const SizedBox(height: 14),
+                          Container(
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF10B981).withValues(alpha: 0.08),
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(
+                                color: const Color(0xFF10B981).withValues(alpha: 0.25),
+                              ),
+                            ),
+                            child: Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Icon(
+                                  Icons.verified_user_outlined,
+                                  size: 18,
+                                  color: Color(0xFF10B981),
+                                ),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: Text(
+                                    _requestedRole == 'teacher'
+                                        ? 'Faculty Notice: Your teacher account will be reviewed and approved by the School Administrator or Director before you can sign in.'
+                                        : 'Student Notice: Your account will wait for approval from your class Attendance Teacher${_selectedTeacherClassName != null ? ' ($_selectedTeacherClassName)' : ''} or School Administrator before you can sign in.',
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      height: 1.4,
+                                      color: isDark
+                                          ? const Color(0xFFA7F3D0)
+                                          : const Color(0xFF065F46),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
                         ],
 
                         if (!_isRegistering)

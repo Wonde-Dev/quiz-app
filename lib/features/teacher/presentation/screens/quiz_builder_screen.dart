@@ -1,8 +1,11 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:quiz_app/core/constants/app_roles.dart';
+import 'package:quiz_app/core/utils/exam_script_parser.dart';
 import 'package:quiz_app/features/auth/presentation/providers/auth_provider.dart';
 import 'package:quiz_app/shared/widgets/dashboard_shell.dart';
 
@@ -183,6 +186,421 @@ class _QuizBuilderScreenState extends ConsumerState<QuizBuilderScreen> {
     }
   }
 
+  Future<void> _pickQuestionImage() async {
+    final picker = ImagePicker();
+    final source = await showModalBottomSheet<ImageSource>(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Padding(
+              padding: EdgeInsets.all(16),
+              child: Text(
+                'Attach Question Diagram or Image',
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+              ),
+            ),
+            ListTile(
+              leading: const Icon(Icons.camera_alt_outlined),
+              title: const Text('Take Photo with Camera'),
+              onTap: () => Navigator.pop(ctx, ImageSource.camera),
+            ),
+            ListTile(
+              leading: const Icon(Icons.photo_library_outlined),
+              title: const Text('Choose from Gallery'),
+              onTap: () => Navigator.pop(ctx, ImageSource.gallery),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (source == null) return;
+    try {
+      final img = await picker.pickImage(
+        source: source,
+        maxWidth: 1600,
+        maxHeight: 1600,
+        imageQuality: 85,
+      );
+      if (img == null) return;
+
+      final bytes = await img.readAsBytes();
+      final ext = img.name.split('.').last.toLowerCase();
+      final mimeType = ext == 'png' ? 'image/png' : 'image/jpeg';
+
+      String url = '';
+      try {
+        final client = Supabase.instance.client;
+        final userId = client.auth.currentUser?.id ?? 'teacher';
+        final path =
+            'question-images/$userId/${DateTime.now().millisecondsSinceEpoch}_${img.name}';
+        await client.storage.from('course-materials').uploadBinary(
+              path,
+              bytes,
+              fileOptions: FileOptions(contentType: mimeType, upsert: true),
+            );
+        url = client.storage.from('course-materials').getPublicUrl(path);
+      } catch (_) {
+        url = 'data:$mimeType;base64,${base64Encode(bytes)}';
+      }
+
+      setState(() {
+        _diagramUrlController.text = url;
+      });
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not attach image: $e')),
+        );
+      }
+    }
+  }
+
+  Future<void> _openScriptImporterModal() async {
+    final scriptController = TextEditingController();
+    final keyController = TextEditingController();
+    bool showKeyField = false;
+    List<ParsedQuestion> parsedPreview = [];
+    String? parseError;
+
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setModalState) {
+          final isDark = Theme.of(ctx).brightness == Brightness.dark;
+          return DraggableScrollableSheet(
+            initialChildSize: 0.88,
+            minChildSize: 0.5,
+            maxChildSize: 0.96,
+            builder: (_, scrollController) => Container(
+              decoration: BoxDecoration(
+                color: isDark ? const Color(0xFF0F172A) : Colors.white,
+                borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+              ),
+              padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
+              child: ListView(
+                controller: scrollController,
+                children: [
+                  Center(
+                    child: Container(
+                      width: 44,
+                      height: 5,
+                      decoration: BoxDecoration(
+                        color: Colors.grey.shade400,
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF6366F1).withValues(alpha: 0.12),
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                        child: const Icon(Icons.auto_awesome_rounded, color: Color(0xFF6366F1), size: 24),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              'Smart Question Script Importer',
+                              style: TextStyle(fontWeight: FontWeight.w900, fontSize: 17),
+                            ),
+                            Text(
+                              'Paste your exam script. Auto-detects Multiple Choice, True/False, Blank Space & Description.',
+                              style: TextStyle(fontSize: 12, color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B)),
+                            ),
+                          ],
+                        ),
+                      ),
+                      TextButton.icon(
+                        icon: const Icon(Icons.lightbulb_outline_rounded, size: 16),
+                        label: const Text('Load Sample', style: TextStyle(fontSize: 12)),
+                        onPressed: () {
+                          setModalState(() {
+                            scriptController.text = ExamScriptParser.sampleScript.trim();
+                            parsedPreview = ExamScriptParser.parse(scriptController.text);
+                            parseError = null;
+                          });
+                        },
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+
+                  TextFormField(
+                    controller: scriptController,
+                    maxLines: 8,
+                    style: const TextStyle(fontFamily: 'monospace', fontSize: 13),
+                    decoration: InputDecoration(
+                      labelText: 'Exam Questions Script (Copy & Paste here)',
+                      hintText: '1. Which organelle is powerhouse of cell?\nA. Nucleus\nB. Mitochondria\nAnswer: B\n\n2. Photosynthesis occurs in animals. (True/False)\nAnswer: False',
+                      alignLabelWithHint: true,
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
+                    ),
+                    onChanged: (text) {
+                      setModalState(() {
+                        if (text.trim().isNotEmpty) {
+                          parsedPreview = ExamScriptParser.parse(
+                            text,
+                            answerKeyScript: showKeyField ? keyController.text : null,
+                          );
+                          parseError = parsedPreview.isEmpty ? 'No recognized questions found. Check numbering.' : null;
+                        } else {
+                          parsedPreview = [];
+                        }
+                      });
+                    },
+                  ),
+                  const SizedBox(height: 8),
+
+                  Row(
+                    children: [
+                      TextButton.icon(
+                        icon: Icon(showKeyField ? Icons.remove_circle_outline : Icons.add_circle_outline, size: 16),
+                        label: Text(showKeyField ? 'Hide Separate Answer Key' : 'Paste Separate Answer Key Script (Optional)'),
+                        onPressed: () => setModalState(() => showKeyField = !showKeyField),
+                      ),
+                    ],
+                  ),
+
+                  if (showKeyField) ...[
+                    const SizedBox(height: 8),
+                    TextFormField(
+                      controller: keyController,
+                      maxLines: 4,
+                      style: const TextStyle(fontFamily: 'monospace', fontSize: 13),
+                      decoration: InputDecoration(
+                        labelText: 'Answer Key Script (Optional)',
+                        hintText: '1. B\n2. False\n3. 0\n4. Photosynthesis is...',
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
+                      ),
+                      onChanged: (val) {
+                        setModalState(() {
+                          parsedPreview = ExamScriptParser.parse(
+                            scriptController.text,
+                            answerKeyScript: val,
+                          );
+                        });
+                      },
+                    ),
+                  ],
+                  const SizedBox(height: 14),
+
+                  FilledButton.icon(
+                    style: FilledButton.styleFrom(
+                      backgroundColor: const Color(0xFF6366F1),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
+                    icon: const Icon(Icons.flash_on_rounded, size: 18),
+                    label: const Text('Parse Script & Validate Questions'),
+                    onPressed: () {
+                      setModalState(() {
+                        parsedPreview = ExamScriptParser.parse(
+                          scriptController.text,
+                          answerKeyScript: showKeyField ? keyController.text : null,
+                        );
+                        parseError = parsedPreview.isEmpty ? 'No questions could be extracted. Please check the script format.' : null;
+                      });
+                    },
+                  ),
+                  if (parseError != null) ...[
+                    const SizedBox(height: 8),
+                    Text(parseError!, style: const TextStyle(color: Colors.red, fontSize: 12)),
+                  ],
+                  const SizedBox(height: 16),
+
+                  if (parsedPreview.isNotEmpty) ...[
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF10B981).withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(color: const Color(0xFF10B981).withValues(alpha: 0.3)),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              const Icon(Icons.check_circle_rounded, color: Color(0xFF10B981), size: 18),
+                              const SizedBox(width: 8),
+                              Text(
+                                '${parsedPreview.length} Questions Ready to Import',
+                                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 8),
+                          Wrap(
+                            spacing: 6,
+                            runSpacing: 6,
+                            children: [
+                              _scriptTypeBadge(
+                                'Multiple Choice (${parsedPreview.where((q) => q.type == 'multiple_choice').length})',
+                                const Color(0xFF3B82F6),
+                              ),
+                              _scriptTypeBadge(
+                                'True/False (${parsedPreview.where((q) => q.type == 'true_false').length})',
+                                const Color(0xFF10B981),
+                              ),
+                              _scriptTypeBadge(
+                                'Blank Space (${parsedPreview.where((q) => q.type == 'fill_in_blank').length})',
+                                const Color(0xFFF59E0B),
+                              ),
+                              _scriptTypeBadge(
+                                'Description (${parsedPreview.where((q) => q.type == 'short_answer').length})',
+                                const Color(0xFF8B5CF6),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+
+                    const Text('Parsed Questions Preview:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                    const SizedBox(height: 8),
+                    for (int i = 0; i < parsedPreview.length; i++) ...[
+                      _buildParsedQuestionTile(i + 1, parsedPreview[i], isDark),
+                      const SizedBox(height: 8),
+                    ],
+
+                    const SizedBox(height: 16),
+                    FilledButton.icon(
+                      style: FilledButton.styleFrom(
+                        backgroundColor: const Color(0xFF10B981),
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                      ),
+                      icon: const Icon(Icons.add_task_rounded, size: 20),
+                      label: Text('Import All ${parsedPreview.length} Questions to Quiz'),
+                      onPressed: () {
+                        setState(() {
+                          for (int i = 0; i < parsedPreview.length; i++) {
+                            _questions.add(parsedPreview[i].toMap(_questions.length));
+                          }
+                        });
+                        Navigator.pop(ctx);
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text('Successfully imported ${parsedPreview.length} questions into quiz!'),
+                            backgroundColor: const Color(0xFF10B981),
+                          ),
+                        );
+                      },
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _scriptTypeBadge(String label, Color color) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: color.withValues(alpha: 0.3)),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(color: color, fontSize: 11, fontWeight: FontWeight.bold),
+      ),
+    );
+  }
+
+  Widget _buildParsedQuestionTile(int index, ParsedQuestion q, bool isDark) {
+    final typeColor = switch (q.type) {
+      'true_false' => const Color(0xFF10B981),
+      'fill_in_blank' => const Color(0xFFF59E0B),
+      'short_answer' => const Color(0xFF8B5CF6),
+      _ => const Color(0xFF3B82F6),
+    };
+
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF1E293B) : const Color(0xFFF8FAFC),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Text(
+                'Q$index.',
+                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+              ),
+              const SizedBox(width: 8),
+              _scriptTypeBadge(_questionTypeLabel(q.type), typeColor),
+              if (q.imageUrl != null) ...[
+                const SizedBox(width: 6),
+                const Icon(Icons.image_outlined, size: 14, color: Color(0xFF10B981)),
+              ],
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text(q.text, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+          if (q.options.isNotEmpty) ...[
+            const SizedBox(height: 6),
+            for (final opt in q.options)
+              Padding(
+                padding: const EdgeInsets.only(left: 8, top: 2),
+                child: Row(
+                  children: [
+                    Icon(
+                      opt['is_correct'] == true ? Icons.check_circle_rounded : Icons.radio_button_unchecked,
+                      size: 13,
+                      color: opt['is_correct'] == true ? const Color(0xFF10B981) : Colors.grey,
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      '${(opt['id'] as String).toUpperCase()}. ${opt['text']}',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: opt['is_correct'] == true ? FontWeight.bold : FontWeight.normal,
+                        color: opt['is_correct'] == true ? const Color(0xFF10B981) : null,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+          ],
+          if (q.correctAnswer != null && q.correctAnswer!.isNotEmpty && q.type != 'multiple_choice') ...[
+            const SizedBox(height: 4),
+            Text(
+              'Answer Key: ${q.correctAnswer}',
+              style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold, color: Color(0xFF10B981)),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
   void _addQuestion() {
     final questionText = _questionController.text.trim();
     final diagramUrl = _diagramUrlController.text.trim();
@@ -197,6 +615,8 @@ class _QuizBuilderScreenState extends ConsumerState<QuizBuilderScreen> {
       setState(() {
         _error = switch (_questionType) {
           'true_false' => 'Enter a true-or-false question statement.',
+          'fill_in_blank' => 'Enter a question statement with blanks (e.g. ______)',
+          'short_answer' => 'Enter a descriptive question prompt.',
           _ => 'Enter a question and all four answer choices.',
         };
       });
@@ -210,7 +630,10 @@ class _QuizBuilderScreenState extends ConsumerState<QuizBuilderScreen> {
         : _optionControllers.map((c) => c.text.trim()).toList();
 
     final expectedAnswer = _correctAnswerController.text.trim();
-    final effectiveCorrectAnswer = _questionType == 'short_answer'
+    final effectiveCorrectAnswer = (_questionType == 'short_answer' ||
+            _questionType == 'fill_in_blank' ||
+            _questionType == 'blank_space' ||
+            _questionType == 'description')
         ? (expectedAnswer.isNotEmpty
               ? expectedAnswer
               : 'Teacher manual evaluation')
@@ -237,6 +660,7 @@ class _QuizBuilderScreenState extends ConsumerState<QuizBuilderScreen> {
         'explanation': _explanationController.text.trim().isEmpty
             ? null
             : _explanationController.text.trim(),
+        'image_url': diagramUrl.isNotEmpty ? diagramUrl : null,
       });
 
       _questionController.clear();
@@ -784,6 +1208,67 @@ class _QuizBuilderScreenState extends ConsumerState<QuizBuilderScreen> {
                       ),
                       const SizedBox(height: 20),
 
+                      // Smart Script Importer Callout Banner
+                      Container(
+                        padding: const EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                          gradient: const LinearGradient(
+                            colors: [Color(0xFF4F46E5), Color(0xFF6366F1), Color(0xFF4338CA)],
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                          ),
+                          borderRadius: BorderRadius.circular(20),
+                          boxShadow: [
+                            BoxShadow(
+                              color: const Color(0xFF6366F1).withValues(alpha: 0.25),
+                              blurRadius: 16,
+                              offset: const Offset(0, 6),
+                            ),
+                          ],
+                        ),
+                        child: Row(
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.all(12),
+                              decoration: BoxDecoration(
+                                color: Colors.white.withValues(alpha: 0.2),
+                                borderRadius: BorderRadius.circular(14),
+                              ),
+                              child: const Icon(Icons.auto_awesome_rounded, color: Colors.white, size: 26),
+                            ),
+                            const SizedBox(width: 14),
+                            const Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    'Copy & Paste Exam Script',
+                                    style: TextStyle(color: Colors.white, fontWeight: FontWeight.w900, fontSize: 15),
+                                  ),
+                                  SizedBox(height: 2),
+                                  Text(
+                                    'Paste multiple questions at once. Automatically detects Choose, True/False, Blank Space & Description.',
+                                    style: TextStyle(color: Color(0xFFE0E7FF), fontSize: 12),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            FilledButton(
+                              style: FilledButton.styleFrom(
+                                backgroundColor: Colors.white,
+                                foregroundColor: const Color(0xFF4338CA),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                              ),
+                              onPressed: _openScriptImporterModal,
+                              child: const Text('Import Script', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 20),
+
                       // Section 3: Questions list
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -911,13 +1396,55 @@ class _QuizBuilderScreenState extends ConsumerState<QuizBuilderScreen> {
                               const SizedBox(height: 12),
                               TextFormField(
                                 controller: _diagramUrlController,
-                                decoration: const InputDecoration(
+                                decoration: InputDecoration(
                                   labelText: 'Question Diagram / Graph / Reference URL (optional)',
-                                  prefixIcon: Icon(Icons.insert_chart_outlined),
+                                  prefixIcon: const Icon(Icons.insert_chart_outlined),
                                   hintText: 'https://... image link or graph',
+                                  suffixIcon: IconButton(
+                                    tooltip: 'Attach Diagram from Camera or Gallery',
+                                    icon: const Icon(Icons.add_a_photo_outlined, color: Color(0xFF10B981)),
+                                    onPressed: _questionsSaved ? null : _pickQuestionImage,
+                                  ),
                                 ),
                                 readOnly: _questionsSaved,
+                                onChanged: (_) => setState(() {}),
                               ),
+                              if (_diagramUrlController.text.isNotEmpty) ...[
+                                const SizedBox(height: 8),
+                                Row(
+                                  children: [
+                                    ClipRRect(
+                                      borderRadius: BorderRadius.circular(8),
+                                      child: _diagramUrlController.text.startsWith('data:')
+                                          ? Image.memory(
+                                              base64Decode(_diagramUrlController.text.split(',').last),
+                                              height: 54,
+                                              width: 74,
+                                              fit: BoxFit.cover,
+                                            )
+                                          : Image.network(
+                                              _diagramUrlController.text,
+                                              height: 54,
+                                              width: 74,
+                                              fit: BoxFit.cover,
+                                              errorBuilder: (_, _, _) => const Icon(Icons.broken_image, size: 30),
+                                            ),
+                                    ),
+                                    const SizedBox(width: 10),
+                                    const Expanded(
+                                      child: Text(
+                                        '✓ Image/Diagram attached to question',
+                                        style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF10B981)),
+                                      ),
+                                    ),
+                                    IconButton(
+                                      tooltip: 'Remove image',
+                                      icon: const Icon(Icons.close_rounded, size: 18, color: Colors.red),
+                                      onPressed: _questionsSaved ? null : () => setState(() => _diagramUrlController.clear()),
+                                    ),
+                                  ],
+                                ),
+                              ],
                               const SizedBox(height: 12),
                               DropdownButtonFormField<String>(
                                 isExpanded: true,
@@ -929,16 +1456,20 @@ class _QuizBuilderScreenState extends ConsumerState<QuizBuilderScreen> {
                                 items: const [
                                   DropdownMenuItem(
                                     value: 'multiple_choice',
-                                    child: Text('Multiple Choice (4 options)'),
+                                    child: Text('Multiple Choice (Choose A, B, C, D)'),
                                   ),
                                   DropdownMenuItem(
                                     value: 'true_false',
                                     child: Text('True or False'),
                                   ),
                                   DropdownMenuItem(
+                                    value: 'fill_in_blank',
+                                    child: Text('Blank Space (Fill in the Blank)'),
+                                  ),
+                                  DropdownMenuItem(
                                     value: 'short_answer',
                                     child: Text(
-                                      'Descriptive / Short Answer (allows text & image)',
+                                      'Descriptive / Short Answer (allows text & photo)',
                                     ),
                                   ),
                                 ],
@@ -955,7 +1486,20 @@ class _QuizBuilderScreenState extends ConsumerState<QuizBuilderScreen> {
                               ),
                               const SizedBox(height: 14),
 
-                              if (_questionType == 'short_answer') ...[
+                              if (_questionType == 'fill_in_blank') ...[
+                                TextFormField(
+                                  controller: _correctAnswerController,
+                                  decoration: const InputDecoration(
+                                    labelText: 'Expected Blank Answer *',
+                                    hintText: 'e.g. Mitochondria, 100, Photosynthesis',
+                                    helperText: 'The student\'s answer will be compared directly against this key.',
+                                    prefixIcon: Icon(
+                                      Icons.check_circle_outline,
+                                    ),
+                                  ),
+                                  readOnly: _questionsSaved,
+                                ),
+                              ] else if (_questionType == 'short_answer') ...[
                                 TextFormField(
                                   controller: _correctAnswerController,
                                   decoration: const InputDecoration(
@@ -1130,7 +1674,8 @@ class _QuizBuilderScreenState extends ConsumerState<QuizBuilderScreen> {
 
   String _questionTypeLabel(String type) => switch (type) {
     'true_false' => 'True or false',
-    'short_answer' => 'Description / Short answer',
+    'fill_in_blank' || 'blank_space' => 'Blank Space',
+    'short_answer' || 'description' => 'Description / Short answer',
     _ => 'Multiple choice',
   };
 }

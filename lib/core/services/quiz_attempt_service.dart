@@ -186,7 +186,10 @@ class QuizAttemptService {
           );
           isCorrect = correctOpt != null && selectedOptionId == correctOpt['id'];
         }
-      } else if (q['type'] == 'short_answer') {
+      } else if (q['type'] == 'short_answer' ||
+          q['type'] == 'fill_in_blank' ||
+          q['type'] == 'blank_space' ||
+          q['type'] == 'description') {
         final cAns = q['correct_answer'] as String?;
         String textVal = '';
         if (rawAns is String) {
@@ -206,7 +209,17 @@ class QuizAttemptService {
           textVal = rawAns?.toString() ?? '';
         }
         if (cAns != null && cAns.trim().isNotEmpty) {
-          isCorrect = textVal.trim().toLowerCase() == cAns.trim().toLowerCase();
+          final normStudent = textVal
+              .trim()
+              .toLowerCase()
+              .replaceAll(RegExp(r'[.,!?:;]+$'), '')
+              .replaceAll(RegExp(r'\s+'), ' ');
+          final normTeacher = cAns
+              .trim()
+              .toLowerCase()
+              .replaceAll(RegExp(r'[.,!?:;]+$'), '')
+              .replaceAll(RegExp(r'\s+'), ' ');
+          isCorrect = normStudent == normTeacher;
         }
       }
 

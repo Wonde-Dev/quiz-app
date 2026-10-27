@@ -12,7 +12,7 @@ String roleUsername(String fullName, String role, {int? order}) {
       )
       .join();
   final roleName = switch (role.toLowerCase()) {
-    'admin' => 'Admin',
+    'admin' || 'subadmin' => 'Admin',
     'teacher' => 'Teacher',
     _ => 'Student',
   };
@@ -72,7 +72,7 @@ bool isRoleUsername(String username, String role) {
   if (!regex.hasMatch(clean)) return false;
 
   final domain = clean.split('@').last;
-  if (roleLower == 'admin') {
+  if (roleLower == 'admin' || roleLower == 'subadmin') {
     return domain == 'Admin.edu';
   } else if (roleLower == 'teacher') {
     return domain == 'Teacher.edu';

@@ -1,6 +1,9 @@
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:quiz_app/core/constants/app_roles.dart';
 import 'package:quiz_app/core/services/course_resource_service.dart';
 import 'package:quiz_app/features/auth/presentation/providers/auth_provider.dart';
@@ -18,7 +21,7 @@ class _ResourcesScreenState extends ConsumerState<ResourcesScreen> {
   final _resourceService = CourseResourceService();
   late Future<List<CourseResource>> _resourcesFuture;
   String _searchQuery = '';
-  String _filterType = 'all'; // all, worksheet, exam, pdf
+  String _filterType = 'all'; // all, pdf, video, worksheet, exam
 
   @override
   void initState() {
@@ -37,14 +40,14 @@ class _ResourcesScreenState extends ConsumerState<ResourcesScreen> {
       _resourcesFuture = _resourceService.getResourcesByTeacher(user.id);
     } else {
       _resourcesFuture = _resourceService.getResourcesForStudent(
-        targetGrade: null, // will fetch and filter
-        targetSection: null,
+        targetGrade: user.assignedGrade,
+        targetSection: user.assignedClass,
         schoolId: user.schoolId,
       );
     }
   }
 
-  Future<void> _pickAndUploadResource() async {
+  Future<void> _pickAndUploadPdfResource() async {
     final user = ref.read(authStateProvider).user;
     if (user == null || user.role != AppRoles.teacher) return;
 
@@ -67,7 +70,6 @@ class _ResourcesScreenState extends ConsumerState<ResourcesScreen> {
 
     if (!mounted) return;
 
-    // Show dialog to enter Title, Grade, and Section
     String title = file.name.replaceAll('.pdf', '').replaceAll('_', ' ');
     String description = '';
     String selectedGrade = 'Grade 9';
@@ -78,9 +80,10 @@ class _ResourcesScreenState extends ConsumerState<ResourcesScreen> {
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setDialogState) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
           title: const Row(
             children: [
-              Icon(Icons.upload_file_rounded, color: Color(0xFF10B981)),
+              Icon(Icons.picture_as_pdf_rounded, color: Color(0xFF10B981)),
               SizedBox(width: 10),
               Text('Upload Worksheet / PDF'),
             ],
@@ -134,13 +137,13 @@ class _ResourcesScreenState extends ConsumerState<ResourcesScreen> {
                 DropdownButtonFormField<String>(
                   initialValue: selectedSection,
                   decoration: const InputDecoration(
-                    labelText: 'Target Section',
+                    labelText: 'Target Section / Class',
                     prefixIcon: Icon(Icons.class_outlined),
                   ),
                   items: const [
-                    DropdownMenuItem(value: 'Section A', child: Text('Section A')),
-                    DropdownMenuItem(value: 'Section B', child: Text('Section B')),
-                    DropdownMenuItem(value: 'Section C', child: Text('Section C')),
+                    DropdownMenuItem(value: 'Section A', child: Text('Section A (or 9A/10A)')),
+                    DropdownMenuItem(value: 'Section B', child: Text('Section B (or 9B/10B)')),
+                    DropdownMenuItem(value: 'Section C', child: Text('Section C (or 9C/10C)')),
                     DropdownMenuItem(value: 'Section D', child: Text('Section D')),
                     DropdownMenuItem(value: 'All Sections', child: Text('All Sections')),
                   ],
@@ -221,6 +224,256 @@ class _ResourcesScreenState extends ConsumerState<ResourcesScreen> {
     }
   }
 
+  Future<void> _addVideoLessonResource() async {
+    final user = ref.read(authStateProvider).user;
+    if (user == null || user.role != AppRoles.teacher) return;
+
+    final titleController = TextEditingController();
+    final urlController = TextEditingController();
+    final descController = TextEditingController();
+
+    String selectedGrade = 'Grade 9';
+    String selectedSection = 'Section A';
+    String? liveThumbnailUrl;
+    Uint8List? pickedThumbnailBytes;
+    String? pickedThumbnailName;
+
+    final shouldAdd = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          title: const Row(
+            children: [
+              Icon(Icons.smart_display_rounded, color: Color(0xFFEF4444)),
+              SizedBox(width: 10),
+              Text('Add Video Lesson'),
+            ],
+          ),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Provide a video URL (YouTube, Vimeo, MP4) for your students to watch alongside course notes.',
+                  style: TextStyle(fontSize: 12, color: Color(0xFF64748B)),
+                ),
+                const SizedBox(height: 16),
+                TextFormField(
+                  controller: titleController,
+                  decoration: const InputDecoration(
+                    labelText: 'Video Title *',
+                    hintText: 'e.g. Physics: Newton\'s Laws Explained',
+                    prefixIcon: Icon(Icons.title_rounded),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextFormField(
+                  controller: urlController,
+                  decoration: const InputDecoration(
+                    labelText: 'Video Link / URL *',
+                    hintText: 'https://www.youtube.com/watch?v=...',
+                    prefixIcon: Icon(Icons.link_rounded),
+                  ),
+                  onChanged: (val) {
+                    final detected = CourseResource.extractYoutubeThumbnail(val.trim());
+                    setDialogState(() => liveThumbnailUrl = detected);
+                  },
+                ),
+                const SizedBox(height: 12),
+
+                // Live Thumbnail Preview Card
+                if (pickedThumbnailBytes != null) ...[
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(12),
+                    child: Stack(
+                      alignment: Alignment.center,
+                      children: [
+                        Image.memory(
+                          pickedThumbnailBytes!,
+                          height: 130,
+                          width: double.infinity,
+                          fit: BoxFit.cover,
+                        ),
+                        Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: const BoxDecoration(
+                            color: Colors.black54,
+                            shape: BoxShape.circle,
+                          ),
+                          child: const Icon(Icons.play_arrow_rounded, color: Colors.white, size: 28),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                ] else if (liveThumbnailUrl != null && liveThumbnailUrl!.isNotEmpty) ...[
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(12),
+                    child: Stack(
+                      alignment: Alignment.center,
+                      children: [
+                        Image.network(
+                          liveThumbnailUrl!,
+                          height: 130,
+                          width: double.infinity,
+                          fit: BoxFit.cover,
+                          errorBuilder: (_, _, _) => const SizedBox.shrink(),
+                        ),
+                        Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: const BoxDecoration(
+                            color: Colors.black54,
+                            shape: BoxShape.circle,
+                          ),
+                          child: const Icon(Icons.play_arrow_rounded, color: Colors.white, size: 28),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  const Text(
+                    '✓ Auto-detected YouTube Thumbnail',
+                    style: TextStyle(fontSize: 11, color: Color(0xFF10B981), fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 10),
+                ],
+
+                OutlinedButton.icon(
+                  onPressed: () async {
+                    final picker = ImagePicker();
+                    final img = await picker.pickImage(
+                      source: ImageSource.gallery,
+                      maxWidth: 1280,
+                      maxHeight: 720,
+                      imageQuality: 85,
+                    );
+                    if (img != null) {
+                      final bytes = await img.readAsBytes();
+                      setDialogState(() {
+                        pickedThumbnailBytes = bytes;
+                        pickedThumbnailName = img.name;
+                      });
+                    }
+                  },
+                  icon: const Icon(Icons.add_photo_alternate_outlined, size: 16),
+                  label: Text(
+                    pickedThumbnailBytes != null ? 'Change Custom Thumbnail' : 'Upload Custom Thumbnail',
+                    style: const TextStyle(fontSize: 12),
+                  ),
+                ),
+                const SizedBox(height: 12),
+
+                TextFormField(
+                  controller: descController,
+                  decoration: const InputDecoration(
+                    labelText: 'Video Description / Lesson Objectives',
+                    prefixIcon: Icon(Icons.notes_rounded),
+                  ),
+                  maxLines: 2,
+                ),
+                const SizedBox(height: 12),
+
+                DropdownButtonFormField<String>(
+                  initialValue: selectedGrade,
+                  decoration: const InputDecoration(
+                    labelText: 'Target Grade (9 - 12)',
+                    prefixIcon: Icon(Icons.grade_outlined),
+                  ),
+                  items: const [
+                    DropdownMenuItem(value: 'Grade 9', child: Text('Grade 9')),
+                    DropdownMenuItem(value: 'Grade 10', child: Text('Grade 10')),
+                    DropdownMenuItem(value: 'Grade 11', child: Text('Grade 11')),
+                    DropdownMenuItem(value: 'Grade 12', child: Text('Grade 12')),
+                  ],
+                  onChanged: (v) => setDialogState(() => selectedGrade = v ?? 'Grade 9'),
+                ),
+                const SizedBox(height: 12),
+                DropdownButtonFormField<String>(
+                  initialValue: selectedSection,
+                  decoration: const InputDecoration(
+                    labelText: 'Target Section / Class',
+                    prefixIcon: Icon(Icons.class_outlined),
+                  ),
+                  items: const [
+                    DropdownMenuItem(value: 'Section A', child: Text('Section A (or 9A/10A)')),
+                    DropdownMenuItem(value: 'Section B', child: Text('Section B (or 9B/10B)')),
+                    DropdownMenuItem(value: 'Section C', child: Text('Section C (or 9C/10C)')),
+                    DropdownMenuItem(value: 'Section D', child: Text('Section D')),
+                    DropdownMenuItem(value: 'All Sections', child: Text('All Sections')),
+                  ],
+                  onChanged: (v) => setDialogState(() => selectedSection = v ?? 'Section A'),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton.icon(
+              icon: const Icon(Icons.check_rounded, size: 16),
+              label: const Text('Add Video'),
+              onPressed: () {
+                if (titleController.text.trim().isEmpty || urlController.text.trim().isEmpty) {
+                  ScaffoldMessenger.of(ctx).showSnackBar(
+                    const SnackBar(content: Text('Enter both video title and URL')),
+                  );
+                  return;
+                }
+                Navigator.pop(ctx, true);
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (shouldAdd != true) return;
+
+    try {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Saving video lesson...')),
+        );
+      }
+
+      await _resourceService.addVideoResource(
+        title: titleController.text.trim(),
+        description: descController.text.trim().isNotEmpty ? descController.text.trim() : null,
+        videoUrl: urlController.text.trim(),
+        thumbnailBytes: pickedThumbnailBytes,
+        thumbnailFileName: pickedThumbnailName,
+        targetGrade: selectedGrade,
+        targetSection: selectedSection,
+        teacherId: user.id,
+        teacherName: user.fullName?.isNotEmpty == true ? user.fullName! : user.username,
+        schoolId: user.schoolId,
+      );
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Video lesson added successfully for students!'),
+            backgroundColor: Color(0xFF10B981),
+          ),
+        );
+        setState(() => _loadResources());
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Could not save video: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -229,7 +482,7 @@ class _ResourcesScreenState extends ConsumerState<ResourcesScreen> {
     final isTeacher = user?.role == AppRoles.teacher;
 
     return DashboardShell(
-      title: 'Class Worksheets & PDFs',
+      title: 'Course Materials & Video Lessons',
       body: RefreshIndicator(
         onRefresh: () async => setState(() => _loadResources()),
         child: ListView(
@@ -310,7 +563,7 @@ class _ResourcesScreenState extends ConsumerState<ResourcesScreen> {
                                 ),
                               ),
                               child: const Icon(
-                                Icons.picture_as_pdf_rounded,
+                                Icons.auto_stories_rounded,
                                 color: Color(0xFF34D399),
                                 size: 28,
                               ),
@@ -322,8 +575,8 @@ class _ResourcesScreenState extends ConsumerState<ResourcesScreen> {
                                 children: [
                                   Text(
                                     isTeacher
-                                        ? 'Teacher PDF & Worksheet Uploader'
-                                        : 'My Class Worksheets & Exams',
+                                        ? 'Teacher Learning Materials Hub'
+                                        : 'My Worksheets & Video Lessons',
                                     style: theme.textTheme.titleMedium?.copyWith(
                                       fontWeight: FontWeight.w900,
                                       color: Colors.white,
@@ -333,8 +586,8 @@ class _ResourcesScreenState extends ConsumerState<ResourcesScreen> {
                                   const SizedBox(height: 4),
                                   Text(
                                     isTeacher
-                                        ? 'Upload exams, worksheets, and course materials targeted for Grade 9-12 and specific sections.'
-                                        : 'Access and download official worksheets and exams uploaded by your teachers for your grade and section.',
+                                        ? 'Upload PDF worksheets, official exams, and interactive video lesson URLs with thumbnails.'
+                                        : 'Access worksheets, study guides, and watch video lessons published by your teachers.',
                                     style: const TextStyle(
                                       fontSize: 12,
                                       color: Color(0xFFE2E8F0),
@@ -348,20 +601,41 @@ class _ResourcesScreenState extends ConsumerState<ResourcesScreen> {
                         ),
                         if (isTeacher) ...[
                           const SizedBox(height: 16),
-                          FilledButton.icon(
-                            style: FilledButton.styleFrom(
-                              backgroundColor: Colors.white,
-                              foregroundColor: const Color(0xFF0F172A),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(12),
+                          Wrap(
+                            spacing: 10,
+                            runSpacing: 10,
+                            children: [
+                              FilledButton.icon(
+                                style: FilledButton.styleFrom(
+                                  backgroundColor: Colors.white,
+                                  foregroundColor: const Color(0xFF0F172A),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                ),
+                                onPressed: _pickAndUploadPdfResource,
+                                icon: const Icon(Icons.upload_file_rounded, size: 18),
+                                label: const Text(
+                                  'Upload PDF Worksheet',
+                                  style: TextStyle(fontWeight: FontWeight.w700),
+                                ),
                               ),
-                            ),
-                            onPressed: _pickAndUploadResource,
-                            icon: const Icon(Icons.upload_file_rounded, size: 18),
-                            label: const Text(
-                              'Upload Worksheet / Exam PDF',
-                              style: TextStyle(fontWeight: FontWeight.w700),
-                            ),
+                              FilledButton.icon(
+                                style: FilledButton.styleFrom(
+                                  backgroundColor: const Color(0xFFEF4444),
+                                  foregroundColor: Colors.white,
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                ),
+                                onPressed: _addVideoLessonResource,
+                                icon: const Icon(Icons.video_call_rounded, size: 18),
+                                label: const Text(
+                                  'Add Video Lesson',
+                                  style: TextStyle(fontWeight: FontWeight.w700),
+                                ),
+                              ),
+                            ],
                           ),
                         ],
                       ],
@@ -372,10 +646,10 @@ class _ResourcesScreenState extends ConsumerState<ResourcesScreen> {
             ),
             const SizedBox(height: 20),
 
-            // Search Bar & Filter Chips
+            // Search Bar
             TextField(
               decoration: InputDecoration(
-                hintText: 'Search worksheets by title, grade, or topic...',
+                hintText: 'Search worksheets and video lessons...',
                 prefixIcon: const Icon(Icons.search_rounded),
                 suffixIcon: _searchQuery.isNotEmpty
                     ? IconButton(
@@ -394,10 +668,10 @@ class _ResourcesScreenState extends ConsumerState<ResourcesScreen> {
               child: Row(
                 children: [
                   for (final item in const [
-                    (type: 'all', label: 'All Files', icon: Icons.folder_open_rounded),
-                    (type: 'worksheet', label: 'Worksheets', icon: Icons.assignment_outlined),
+                    (type: 'all', label: 'All Resources', icon: Icons.folder_open_rounded),
+                    (type: 'video', label: 'Video Lessons', icon: Icons.smart_display_outlined),
+                    (type: 'pdf', label: 'Worksheets & PDFs', icon: Icons.picture_as_pdf_outlined),
                     (type: 'exam', label: 'Exam Papers', icon: Icons.quiz_outlined),
-                    (type: 'pdf', label: 'Reference PDFs', icon: Icons.menu_book_outlined),
                   ])
                     Padding(
                       padding: const EdgeInsets.only(right: 8),
@@ -432,7 +706,7 @@ class _ResourcesScreenState extends ConsumerState<ResourcesScreen> {
                       padding: const EdgeInsets.all(24),
                       child: Center(
                         child: Text(
-                          'Could not load worksheets: ${snapshot.error}',
+                          'Could not load materials: ${snapshot.error}',
                           style: TextStyle(color: theme.colorScheme.error),
                         ),
                       ),
@@ -442,9 +716,10 @@ class _ResourcesScreenState extends ConsumerState<ResourcesScreen> {
 
                 final allList = snapshot.data ?? [];
                 final filtered = allList.where((res) {
-                  if (_filterType != 'all' && res.fileType != _filterType) {
-                    return false;
-                  }
+                  if (_filterType == 'video' && !res.isVideo) return false;
+                  if (_filterType == 'pdf' && !res.isPdf) return false;
+                  if (_filterType == 'exam' && res.fileType != 'exam') return false;
+
                   if (_searchQuery.isNotEmpty) {
                     final t = res.title.toLowerCase();
                     final g = (res.targetGrade ?? '').toLowerCase();
@@ -480,15 +755,15 @@ class _ResourcesScreenState extends ConsumerState<ResourcesScreen> {
                             const SizedBox(height: 12),
                             Text(
                               isTeacher
-                                  ? 'No worksheets uploaded yet'
-                                  : 'No worksheets available for your class yet',
+                                  ? 'No learning materials uploaded yet'
+                                  : 'No worksheets or video lessons available yet',
                               style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
                             ),
                             const SizedBox(height: 4),
                             Text(
                               isTeacher
-                                  ? 'Click the button above to upload PDF worksheets and exams for your students.'
-                                  : 'When your teachers upload study sheets, exam papers, or PDFs, they will appear here.',
+                                  ? 'Use the buttons above to upload PDF worksheets or add interactive video lessons for your classes.'
+                                  : 'When your teachers publish worksheets, study materials, or video lessons, they will show up here.',
                               textAlign: TextAlign.center,
                               style: TextStyle(
                                 color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
@@ -506,7 +781,7 @@ class _ResourcesScreenState extends ConsumerState<ResourcesScreen> {
                   shrinkWrap: true,
                   physics: const NeverScrollableScrollPhysics(),
                   itemCount: filtered.length,
-                  separatorBuilder: (_, _) => const SizedBox(height: 12),
+                  separatorBuilder: (_, _) => const SizedBox(height: 14),
                   itemBuilder: (context, index) {
                     final res = filtered[index];
                     return _ResourceCard(
@@ -545,14 +820,64 @@ class _ResourceCard extends StatelessWidget {
   final bool isTeacher;
   final VoidCallback? onDelete;
 
+  Future<void> _openResource(BuildContext context) async {
+    final urlStr = (resource.videoUrl != null && resource.videoUrl!.isNotEmpty)
+        ? resource.videoUrl!
+        : resource.fileUrl;
+
+    if (urlStr.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No link attached to this resource.')),
+      );
+      return;
+    }
+
+    final uri = Uri.tryParse(urlStr);
+    if (uri != null) {
+      try {
+        final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
+        if (!launched && context.mounted) {
+          _showResourceFallbackDialog(context, urlStr);
+        }
+      } catch (_) {
+        if (context.mounted) _showResourceFallbackDialog(context, urlStr);
+      }
+    } else {
+      _showResourceFallbackDialog(context, urlStr);
+    }
+  }
+
+  void _showResourceFallbackDialog(BuildContext context, String url) {
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(resource.isVideo ? 'Video Lesson' : 'Resource Document'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(resource.title, style: const TextStyle(fontWeight: FontWeight.bold)),
+            const SizedBox(height: 8),
+            SelectableText(url, style: const TextStyle(fontSize: 12, color: Colors.blue)),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    final sizeKb = resource.fileSize != null
-        ? '${(resource.fileSize! / 1024).toStringAsFixed(1)} KB'
-        : 'PDF';
+    final isVideo = resource.isVideo;
+    final thumbnail = resource.effectiveThumbnail;
 
     return Container(
-      padding: const EdgeInsets.all(16),
+      clipBehavior: Clip.antiAlias,
       decoration: BoxDecoration(
         color: isDark ? const Color(0xFF1E293B) : Colors.white,
         borderRadius: BorderRadius.circular(18),
@@ -564,7 +889,7 @@ class _ResourceCard extends StatelessWidget {
           BoxShadow(
             color: isDark
                 ? Colors.black.withValues(alpha: 0.2)
-                : const Color(0xFF0F172A).withValues(alpha: 0.03),
+                : const Color(0xFF0F172A).withValues(alpha: 0.04),
             blurRadius: 14,
             offset: const Offset(0, 4),
           ),
@@ -573,148 +898,221 @@ class _ResourceCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Container(
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF10B981).withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: const Icon(
-                  Icons.picture_as_pdf_rounded,
-                  color: Color(0xFF10B981),
-                  size: 26,
-                ),
+          // If Video and Thumbnail is available, show video banner with play button
+          if (isVideo && thumbnail != null && thumbnail.isNotEmpty)
+            InkWell(
+              onTap: () => _openResource(context),
+              child: Stack(
+                alignment: Alignment.center,
+                children: [
+                  Image.network(
+                    thumbnail,
+                    height: 160,
+                    width: double.infinity,
+                    fit: BoxFit.cover,
+                    errorBuilder: (_, _, _) => Container(
+                      height: 120,
+                      color: const Color(0xFF1E293B),
+                      child: const Center(
+                        child: Icon(Icons.smart_display_rounded, size: 48, color: Colors.white54),
+                      ),
+                    ),
+                  ),
+                  Container(
+                    width: 52,
+                    height: 52,
+                    decoration: BoxDecoration(
+                      color: Colors.red.withValues(alpha: 0.9),
+                      shape: BoxShape.circle,
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withValues(alpha: 0.4),
+                          blurRadius: 12,
+                          offset: const Offset(0, 4),
+                        ),
+                      ],
+                    ),
+                    child: const Icon(Icons.play_arrow_rounded, color: Colors.white, size: 34),
+                  ),
+                  Positioned(
+                    top: 10,
+                    right: 10,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: Colors.black.withValues(alpha: 0.75),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: const Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.ondemand_video_rounded, color: Colors.white, size: 12),
+                          SizedBox(width: 4),
+                          Text(
+                            'VIDEO LESSON',
+                            style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.w900),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
               ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
+            ),
+
+          Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      resource.title,
-                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      resource.fileName,
-                      style: TextStyle(
-                        fontSize: 12,
-                        fontFamily: 'monospace',
-                        color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                    if (!isVideo || thumbnail == null || thumbnail.isEmpty)
+                      Container(
+                        padding: const EdgeInsets.all(10),
+                        margin: const EdgeInsets.only(right: 12),
+                        decoration: BoxDecoration(
+                          color: (isVideo ? const Color(0xFFEF4444) : const Color(0xFF10B981))
+                              .withValues(alpha: 0.12),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Icon(
+                          isVideo ? Icons.smart_display_rounded : Icons.picture_as_pdf_rounded,
+                          color: isVideo ? const Color(0xFFEF4444) : const Color(0xFF10B981),
+                          size: 26,
+                        ),
                       ),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            resource.title,
+                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+                          ),
+                          const SizedBox(height: 3),
+                          Text(
+                            isVideo ? (resource.videoUrl ?? resource.fileUrl) : resource.fileName,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    if (onDelete != null)
+                      IconButton(
+                        tooltip: 'Delete resource',
+                        icon: const Icon(Icons.delete_outline_rounded, color: Colors.red, size: 20),
+                        onPressed: onDelete,
+                      ),
+                  ],
+                ),
+                if (resource.description != null && resource.description!.isNotEmpty) ...[
+                  const SizedBox(height: 8),
+                  Text(
+                    resource.description!,
+                    style: TextStyle(
+                      fontSize: 12.5,
+                      color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF475569),
+                    ),
+                  ),
+                ],
+                const SizedBox(height: 12),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 6,
+                  children: [
+                    if (resource.targetGrade != null)
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFECFDF5),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: const Color(0xFFA7F3D0)),
+                        ),
+                        child: Text(
+                          resource.targetGrade!,
+                          style: const TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.bold,
+                            color: Color(0xFF047857),
+                          ),
+                        ),
+                      ),
+                    if (resource.targetSection != null)
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFEFF6FF),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: const Color(0xFFBFDBFE)),
+                        ),
+                        child: Text(
+                          resource.targetSection!,
+                          style: const TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.bold,
+                            color: Color(0xFF1D4ED8),
+                          ),
+                        ),
+                      ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: isDark ? const Color(0xFF334155) : const Color(0xFFF1F5F9),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Text(
+                        isVideo ? 'Video' : 'PDF Worksheet',
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                          color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                        ),
+                      ),
+                    ),
+                    if (resource.teacherName != null)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 2),
+                        child: Text(
+                          'by ${resource.teacherName}',
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 14),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    FilledButton.tonalIcon(
+                      style: FilledButton.styleFrom(
+                        backgroundColor: isVideo
+                            ? const Color(0xFFEF4444).withValues(alpha: 0.12)
+                            : const Color(0xFF10B981).withValues(alpha: 0.12),
+                        foregroundColor: isVideo ? const Color(0xFFDC2626) : const Color(0xFF047857),
+                        minimumSize: const Size(0, 38),
+                        padding: const EdgeInsets.symmetric(horizontal: 16),
+                      ),
+                      icon: Icon(
+                        isVideo ? Icons.play_circle_fill_rounded : Icons.download_rounded,
+                        size: 18,
+                      ),
+                      label: Text(isVideo ? 'Watch Video Lesson' : 'Open / Read PDF'),
+                      onPressed: () => _openResource(context),
                     ),
                   ],
                 ),
-              ),
-              if (onDelete != null)
-                IconButton(
-                  tooltip: 'Delete resource',
-                  icon: const Icon(Icons.delete_outline_rounded, color: Colors.red, size: 20),
-                  onPressed: onDelete,
-                ),
-            ],
-          ),
-          if (resource.description != null && resource.description!.isNotEmpty) ...[
-            const SizedBox(height: 8),
-            Text(
-              resource.description!,
-              style: TextStyle(
-                fontSize: 12,
-                color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF475569),
-              ),
+              ],
             ),
-          ],
-          const SizedBox(height: 12),
-          Wrap(
-            spacing: 8,
-            runSpacing: 6,
-            children: [
-              if (resource.targetGrade != null)
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFECFDF5),
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: const Color(0xFFA7F3D0)),
-                  ),
-                  child: Text(
-                    resource.targetGrade!,
-                    style: const TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.bold,
-                      color: Color(0xFF047857),
-                    ),
-                  ),
-                ),
-              if (resource.targetSection != null)
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFEFF6FF),
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: const Color(0xFFBFDBFE)),
-                  ),
-                  child: Text(
-                    resource.targetSection!,
-                    style: const TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.bold,
-                      color: Color(0xFF1D4ED8),
-                    ),
-                  ),
-                ),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                decoration: BoxDecoration(
-                  color: isDark ? const Color(0xFF334155) : const Color(0xFFF1F5F9),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Text(
-                  sizeKb,
-                  style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w600,
-                    color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
-                  ),
-                ),
-              ),
-              if (resource.teacherName != null)
-                Padding(
-                  padding: const EdgeInsets.only(top: 2),
-                  child: Text(
-                    'by ${resource.teacherName}',
-                    style: TextStyle(
-                      fontSize: 11,
-                      color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
-                    ),
-                  ),
-                ),
-            ],
-          ),
-          const SizedBox(height: 14),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.end,
-            children: [
-              FilledButton.tonalIcon(
-                style: FilledButton.styleFrom(
-                  minimumSize: const Size(0, 38),
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                ),
-                icon: const Icon(Icons.download_rounded, size: 16),
-                label: const Text('Download / View PDF'),
-                onPressed: () {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text('Opening ${resource.fileName}...'),
-                      behavior: SnackBarBehavior.floating,
-                    ),
-                  );
-                },
-              ),
-            ],
           ),
         ],
       ),

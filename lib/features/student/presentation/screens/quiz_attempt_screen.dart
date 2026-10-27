@@ -497,11 +497,13 @@ class _QuizAttemptScreenState extends State<QuizAttemptScreen>
                             ),
                       ),
                       Text(
-                        question.type == 'short_answer'
+                        question.type == 'short_answer' || question.type == 'description'
                             ? 'Descriptive / Short answer'
-                            : question.type == 'true_false'
-                                ? 'True / False'
-                                : 'Multiple choice',
+                            : question.type == 'fill_in_blank' || question.type == 'blank_space'
+                                ? 'Fill in the Blank'
+                                : question.type == 'true_false'
+                                    ? 'True / False'
+                                    : 'Multiple choice',
                         style: Theme.of(context).textTheme.bodySmall?.copyWith(
                               color: Theme.of(context)
                                   .colorScheme
@@ -523,7 +525,10 @@ class _QuizAttemptScreenState extends State<QuizAttemptScreen>
                   if (question.imageUrl != null && question.imageUrl!.isNotEmpty)
                     _buildQuestionDiagramWidget(question.imageUrl!),
                   const SizedBox(height: 20),
-                  if (question.type == 'short_answer')
+                  if (question.type == 'short_answer' ||
+                      question.type == 'description' ||
+                      question.type == 'fill_in_blank' ||
+                      question.type == 'blank_space')
                     _DescriptionQuestionInput(
                       key: ValueKey(question.id),
                       questionId: question.id,

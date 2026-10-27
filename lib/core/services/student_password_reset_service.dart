@@ -151,4 +151,19 @@ class StudentPasswordResetService {
 
   Future<PasswordResetBatchResult> resetStudents(List<String> studentIds) =>
       resetAccounts(studentIds);
+
+  Future<PasswordResetResult> resetPasswordDirect({
+    required String accountId,
+    required String username,
+    required String role,
+  }) async {
+    final batch = await resetAccounts([accountId]);
+    if (batch.results.isNotEmpty) {
+      return batch.results.first;
+    }
+    final failureMsg = batch.failures.isNotEmpty
+        ? batch.failures.first.message
+        : 'Failed to reset password';
+    throw Exception(failureMsg);
+  }
 }
