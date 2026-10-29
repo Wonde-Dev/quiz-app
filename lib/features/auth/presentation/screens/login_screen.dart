@@ -36,6 +36,12 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   XFile? _pickedAvatarFile;
   Uint8List? _pickedAvatarBytes;
 
+  final _otpController = TextEditingController();
+  bool _useOtpLogin = false;
+  bool _otpSent = false;
+  String _targetOtpEmail = '';
+  bool _isSendingOtp = false;
+
   late Future<List<Map<String, dynamic>>> _schoolsFuture;
   Future<List<Map<String, dynamic>>> _sectionsFuture = Future.value([]);
 
@@ -67,6 +73,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     _confirmController.dispose();
     _subjectController.dispose();
     _phoneController.dispose();
+    _otpController.dispose();
     super.dispose();
   }
 
@@ -184,12 +191,56 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
         }
       }
     } else {
-      await notifier.signIn(
-        emailOrUsername: _usernameController.text.trim(),
-        password: _passwordController.text,
-        expectedRole: roleFromUsername(_usernameController.text.trim()),
-      );
+      if (_useOtpLogin) {
+        if (!_otpSent) {
+          await _sendLoginOtp();
+        } else {
+          await _verifyLoginOtp();
+        }
+      } else {
+        await notifier.signIn(
+          emailOrUsername: _usernameController.text.trim(),
+          password: _passwordController.text,
+          expectedRole: roleFromUsername(_usernameController.text.trim()),
+        );
+      }
     }
+  }
+
+  Future<void> _sendLoginOtp() async {
+    final input = _usernameController.text.trim();
+    if (input.isEmpty) {
+      ref.read(authStateProvider.notifier).setMessage(
+        error: 'Enter your username or email address to receive an OTP code.',
+      );
+      return;
+    }
+    setState(() => _isSendingOtp = true);
+    final email = await ref.read(authStateProvider.notifier).sendLoginOtp(input);
+    if (mounted) {
+      setState(() {
+        _isSendingOtp = false;
+        if (email != null) {
+          _otpSent = true;
+          _targetOtpEmail = email;
+        }
+      });
+    }
+  }
+
+  Future<void> _verifyLoginOtp() async {
+    final token = _otpController.text.trim();
+    if (token.isEmpty || token.length < 6) {
+      ref.read(authStateProvider.notifier).setMessage(
+        error: 'Enter the 6-digit verification code sent to your email.',
+      );
+      return;
+    }
+    await ref.read(authStateProvider.notifier).verifyLoginOtp(
+      email: _targetOtpEmail.isNotEmpty ? _targetOtpEmail : _usernameController.text.trim(),
+      token: token,
+      expectedRole: roleFromUsername(_usernameController.text.trim()),
+    );
   }
 
   Future<void> _pickAvatar() async {
@@ -265,50 +316,223 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   }
 
   Future<void> _sendReset() async {
-    String input = _usernameController.text.trim();
-    if (input.isEmpty) {
-      final controller = TextEditingController();
-      final entered = await showDialog<String>(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          title: const Text('Reset Password'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
+    final emailController = TextEditingController(text: _usernameController.text.trim());
+    final otpCodeController = TextEditingController();
+    final newPasswordController = TextEditingController();
+    final confirmPasswordController = TextEditingController();
+    bool codeSent = false;
+    bool isWorking = false;
+    String targetEmail = '';
+    String? dialogError;
+
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          title: Row(
             children: [
-              const Text(
-                'Enter your registered email address or institutional username to receive a password reset link:',
-                style: TextStyle(fontSize: 13),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: controller,
-                autofocus: true,
-                decoration: const InputDecoration(
-                  labelText: 'Email or Username',
-                  hintText: 'e.g. user@gmail.com or User@Teacher.edu',
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF10B981).withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(10),
                 ),
+                child: const Icon(Icons.lock_reset_rounded, color: Color(0xFF10B981)),
               ),
+              const SizedBox(width: 12),
+              const Text('Reset Password'),
             ],
+          ),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (!codeSent) ...[
+                  const Text(
+                    'Enter your registered email address or institutional username. A 6-digit OTP code will be sent to your email:',
+                    style: TextStyle(fontSize: 13),
+                  ),
+                  const SizedBox(height: 14),
+                  TextField(
+                    controller: emailController,
+                    autofocus: true,
+                    decoration: const InputDecoration(
+                      labelText: 'Email or Username',
+                      hintText: 'e.g. user@gmail.com or YeroG@Teacher.edu',
+                      prefixIcon: Icon(Icons.alternate_email_rounded),
+                    ),
+                  ),
+                ] else ...[
+                  Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF10B981).withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.mark_email_read_outlined, size: 18, color: Color(0xFF10B981)),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            '6-digit code sent to $targetEmail. Check your inbox and spam folder.',
+                            style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  TextField(
+                    controller: otpCodeController,
+                    keyboardType: TextInputType.number,
+                    maxLength: 6,
+                    decoration: const InputDecoration(
+                      labelText: '6-Digit OTP Code',
+                      hintText: '123456',
+                      prefixIcon: Icon(Icons.pin_outlined),
+                      counterText: '',
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: newPasswordController,
+                    obscureText: true,
+                    decoration: const InputDecoration(
+                      labelText: 'New Password',
+                      hintText: 'At least 8 characters',
+                      prefixIcon: Icon(Icons.lock_outline_rounded),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: confirmPasswordController,
+                    obscureText: true,
+                    decoration: const InputDecoration(
+                      labelText: 'Confirm New Password',
+                      prefixIcon: Icon(Icons.lock_reset_rounded),
+                    ),
+                  ),
+                ],
+                if (dialogError != null) ...[
+                  const SizedBox(height: 12),
+                  Text(
+                    dialogError!,
+                    style: const TextStyle(color: Colors.red, fontSize: 12),
+                  ),
+                ],
+              ],
+            ),
           ),
           actions: [
             TextButton(
-              onPressed: () => Navigator.pop(ctx),
+              onPressed: isWorking ? null : () => Navigator.pop(ctx),
               child: const Text('Cancel'),
             ),
-            FilledButton(
-              onPressed: () => Navigator.pop(ctx, controller.text.trim()),
-              child: const Text('Send Reset Link'),
-            ),
+            if (!codeSent)
+              FilledButton(
+                onPressed: isWorking
+                    ? null
+                    : () async {
+                        final input = emailController.text.trim();
+                        if (input.isEmpty) {
+                          setDialogState(() => dialogError = 'Please enter your email or username.');
+                          return;
+                        }
+                        setDialogState(() {
+                          isWorking = true;
+                          dialogError = null;
+                        });
+                        try {
+                          final email = await ref
+                              .read(authStateProvider.notifier)
+                              .sendPasswordReset(input);
+                          if (email != null) {
+                            setDialogState(() {
+                              codeSent = true;
+                              targetEmail = email;
+                              isWorking = false;
+                            });
+                          } else {
+                            setDialogState(() {
+                              isWorking = false;
+                              dialogError = 'Could not send reset code. Please check your username/email.';
+                            });
+                          }
+                        } catch (e) {
+                          setDialogState(() {
+                            isWorking = false;
+                            dialogError = e.toString();
+                          });
+                        }
+                      },
+                child: isWorking
+                    ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                    : const Text('Send 6-Digit Code'),
+              )
+            else
+              FilledButton(
+                onPressed: isWorking
+                    ? null
+                    : () async {
+                        final token = otpCodeController.text.trim();
+                        final newPw = newPasswordController.text;
+                        final confirmPw = confirmPasswordController.text;
+
+                        if (token.length < 6) {
+                          setDialogState(() => dialogError = 'Enter the complete 6-digit OTP code.');
+                          return;
+                        }
+                        if (newPw.length < 8) {
+                          setDialogState(() => dialogError = 'New password must be at least 8 characters.');
+                          return;
+                        }
+                        if (newPw != confirmPw) {
+                          setDialogState(() => dialogError = 'Passwords do not match.');
+                          return;
+                        }
+
+                        setDialogState(() {
+                          isWorking = true;
+                          dialogError = null;
+                        });
+
+                        final success = await ref
+                            .read(authStateProvider.notifier)
+                            .verifyPasswordResetOtp(
+                              email: targetEmail,
+                              token: token,
+                              newPassword: newPw,
+                            );
+
+                        if (success) {
+                          if (ctx.mounted) Navigator.pop(ctx);
+                          if (mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text('Password successfully changed! Please sign in with your new password.'),
+                                backgroundColor: Color(0xFF10B981),
+                              ),
+                            );
+                          }
+                        } else {
+                          setDialogState(() {
+                            isWorking = false;
+                            dialogError = 'Invalid code or reset failed. Please check the code.';
+                          });
+                        }
+                      },
+                child: isWorking
+                    ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                    : const Text('Verify & Update Password'),
+              ),
           ],
         ),
-      );
-      if (entered == null || entered.isEmpty) return;
-      input = entered;
-    }
-
-    await ref.read(authStateProvider.notifier).sendPasswordReset(input);
+      ),
+    );
   }
 
   @override
@@ -775,38 +999,135 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                           const SizedBox(height: 14),
                         ],
 
-                        // Password field
-                        TextFormField(
-                          controller: _passwordController,
-                          autofillHints: _isRegistering
-                              ? const [AutofillHints.newPassword]
-                              : const [AutofillHints.password],
-                          decoration: InputDecoration(
-                            labelText: 'Password',
-                            prefixIcon: const Icon(Icons.lock_outline_rounded),
-                            suffixIcon: IconButton(
-                              tooltip: _obscurePassword ? 'Show password' : 'Hide password',
-                              onPressed: () => setState(
-                                () => _obscurePassword = !_obscurePassword,
-                              ),
-                              icon: Icon(
-                                _obscurePassword
-                                    ? Icons.visibility_outlined
-                                    : Icons.visibility_off_outlined,
+                        // Password or OTP login mode
+                        if (!_isRegistering && _useOtpLogin) ...[
+                          Container(
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF10B981).withValues(alpha: 0.08),
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(
+                                color: const Color(0xFF10B981).withValues(alpha: 0.25),
                               ),
                             ),
+                            child: Row(
+                              children: [
+                                const Icon(Icons.mark_email_unread_outlined, color: Color(0xFF10B981), size: 20),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: Text(
+                                    _otpSent
+                                        ? '6-digit OTP code sent to $_targetOtpEmail. Enter it below:'
+                                        : 'Enter your email or username above, then tap below to receive a 6-digit login OTP code in your email.',
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      color: isDark ? const Color(0xFFA7F3D0) : const Color(0xFF065F46),
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
                           ),
-                          obscureText: _obscurePassword,
-                          validator: (value) {
-                            if (!_isRegistering) {
-                              return Validators.password(value);
-                            }
-                            if (value == null || value.length < 8) {
-                              return 'Use at least 8 characters';
-                            }
-                            return null;
-                          },
-                        ),
+                          if (_otpSent) ...[
+                            const SizedBox(height: 14),
+                            TextFormField(
+                              controller: _otpController,
+                              keyboardType: TextInputType.number,
+                              maxLength: 6,
+                              decoration: const InputDecoration(
+                                labelText: '6-Digit OTP Code',
+                                hintText: '123456',
+                                prefixIcon: Icon(Icons.pin_outlined),
+                                counterText: '',
+                              ),
+                              validator: (v) {
+                                if (_useOtpLogin && _otpSent && (v == null || v.trim().length < 6)) {
+                                  return 'Enter the complete 6-digit OTP code';
+                                }
+                                return null;
+                              },
+                            ),
+                          ],
+                          const SizedBox(height: 8),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              TextButton.icon(
+                                onPressed: () {
+                                  setState(() {
+                                    _useOtpLogin = false;
+                                    _otpSent = false;
+                                  });
+                                },
+                                icon: const Icon(Icons.lock_outline_rounded, size: 16),
+                                label: const Text('Use password instead'),
+                              ),
+                              if (_otpSent)
+                                TextButton.icon(
+                                  onPressed: _isSendingOtp ? null : _sendLoginOtp,
+                                  icon: const Icon(Icons.refresh_rounded, size: 16),
+                                  label: const Text('Resend Code'),
+                                ),
+                            ],
+                          ),
+                        ] else ...[
+                          // Standard Password field
+                          TextFormField(
+                            controller: _passwordController,
+                            autofillHints: _isRegistering
+                                ? const [AutofillHints.newPassword]
+                                : const [AutofillHints.password],
+                            decoration: InputDecoration(
+                              labelText: 'Password',
+                              prefixIcon: const Icon(Icons.lock_outline_rounded),
+                              suffixIcon: IconButton(
+                                tooltip: _obscurePassword ? 'Show password' : 'Hide password',
+                                onPressed: () => setState(
+                                  () => _obscurePassword = !_obscurePassword,
+                                ),
+                                icon: Icon(
+                                  _obscurePassword
+                                      ? Icons.visibility_outlined
+                                      : Icons.visibility_off_outlined,
+                                ),
+                              ),
+                            ),
+                            obscureText: _obscurePassword,
+                            validator: (value) {
+                              if (_useOtpLogin) return null;
+                              if (!_isRegistering) {
+                                return Validators.password(value);
+                              }
+                              if (value == null || value.length < 8) {
+                                return 'Use at least 8 characters';
+                              }
+                              return null;
+                            },
+                          ),
+                          if (!_isRegistering) ...[
+                            const SizedBox(height: 4),
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                TextButton.icon(
+                                  onPressed: () {
+                                    setState(() {
+                                      _useOtpLogin = true;
+                                      _otpSent = false;
+                                    });
+                                  },
+                                  icon: const Icon(Icons.mark_email_read_outlined, size: 16),
+                                  label: const Text('Sign in with Email OTP'),
+                                ),
+                                TextButton(
+                                  onPressed: _sendReset,
+                                  child: const Text('Forgot password?'),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ],
 
                         if (_isRegistering) ...[
                           const SizedBox(height: 14),
@@ -873,15 +1194,6 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                           ),
                         ],
 
-                        if (!_isRegistering)
-                          Align(
-                            alignment: Alignment.centerRight,
-                            child: TextButton(
-                              onPressed: _sendReset,
-                              child: const Text('Forgot password?'),
-                            ),
-                          ),
-
                         if (authState.error != null) ...[
                           const SizedBox(height: 14),
                           _MessageBanner(message: authState.error!, isError: true),
@@ -940,13 +1252,23 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                                       Icon(
                                         _isRegistering
                                             ? Icons.person_add_alt_1_rounded
-                                            : Icons.login_rounded,
+                                            : (_useOtpLogin
+                                                ? (_otpSent
+                                                    ? Icons.verified_rounded
+                                                    : Icons.send_rounded)
+                                                : Icons.login_rounded),
                                         size: 18,
                                         color: Colors.white,
                                       ),
                                       const SizedBox(width: 8),
                                       Text(
-                                        _isRegistering ? 'Create account' : 'Sign in',
+                                        _isRegistering
+                                            ? 'Create account'
+                                            : (_useOtpLogin
+                                                ? (_otpSent
+                                                    ? 'Verify Code & Sign In'
+                                                    : 'Send Login OTP Code')
+                                                : 'Sign in'),
                                         style: const TextStyle(
                                           fontSize: 15,
                                           fontWeight: FontWeight.w700,
@@ -1150,7 +1472,15 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   Future<List<Map<String, dynamic>>> _loadSchools() async {
     try {
       final schools = await ref.read(authStateProvider.notifier).loadSchools();
-      if (mounted) setState(() => _schoolsReady = schools.isNotEmpty);
+      if (mounted) {
+        setState(() {
+          _schoolsReady = schools.isNotEmpty;
+          if (schools.isNotEmpty && _selectedSchoolId == null) {
+            _selectedSchoolId = schools.first['id'] as String;
+            _sectionsFuture = _loadSections(_selectedSchoolId!);
+          }
+        });
+      }
       return schools;
     } catch (_) {
       if (mounted) setState(() => _schoolsReady = false);

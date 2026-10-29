@@ -86,17 +86,112 @@ class AuthNotifier extends Notifier<AuthState> {
     );
   }
 
-  Future<void> sendPasswordReset(String emailOrUsername) async {
+  Future<String?> sendPasswordReset(String emailOrUsername) async {
     state = const AuthState(isLoading: true);
     try {
       final targetEmail = await _authService.sendPasswordReset(emailOrUsername);
       final masked = _maskEmail(targetEmail);
       state = AuthState(
         successMessage:
-            'Password reset link sent to $masked. Check your inbox and spam folder.',
+            'A 6-digit password reset OTP code has been sent to $masked. Check your inbox and spam folder.',
       );
+      return targetEmail;
     } catch (error) {
-      state = AuthState(error: 'Could not send reset link: $error');
+      state = AuthState(error: 'Could not send reset code: $error');
+      return null;
+    }
+  }
+
+  Future<String?> sendLoginOtp(String emailOrUsername) async {
+    state = const AuthState(isLoading: true);
+    try {
+      final targetEmail = await _authService.sendLoginOtp(emailOrUsername);
+      final masked = _maskEmail(targetEmail);
+      state = AuthState(
+        successMessage: 'A 6-digit login OTP code was sent to $masked. Enter it below to sign in.',
+      );
+      return targetEmail;
+    } catch (e) {
+      state = AuthState(error: 'Could not send OTP code: $e');
+      return null;
+    }
+  }
+
+  Future<void> verifyLoginOtp({
+    required String email,
+    required String token,
+    String? expectedRole,
+  }) async {
+    state = const AuthState(isLoading: true);
+    try {
+      await _authService.verifyLoginOtp(email: email, token: token);
+      final supabaseUser = _authService.currentUser;
+      if (supabaseUser == null) {
+        state = const AuthState(error: 'Authentication failed. Please try again.');
+        return;
+      }
+      final appUser = await _authService.getAppUser(supabaseUser.id);
+      if (appUser == null) {
+        await _authService.signOut();
+        state = const AuthState(error: 'User record not found. Contact administrator.');
+        return;
+      }
+      if (!appUser.isActive) {
+        await _authService.signOut();
+        state = const AuthState(
+          error: 'This account is disabled. Contact an administrator.',
+        );
+        return;
+      }
+      if (appUser.isPendingApproval) {
+        await _authService.signOut();
+        state = AuthState(
+          error: appUser.role == 'teacher' || appUser.requestedRole == 'teacher'
+              ? 'Your teacher registration is pending approval by the School Director or Administrator.'
+              : 'Your student registration is pending approval by your class Attendance Teacher.',
+        );
+        return;
+      }
+      if (appUser.isRejected) {
+        await _authService.signOut();
+        state = const AuthState(
+          error: 'Your registration request was declined. Please contact your school.',
+        );
+        return;
+      }
+      state = AuthState(
+        user: appUser,
+        needsPasswordChange: appUser.mustChangePassword,
+      );
+      try {
+        await ref
+            .read(auditLogServiceProvider)
+            .logForCurrentUser(action: 'user_signed_in_via_otp');
+      } catch (_) {}
+    } catch (e) {
+      state = AuthState(error: 'Invalid or expired OTP code: $e');
+    }
+  }
+
+  Future<bool> verifyPasswordResetOtp({
+    required String email,
+    required String token,
+    required String newPassword,
+  }) async {
+    state = const AuthState(isLoading: true);
+    try {
+      await _authService.verifyRecoveryOtpAndSetPassword(
+        email: email,
+        token: token,
+        newPassword: newPassword,
+      );
+      state = const AuthState(
+        successMessage: 'Password successfully reset! You can now sign in with your new password.',
+      );
+      return true;
+    } catch (e) {
+      state = AuthState(error: 'Could not reset password: $e');
+      return false;
     }
   }
 

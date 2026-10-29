@@ -104,7 +104,9 @@ class _AdminRegisterUserScreenState
         } else if (_schools.isNotEmpty && _selectedSchoolId == null) {
           _selectedSchoolId = _schools.first['id'] as String;
         }
-        if (currentUser?.isAttendanceTeacher == true) {
+        if (currentUser?.role == AppRoles.subadmin) {
+          _selectedRole = AppRoles.teacher;
+        } else if (currentUser?.isAttendanceTeacher == true) {
           _selectedRole = AppRoles.student;
           if (currentUser?.attendanceGrade != null && currentUser!.attendanceGrade!.isNotEmpty) {
             _selectedGrade = currentUser.attendanceGrade!;
@@ -806,40 +808,79 @@ class _AdminRegisterUserScreenState
                     style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800),
                   ),
                   const SizedBox(height: 10),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: [
-                      ChoiceChip(
-                        avatar: const Icon(Icons.school_outlined, size: 16),
-                        label: const Text('Student',
-                            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-                        selected: _selectedRole == AppRoles.student,
-                        onSelected: (selected) {
-                          if (selected) _onRoleChanged(AppRoles.student);
-                        },
-                      ),
-                      if (ref.watch(authStateProvider).user?.isAttendanceTeacher != true)
-                        ChoiceChip(
-                          avatar: const Icon(Icons.co_present_outlined, size: 16),
-                          label: const Text('Teacher',
-                              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-                          selected: _selectedRole == AppRoles.teacher,
-                          onSelected: (selected) {
-                            if (selected) _onRoleChanged(AppRoles.teacher);
-                          },
-                        ),
-                      if (ref.watch(authStateProvider).user?.isSuperAdmin == true)
-                        ChoiceChip(
-                          avatar: const Icon(Icons.admin_panel_settings_outlined, size: 16),
-                          label: const Text('Sub-Admin / Director',
-                              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-                          selected: _selectedRole == AppRoles.subadmin,
-                          onSelected: (selected) {
-                            if (selected) _onRoleChanged(AppRoles.subadmin);
-                          },
-                        ),
-                    ],
+                  Builder(
+                    builder: (context) {
+                      final currentUser = ref.watch(authStateProvider).user;
+                      final isSubAdmin = currentUser?.role == AppRoles.subadmin;
+                      final isAttendanceTeacher = currentUser?.isAttendanceTeacher == true;
+
+                      if (isSubAdmin) {
+                        return Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: [
+                            ChoiceChip(
+                              avatar: const Icon(Icons.co_present_outlined, size: 16),
+                              label: const Text('Faculty Teacher',
+                                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                              selected: true,
+                              onSelected: (_) => _onRoleChanged(AppRoles.teacher),
+                            ),
+                          ],
+                        );
+                      }
+
+                      if (isAttendanceTeacher) {
+                        return Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: [
+                            ChoiceChip(
+                              avatar: const Icon(Icons.school_outlined, size: 16),
+                              label: Text('Student (${currentUser?.attendanceClass ?? "Assigned Class"})',
+                                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                              selected: true,
+                              onSelected: (_) => _onRoleChanged(AppRoles.student),
+                            ),
+                          ],
+                        );
+                      }
+
+                      return Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: [
+                          ChoiceChip(
+                            avatar: const Icon(Icons.school_outlined, size: 16),
+                            label: const Text('Student',
+                                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                            selected: _selectedRole == AppRoles.student,
+                            onSelected: (selected) {
+                              if (selected) _onRoleChanged(AppRoles.student);
+                            },
+                          ),
+                          ChoiceChip(
+                            avatar: const Icon(Icons.co_present_outlined, size: 16),
+                            label: const Text('Teacher',
+                                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                            selected: _selectedRole == AppRoles.teacher,
+                            onSelected: (selected) {
+                              if (selected) _onRoleChanged(AppRoles.teacher);
+                            },
+                          ),
+                          if (currentUser?.isSuperAdmin == true || currentUser?.role == AppRoles.admin)
+                            ChoiceChip(
+                              avatar: const Icon(Icons.admin_panel_settings_outlined, size: 16),
+                              label: const Text('Sub-Admin / Director',
+                                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                              selected: _selectedRole == AppRoles.subadmin,
+                              onSelected: (selected) {
+                                if (selected) _onRoleChanged(AppRoles.subadmin);
+                              },
+                            ),
+                        ],
+                      );
+                    },
                   ),
                   const SizedBox(height: 20),
 

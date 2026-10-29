@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:quiz_app/core/constants/app_roles.dart';
 import 'package:quiz_app/core/services/audit_log_service.dart';
 import 'package:quiz_app/features/auth/presentation/providers/auth_provider.dart';
 import 'package:quiz_app/shared/models/audit_log.dart';
@@ -18,10 +19,12 @@ class AdminDashboardScreen extends ConsumerStatefulWidget {
 class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen>
     with SingleTickerProviderStateMixin {
   int _totalUsersCount = 0;
+  int _subadminCount = 0;
   int _studentCount = 0;
   int _teacherCount = 0;
   int _quizCount = 0;
   int _pendingCount = 0;
+  List<Map<String, dynamic>> _gradeStats = [];
   List<AuditLog> _recentLogs = [];
   bool _loading = true;
   late final AnimationController _pulseController;
@@ -69,6 +72,39 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen>
     setState(() => _loading = true);
     final client = Supabase.instance.client;
     final auditService = AuditLogService();
+    final currentUser = ref.read(authStateProvider).user;
+
+    try {
+      final results = await Future.wait<dynamic>([
+        client.rpc('get_school_user_stats', params: {
+          'p_school_id': currentUser?.schoolId,
+        }),
+        client.from('quizzes').select('id').eq('is_published', true),
+        auditService.fetchLogs(limit: 5),
+      ]);
+
+      if (!mounted) return;
+      final rpcRes = results[0];
+      final publishedQuizzes = results[1] as List;
+      final recentLogs = results[2] as List<AuditLog>;
+
+      if (rpcRes is Map) {
+        setState(() {
+          _totalUsersCount = (rpcRes['total_users'] as num?)?.toInt() ?? 0;
+          _subadminCount = (rpcRes['subadmins'] as num?)?.toInt() ?? 0;
+          _teacherCount = (rpcRes['teachers'] as num?)?.toInt() ?? 0;
+          _studentCount = (rpcRes['students'] as num?)?.toInt() ?? 0;
+          _pendingCount = (rpcRes['pending'] as num?)?.toInt() ?? 0;
+          _gradeStats = List<Map<String, dynamic>>.from(rpcRes['grades'] ?? []);
+          _quizCount = publishedQuizzes.length;
+          _recentLogs = recentLogs;
+          _loading = false;
+        });
+        return;
+      }
+    } catch (e) {
+      debugPrint('get_school_user_stats RPC note: $e');
+    }
 
     try {
       final results = await Future.wait<dynamic>([
@@ -84,15 +120,17 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen>
 
       // Active users: count anyone where is_active is not explicitly false
       final activeUsers = allUsers.where((u) => u['is_active'] != false).toList();
+      final subadminCount = activeUsers.where((u) => u['role'] == 'subadmin').length;
       final studentCount = activeUsers.where((u) => u['role'] == 'student').length;
       final teacherCount = activeUsers.where((u) => u['role'] == 'teacher').length;
       final totalUsers = activeUsers.length;
       final pendingCount = allUsers.where((u) => u['approval_status'] == 'pending').length;
 
       setState(() {
+        _totalUsersCount = totalUsers;
+        _subadminCount = subadminCount;
         _studentCount = studentCount;
         _teacherCount = teacherCount;
-        _totalUsersCount = totalUsers;
         _quizCount = publishedQuizzes.length;
         _pendingCount = pendingCount;
         _recentLogs = recentLogs;
@@ -334,12 +372,13 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen>
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
     final currentUser = ref.watch(authStateProvider).user;
+    final isSubAdmin = currentUser?.role == AppRoles.subadmin;
     final adminName = currentUser?.fullName?.isNotEmpty == true
         ? currentUser!.fullName!
-        : currentUser?.username ?? 'Administrator';
+        : currentUser?.username ?? (isSubAdmin ? 'Director' : 'Administrator');
 
     return DashboardShell(
-      title: 'Admin Control Center',
+      title: isSubAdmin ? 'Ciro School Director Center' : 'Admin Control Center',
       body: RefreshIndicator(
         onRefresh: _loadStats,
         child: ListView(
@@ -583,7 +622,9 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen>
 
             // Live Metrics Overview
             Text(
-              'Institutional Metrics',
+              isSubAdmin
+                  ? 'Ciro School Institutional Metrics'
+                  : 'System Users by Role (Totals)',
               style: theme.textTheme.titleMedium?.copyWith(
                 fontWeight: FontWeight.w800,
                 color: isDark ? Colors.white : const Color(0xFF0F172A),
@@ -591,57 +632,229 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen>
             ),
             const SizedBox(height: 12),
 
-            Row(
-              children: [
-                Expanded(
-                  child: _MetricCard(
-                    title: 'Total Users',
-                    count: _totalUsersCount,
-                    loading: _loading,
-                    icon: Icons.groups_rounded,
-                    color: isDark
-                        ? const Color(0xFF38BDF8)
-                        : const Color(0xFF0F172A),
+            if (!isSubAdmin) ...[
+              // SUPER ADMIN: Role totals only (No grade/section breakdown)
+              Row(
+                children: [
+                  Expanded(
+                    child: _MetricCard(
+                      title: 'Total Users',
+                      count: _totalUsersCount,
+                      loading: _loading,
+                      icon: Icons.groups_rounded,
+                      color: isDark
+                          ? const Color(0xFF38BDF8)
+                          : const Color(0xFF0F172A),
+                    ),
                   ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: _MetricCard(
-                    title: 'Students',
-                    count: _studentCount,
-                    loading: _loading,
-                    icon: Icons.school_rounded,
-                    color: const Color(0xFF6366F1),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: _MetricCard(
+                      title: 'Sub-Admins',
+                      count: _subadminCount,
+                      loading: _loading,
+                      icon: Icons.admin_panel_settings_rounded,
+                      color: const Color(0xFF6366F1),
+                    ),
                   ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 10),
-            Row(
-              children: [
-                Expanded(
-                  child: _MetricCard(
-                    title: 'Teachers',
-                    count: _teacherCount,
-                    loading: _loading,
-                    icon: Icons.co_present_rounded,
-                    color: const Color(0xFF10B981),
+                ],
+              ),
+              const SizedBox(height: 10),
+              Row(
+                children: [
+                  Expanded(
+                    child: _MetricCard(
+                      title: 'Teachers',
+                      count: _teacherCount,
+                      loading: _loading,
+                      icon: Icons.co_present_rounded,
+                      color: const Color(0xFF10B981),
+                    ),
                   ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: _MetricCard(
-                    title: 'Quizzes',
-                    count: _quizCount,
-                    loading: _loading,
-                    icon: Icons.quiz_rounded,
-                    color: const Color(0xFF8B5CF6),
-                    onTap: _openQuizzesModerationSheet,
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: _MetricCard(
+                      title: 'Students',
+                      count: _studentCount,
+                      loading: _loading,
+                      icon: Icons.school_rounded,
+                      color: const Color(0xFF3B82F6),
+                    ),
                   ),
+                ],
+              ),
+              const SizedBox(height: 10),
+              _MetricCard(
+                title: 'Faculty Quizzes Prepared (Teacher Created Only)',
+                count: _quizCount,
+                loading: _loading,
+                icon: Icons.quiz_rounded,
+                color: const Color(0xFF8B5CF6),
+                onTap: _openQuizzesModerationSheet,
+              ),
+            ] else ...[
+              // SUB-ADMIN: School total + Grade breakdowns (9, 10, 11, 12, not section)
+              Row(
+                children: [
+                  Expanded(
+                    child: _MetricCard(
+                      title: 'School Total Users',
+                      count: _totalUsersCount,
+                      loading: _loading,
+                      icon: Icons.school_rounded,
+                      color: isDark
+                          ? const Color(0xFF38BDF8)
+                          : const Color(0xFF0F172A),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: _MetricCard(
+                      title: 'Faculty Teachers',
+                      count: _teacherCount,
+                      loading: _loading,
+                      icon: Icons.co_present_rounded,
+                      color: const Color(0xFF10B981),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 10),
+              Row(
+                children: [
+                  Expanded(
+                    child: _MetricCard(
+                      title: 'Enrolled Students',
+                      count: _studentCount,
+                      loading: _loading,
+                      icon: Icons.groups_rounded,
+                      color: const Color(0xFF3B82F6),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: _MetricCard(
+                      title: 'Faculty Quizzes',
+                      count: _quizCount,
+                      loading: _loading,
+                      icon: Icons.quiz_rounded,
+                      color: const Color(0xFF8B5CF6),
+                      onTap: _openQuizzesModerationSheet,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+
+              // Grade Breakdown Card for Subadmin (Grades 9 to 12 only, no sections)
+              Container(
+                padding: const EdgeInsets.all(18),
+                decoration: BoxDecoration(
+                  color: isDark ? const Color(0xFF1E293B) : Colors.white,
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(
+                    color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0),
+                    width: 1.2,
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.04),
+                      blurRadius: 10,
+                      offset: const Offset(0, 4),
+                    ),
+                  ],
                 ),
-              ],
-            ),
-            const SizedBox(height: 12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF10B981).withValues(alpha: 0.12),
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: const Icon(Icons.grade_rounded, color: Color(0xFF10B981), size: 20),
+                        ),
+                        const SizedBox(width: 10),
+                        const Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Ciro School Users by Grade',
+                                style: TextStyle(fontWeight: FontWeight.w800, fontSize: 14),
+                              ),
+                              Text(
+                                'Official counts for Grades 9, 10, 11, and 12 (grade level only)',
+                                style: TextStyle(fontSize: 11, color: Color(0xFF64748B)),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 14),
+                    if (_loading)
+                      const Center(child: Padding(padding: EdgeInsets.all(16), child: CircularProgressIndicator()))
+                    else
+                      GridView.count(
+                        crossAxisCount: 2,
+                        shrinkWrap: true,
+                        physics: const NeverScrollableScrollPhysics(),
+                        crossAxisSpacing: 10,
+                        mainAxisSpacing: 10,
+                        childAspectRatio: 2.1,
+                        children: [
+                          for (final gradeName in const ['Grade 9', 'Grade 10', 'Grade 11', 'Grade 12'])
+                            Builder(
+                              builder: (context) {
+                                final match = _gradeStats.firstWhere(
+                                  (g) => g['grade'] == gradeName,
+                                  orElse: () => {'students': 0, 'teachers': 0},
+                                );
+                                final students = match['students'] ?? 0;
+                                final teachers = match['teachers'] ?? 0;
+
+                                return Container(
+                                  padding: const EdgeInsets.all(12),
+                                  decoration: BoxDecoration(
+                                    color: isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
+                                    borderRadius: BorderRadius.circular(14),
+                                    border: Border.all(
+                                      color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0),
+                                    ),
+                                  ),
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      Text(
+                                        gradeName,
+                                        style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13),
+                                      ),
+                                      const SizedBox(height: 4),
+                                      Text(
+                                        '$students Students · $teachers Teachers',
+                                        style: TextStyle(
+                                          fontSize: 11,
+                                          fontWeight: FontWeight.w600,
+                                          color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF475569),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                );
+                              },
+                            ),
+                        ],
+                      ),
+                  ],
+                ),
+              ),
+            ],
+            const SizedBox(height: 16),
 
             if (_pendingCount > 0) ...[
               Card(
@@ -763,90 +976,155 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen>
             ),
             const SizedBox(height: 12),
 
-            // Main Action Cards
-            _ActionTile(
-              icon: Icons.person_add_alt_1_rounded,
-              color: const Color(0xFF10B981),
-              title: 'Register New User (Admin, Teacher, Student)',
-              subtitle:
-                  'Directly create and activate Administrator, Teacher, or Student accounts with instant institutional credentials.',
-              buttonText: 'Register User',
-              onTap: () async {
-                await context.push('/admin/register-user');
-                if (mounted) _loadStats();
-              },
-            ),
-            const SizedBox(height: 10),
+            if (isSubAdmin) ...[
+              // SUB-ADMIN ACTIONS: Strictly Teachers only (Not students)
+              _ActionTile(
+                icon: Icons.person_add_alt_1_rounded,
+                color: const Color(0xFF10B981),
+                title: 'Register Faculty Teacher',
+                subtitle:
+                    'Directly create and activate new Faculty Teacher accounts for Ciro School with generated institutional credentials.',
+                buttonText: 'Register Teacher',
+                onTap: () async {
+                  await context.push('/admin/register-user');
+                  if (mounted) _loadStats();
+                },
+              ),
+              const SizedBox(height: 10),
 
-            _ActionTile(
-              icon: Icons.manage_accounts_rounded,
-              color: const Color(0xFF6366F1),
-              title: 'User Rosters & Deletion',
-              subtitle:
-                  'Browse registered student and teacher directories, view profiles, or delete user accounts.',
-              buttonText: 'Manage Users',
-              onTap: () async {
-                await context.push('/teacher/students');
-                if (mounted) _loadStats();
-              },
-            ),
-            const SizedBox(height: 10),
+              _ActionTile(
+                icon: Icons.how_to_reg_rounded,
+                color: const Color(0xFF059669),
+                title: 'Review Teacher Approvals',
+                subtitle:
+                    'Review, approve, or reject pending teacher registration requests for Ciro School.',
+                buttonText: 'Teacher Approvals',
+                onTap: () async {
+                  await context.push('/admin/approvals');
+                  if (mounted) _loadStats();
+                },
+              ),
+              const SizedBox(height: 10),
 
-            _ActionTile(
-              icon: Icons.lock_reset_rounded,
-              color: const Color(0xFF0284C7),
-              title: 'Reset User Passwords',
-              subtitle:
-                  'Instant password resets with generated temporary credentials matching institution format.',
-              buttonText: 'Reset Tool',
-              onTap: () async {
-                await context.push('/teacher/reset-passwords');
-                if (mounted) _loadStats();
-              },
-            ),
-            const SizedBox(height: 10),
+              _ActionTile(
+                icon: Icons.co_present_rounded,
+                color: const Color(0xFF6366F1),
+                title: 'Faculty Directory, Deletion & Password Reset',
+                subtitle:
+                    'Manage Ciro School faculty teachers, reset passwords, update subject assignments, or remove teacher accounts.',
+                buttonText: 'Manage Teachers',
+                onTap: () async {
+                  await context.push('/admin/teachers');
+                  if (mounted) _loadStats();
+                },
+              ),
+              const SizedBox(height: 10),
 
-            _ActionTile(
-              icon: Icons.how_to_reg_rounded,
-              color: const Color(0xFF10B981),
-              title: 'Review Registration Requests',
-              subtitle:
-                  'Review, approve, or reject new student and teacher registration applications.',
-              buttonText: 'Registration Approvals',
-              onTap: () async {
-                await context.push('/admin/approvals');
-                if (mounted) _loadStats();
-              },
-            ),
-            const SizedBox(height: 10),
+              _ActionTile(
+                icon: Icons.quiz_rounded,
+                color: const Color(0xFF8B5CF6),
+                title: 'Faculty Quizzes Oversight',
+                subtitle:
+                    'Quizzes are prepared exclusively by faculty teachers. Review published exams and remove outdated submissions.',
+                buttonText: 'Review Quizzes',
+                onTap: _openQuizzesModerationSheet,
+              ),
+            ] else ...[
+              // SUPER ADMIN ACTIONS: Full system control
+              _ActionTile(
+                icon: Icons.person_add_alt_1_rounded,
+                color: const Color(0xFF10B981),
+                title: 'Register New User (Sub-Admin, Teacher, Student)',
+                subtitle:
+                    'Directly create and activate Administrator, Teacher, or Student accounts with instant institutional credentials.',
+                buttonText: 'Register User',
+                onTap: () async {
+                  await context.push('/admin/register-user');
+                  if (mounted) _loadStats();
+                },
+              ),
+              const SizedBox(height: 10),
 
-            _ActionTile(
-              icon: Icons.co_present_rounded,
-              color: const Color(0xFF059669),
-              title: 'Faculty Directory & Passwords',
-              subtitle:
-                  'View approved teachers, assign subjects, and reset faculty passwords directly.',
-              buttonText: 'Teachers Directory',
-              onTap: () async {
-                await context.push('/admin/teachers');
-                if (mounted) _loadStats();
-              },
-            ),
-            const SizedBox(height: 10),
+              _ActionTile(
+                icon: Icons.manage_accounts_rounded,
+                color: const Color(0xFF6366F1),
+                title: 'User Rosters & Account Deletion',
+                subtitle:
+                    'Browse registered student and teacher directories, view profiles, or delete user accounts.',
+                buttonText: 'Manage Users',
+                onTap: () async {
+                  await context.push('/teacher/students');
+                  if (mounted) _loadStats();
+                },
+              ),
+              const SizedBox(height: 10),
 
-            _ActionTile(
-              icon: Icons.class_outlined,
-              color: const Color(0xFF0D9488),
-              title: 'Class & Section Assignments',
-              subtitle:
-                  'Manage school grades, classroom sections, and course allocations.',
-              buttonText: 'Class Management',
-              onTap: () async {
-                await context.push('/admin/classes');
-                if (mounted) _loadStats();
-              },
-            ),
-            const SizedBox(height: 10),
+              _ActionTile(
+                icon: Icons.lock_reset_rounded,
+                color: const Color(0xFF0284C7),
+                title: 'Reset User Passwords',
+                subtitle:
+                    'Instant password resets with generated temporary credentials matching institution format.',
+                buttonText: 'Reset Tool',
+                onTap: () async {
+                  await context.push('/teacher/reset-passwords');
+                  if (mounted) _loadStats();
+                },
+              ),
+              const SizedBox(height: 10),
+
+              _ActionTile(
+                icon: Icons.how_to_reg_rounded,
+                color: const Color(0xFF10B981),
+                title: 'Review Registration Requests',
+                subtitle:
+                    'Review, approve, or reject new student and teacher registration applications.',
+                buttonText: 'Registration Approvals',
+                onTap: () async {
+                  await context.push('/admin/approvals');
+                  if (mounted) _loadStats();
+                },
+              ),
+              const SizedBox(height: 10),
+
+              _ActionTile(
+                icon: Icons.co_present_rounded,
+                color: const Color(0xFF059669),
+                title: 'Faculty Directory & Passwords',
+                subtitle:
+                    'View approved teachers, assign subjects, and reset faculty passwords directly.',
+                buttonText: 'Teachers Directory',
+                onTap: () async {
+                  await context.push('/admin/teachers');
+                  if (mounted) _loadStats();
+                },
+              ),
+              const SizedBox(height: 10),
+
+              _ActionTile(
+                icon: Icons.class_outlined,
+                color: const Color(0xFF0D9488),
+                title: 'Class & Section Assignments',
+                subtitle:
+                    'Manage school grades, classroom sections, and course allocations.',
+                buttonText: 'Class Management',
+                onTap: () async {
+                  await context.push('/admin/classes');
+                  if (mounted) _loadStats();
+                },
+              ),
+              const SizedBox(height: 10),
+
+              _ActionTile(
+                icon: Icons.quiz_rounded,
+                color: const Color(0xFF8B5CF6),
+                title: 'Faculty Quizzes Oversight',
+                subtitle:
+                    'Quizzes are prepared exclusively by teachers. Review exams and moderate/delete preparations.',
+                buttonText: 'Quizzes Oversight',
+                onTap: _openQuizzesModerationSheet,
+              ),
+            ],
 
             _ActionTile(
               icon: Icons.quiz_rounded,

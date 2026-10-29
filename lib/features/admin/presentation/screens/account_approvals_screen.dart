@@ -55,6 +55,21 @@ class _AccountApprovalsScreenState extends ConsumerState<AccountApprovalsScreen>
         query = query.eq('school_id', targetSchoolId);
       }
 
+      // Hierarchy filtering:
+      // Subadmins only review teacher registrations (not students)
+      if (currentUser?.role == AppRoles.subadmin) {
+        query = query.or('requested_role.eq.teacher,role.eq.teacher');
+      }
+      // Attendance teachers only review students for their designated class
+      else if (currentUser?.role == AppRoles.teacher && currentUser?.isAttendanceTeacher == true) {
+        query = query.or('requested_role.eq.student,role.eq.student');
+        if (currentUser?.attendanceClass != null && currentUser!.attendanceClass!.isNotEmpty) {
+          query = query.or(
+            'requested_class.ilike.%${currentUser.attendanceClass}%,assigned_class.ilike.%${currentUser.attendanceClass}%',
+          );
+        }
+      }
+
       final rows = await query.order('created_at');
       return List<Map<String, dynamic>>.from(rows);
     } catch (e) {

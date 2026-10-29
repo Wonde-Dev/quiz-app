@@ -23,6 +23,9 @@ class _TeacherDashboardScreenState
   int _quizCount = 0;
   int _submissionCount = 0;
   List<Map<String, dynamic>> _myQuizzes = [];
+  List<Map<String, dynamic>> _gradeStats = [];
+  List<Map<String, dynamic>> _sectionStats = [];
+  List<Map<String, dynamic>> _myAssignedCourses = [];
   bool _loading = true;
   bool _materialsLocked = false;
   bool _togglingLock = false;
@@ -128,14 +131,28 @@ class _TeacherDashboardScreenState
           .eq('teacher_id', user.id)
           .order('created_at', ascending: false);
 
-      final results = await Future.wait([
+      final rpcStatsQuery = client.rpc('get_school_user_stats', params: {
+        'p_school_id': user.schoolId,
+      });
+
+      final teacherCoursesQuery = client
+          .from('teacher_courses')
+          .select('id, subject, section_id, sections(name, grade)')
+          .eq('teacher_id', user.id);
+
+      final results = await Future.wait<dynamic>([
         studentsQuery,
         teacherQuizzesQuery,
+        rpcStatsQuery,
+        teacherCoursesQuery,
       ]);
 
       final allStudents = (results[0] as List).cast<Map<String, dynamic>>();
       final activeStudents = allStudents.where((s) => s['is_active'] != false).toList();
       final quizzesList = results[1] as List;
+      final rpcRes = results[2];
+      final myCoursesList = (results[3] as List).cast<Map<String, dynamic>>();
+
       final quizIds =
           quizzesList.map((q) => q['id'] as String).toList();
 
@@ -154,6 +171,11 @@ class _TeacherDashboardScreenState
         _studentCount = activeStudents.length;
         _quizCount = quizzesList.length;
         _submissionCount = submissionCount;
+        if (rpcRes is Map) {
+          _gradeStats = List<Map<String, dynamic>>.from(rpcRes['grades'] ?? []);
+          _sectionStats = List<Map<String, dynamic>>.from(rpcRes['sections'] ?? []);
+        }
+        _myAssignedCourses = myCoursesList;
         _loading = false;
       });
     } catch (e) {
@@ -553,7 +575,7 @@ class _TeacherDashboardScreenState
               children: [
                 Expanded(
                   child: _TeacherStatCard(
-                    title: 'Students',
+                    title: 'Total Students',
                     value: '$_studentCount',
                     loading: _loading,
                     icon: Icons.school_rounded,
@@ -582,7 +604,277 @@ class _TeacherDashboardScreenState
                 ),
               ],
             ),
-            const SizedBox(height: 24),
+            const SizedBox(height: 18),
+
+            // Multi-Class Teaching Allocations Card
+            Container(
+              padding: const EdgeInsets.all(18),
+              decoration: BoxDecoration(
+                color: isDark ? const Color(0xFF1E293B) : Colors.white,
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(
+                  color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0),
+                  width: 1.2,
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.04),
+                    blurRadius: 10,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF10B981).withValues(alpha: 0.12),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: const Icon(Icons.class_rounded, color: Color(0xFF10B981), size: 20),
+                      ),
+                      const SizedBox(width: 10),
+                      const Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'My Teaching Allocations & Assigned Classes',
+                              style: TextStyle(fontWeight: FontWeight.w800, fontSize: 14),
+                            ),
+                            Text(
+                              'Teachers can be assigned to multiple grades, classes, and subjects across Ciro School',
+                              style: TextStyle(fontSize: 11, color: Color(0xFF64748B)),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      if (currentUser?.assignedClass != null && currentUser!.assignedClass!.isNotEmpty)
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF10B981).withValues(alpha: 0.12),
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(color: const Color(0xFF10B981).withValues(alpha: 0.3)),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Icon(Icons.school_outlined, size: 14, color: Color(0xFF10B981)),
+                              const SizedBox(width: 6),
+                              Text(
+                                '${currentUser.assignedGrade ?? "Grade 9"} · Class ${currentUser.assignedClass}${currentUser.assignedSubject != null ? " (${currentUser.assignedSubject})" : ""}',
+                                style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF047857)),
+                              ),
+                            ],
+                          ),
+                        ),
+                      for (final course in _myAssignedCourses)
+                        Builder(
+                          builder: (context) {
+                            final secMap = course['sections'] as Map<String, dynamic>?;
+                            final secName = secMap?['name']?.toString() ?? 'Section';
+                            final secGrade = secMap?['grade']?.toString() ?? 'Grade';
+                            final subj = course['subject']?.toString() ?? 'Course';
+
+                            return Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFF6366F1).withValues(alpha: 0.1),
+                                borderRadius: BorderRadius.circular(10),
+                                border: Border.all(color: const Color(0xFF6366F1).withValues(alpha: 0.25)),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  const Icon(Icons.bookmark_outline_rounded, size: 14, color: Color(0xFF6366F1)),
+                                  const SizedBox(width: 6),
+                                  Text(
+                                    '$secGrade · Class $secName ($subj)',
+                                    style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF4338CA)),
+                                  ),
+                                ],
+                              ),
+                            );
+                          },
+                        ),
+                      if (currentUser?.isAttendanceTeacher == true)
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFD97706).withValues(alpha: 0.12),
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(color: const Color(0xFFD97706).withValues(alpha: 0.3)),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Icon(Icons.verified_user_rounded, size: 14, color: Color(0xFFD97706)),
+                              const SizedBox(width: 6),
+                              Text(
+                                'Attendance Master: ${currentUser?.attendanceClass ?? "Class"}',
+                                style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFFB45309)),
+                              ),
+                            ],
+                          ),
+                        ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
+
+            // Section-by-Section Student Numbers Card for Teachers
+            Container(
+              padding: const EdgeInsets.all(18),
+              decoration: BoxDecoration(
+                color: isDark ? const Color(0xFF1E293B) : Colors.white,
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(
+                  color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0),
+                  width: 1.2,
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.04),
+                    blurRadius: 10,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF0284C7).withValues(alpha: 0.12),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: const Icon(Icons.people_alt_rounded, color: Color(0xFF0284C7), size: 20),
+                      ),
+                      const SizedBox(width: 10),
+                      const Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Students by Section across Grades',
+                              style: TextStyle(fontWeight: FontWeight.w800, fontSize: 14),
+                            ),
+                            Text(
+                              'Faculty view of enrolled students in Section A, B, C per grade level',
+                              style: TextStyle(fontSize: 11, color: Color(0xFF64748B)),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 14),
+                  if (_loading)
+                    const Center(child: Padding(padding: EdgeInsets.all(16), child: CircularProgressIndicator()))
+                  else
+                    Column(
+                      children: [
+                        for (final grade in const ['Grade 9', 'Grade 10', 'Grade 11', 'Grade 12'])
+                          Builder(
+                            builder: (context) {
+                              final gradeMatch = _gradeStats.firstWhere(
+                                (g) => g['grade'] == grade,
+                                orElse: () => {'students': 0},
+                              );
+                              final gradeTotal = gradeMatch['students'] ?? 0;
+                              final matchingSections = _sectionStats.where((s) {
+                                final sGrade = s['grade']?.toString() ?? '';
+                                return sGrade == grade || sGrade == grade.replaceAll('Grade ', '');
+                              }).toList();
+
+                              return Container(
+                                margin: const EdgeInsets.only(bottom: 8),
+                                padding: const EdgeInsets.all(12),
+                                decoration: BoxDecoration(
+                                  color: isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
+                                  borderRadius: BorderRadius.circular(14),
+                                  border: Border.all(
+                                    color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0),
+                                  ),
+                                ),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Row(
+                                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                      children: [
+                                        Text(
+                                          grade,
+                                          style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13),
+                                        ),
+                                        Text(
+                                          '$gradeTotal Students Total',
+                                          style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF0284C7)),
+                                        ),
+                                      ],
+                                    ),
+                                    const SizedBox(height: 8),
+                                    Wrap(
+                                      spacing: 8,
+                                      runSpacing: 6,
+                                      children: [
+                                        if (matchingSections.isEmpty)
+                                          for (final sec in const ['A', 'B', 'C'])
+                                            Container(
+                                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                              decoration: BoxDecoration(
+                                                color: Colors.grey.withValues(alpha: 0.1),
+                                                borderRadius: BorderRadius.circular(8),
+                                              ),
+                                              child: Text(
+                                                'Class $sec: 0 students',
+                                                style: const TextStyle(fontSize: 11, color: Colors.grey),
+                                              ),
+                                            )
+                                        else
+                                          for (final s in matchingSections)
+                                            Container(
+                                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                              decoration: BoxDecoration(
+                                                color: const Color(0xFF0284C7).withValues(alpha: 0.08),
+                                                borderRadius: BorderRadius.circular(8),
+                                                border: Border.all(color: const Color(0xFF0284C7).withValues(alpha: 0.2)),
+                                              ),
+                                              child: Text(
+                                                'Class ${s['section']}: ${s['students'] ?? 0} students',
+                                                style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Color(0xFF0369A1)),
+                                              ),
+                                            ),
+                                      ],
+                                    ),
+                                  ],
+                                ),
+                              );
+                            },
+                          ),
+                      ],
+                    ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 18),
 
             Text(
               'Teaching & Exam Actions',

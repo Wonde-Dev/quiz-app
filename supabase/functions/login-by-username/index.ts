@@ -28,47 +28,75 @@ Deno.serve(async (request) => {
   } catch {
     return json({ error: "Request body must be valid JSON" }, 400);
   }
+
   const username = typeof body.username === "string"
-    ? body.username.trim().toLowerCase()
+    ? body.username.trim()
     : "";
   const password = typeof body.password === "string" ? body.password : "";
-  const isEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(username);
-  const isAppUsername = /^[a-z0-9]{1,50}@(admin|teacher|students?|a|t|s)\.edu$/.test(username);
-  const isLegacyUsername = /^[a-z0-9.-]{2,64}$/.test(username);
-  if ((!isEmail && !isAppUsername && !isLegacyUsername) || password.length === 0) {
-    return json({ error: "Invalid username or password" }, 401);
+
+  if (!username || !password) {
+    return json({ error: "Username/email and password are required" }, 400);
   }
 
   const admin = createClient(url, serviceRoleKey, {
     auth: { autoRefreshToken: false, persistSession: false },
   });
 
-  let targetEmail = username;
-  if (!isEmail) {
-    const { data: profile, error: profileError } = await admin
-      .from("users")
-      .select("email, is_active")
-      .or(`username.ilike.${username},email.ilike.${username}`)
-      .maybeSingle();
-    if (profileError || !profile?.email || profile.is_active === false) {
-      return json({ error: "Invalid username or password" }, 401);
-    }
-    targetEmail = profile.email;
-  }
-
   const auth = createClient(url, anonKey, {
     auth: { autoRefreshToken: false, persistSession: false },
   });
-  const { data, error } = await auth.auth.signInWithPassword({
-    email: targetEmail,
-    password,
-  });
-  if (error || !data.session) {
-    return json({ error: "Invalid username or password" }, 401);
+
+  // 1. Look up profile in public.users by username OR email (case-insensitive)
+  const { data: profile, error: profileError } = await admin
+    .from("users")
+    .select("id, email, username, is_active, approval_status, role")
+    .or(`username.ilike.${username},email.ilike.${username}`)
+    .maybeSingle();
+
+  if (profile && profile.is_active === false) {
+    return json({ error: "Account is disabled. Please contact the administrator." }, 403);
+  }
+
+  // Build candidate emails to try
+  const candidates: string[] = [];
+  if (profile?.email) {
+    candidates.push(profile.email.trim().toLowerCase());
+  }
+  const direct = username.trim().toLowerCase();
+  if (!candidates.includes(direct)) {
+    candidates.push(direct);
+  }
+
+  // Also check admin aliases
+  if (direct.startsWith("wondedev") || direct.startsWith("wondeadmin") || direct.includes("@admin.edu")) {
+    if (!candidates.includes("wondedev369@gmail.com")) candidates.push("wondedev369@gmail.com");
+    if (!candidates.includes("wondeadmin@admin.edu")) candidates.push("wondeadmin@admin.edu");
+  }
+
+  let lastError: any = null;
+  for (const candidateEmail of candidates) {
+    try {
+      const { data, error } = await auth.auth.signInWithPassword({
+        email: candidateEmail,
+        password,
+      });
+
+      if (!error && data?.session) {
+        return json({
+          access_token: data.session.access_token,
+          refresh_token: data.session.refresh_token,
+          user: data.user,
+        });
+      }
+      if (error) {
+        lastError = error;
+      }
+    } catch (e) {
+      lastError = e;
+    }
   }
 
   return json({
-    access_token: data.session.access_token,
-    refresh_token: data.session.refresh_token,
-  });
+    error: lastError?.message || "Invalid login credentials",
+  }, 401);
 });
