@@ -261,6 +261,7 @@ $$;
 grant execute on function public.review_user_registration(uuid, text, uuid) to authenticated;
 
 -- 9. Master Function: delete_user_account (Protected Main Admin & School Scoping)
+drop function if exists public.delete_user_account(uuid, uuid);
 drop function if exists public.delete_user_account(uuid);
 drop function if exists public.delete_user_account(jsonb);
 

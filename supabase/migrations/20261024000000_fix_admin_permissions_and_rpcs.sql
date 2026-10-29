@@ -452,6 +452,10 @@ grant execute on function public.review_user_registration(uuid, text, uuid) to a
 
 -- 9. RPC: delete_user_account
 -- Protected against deleting Main Admin account by anyone (including sub-admins)
+drop function if exists public.delete_user_account(uuid, uuid);
+drop function if exists public.delete_user_account(uuid);
+drop function if exists public.delete_user_account(jsonb);
+
 create or replace function public.delete_user_account(
   user_id uuid default null,
   p_user_id uuid default null
