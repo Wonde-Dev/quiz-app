@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:quiz_app/core/constants/app_roles.dart';
 import 'package:quiz_app/core/di/providers.dart';
 import 'package:quiz_app/core/services/auth_service.dart';
@@ -58,6 +59,11 @@ class AuthNotifier extends Notifier<AuthState> {
 
   @override
   AuthState build() {
+    _authService.authStateChanges.listen((event) {
+      if (event.event == AuthChangeEvent.passwordRecovery) {
+        state = state.copyWith(needsPasswordChange: true);
+      }
+    });
     Future.microtask(checkSession);
     return const AuthState(isLoading: true);
   }
@@ -80,16 +86,29 @@ class AuthNotifier extends Notifier<AuthState> {
     );
   }
 
-  Future<void> sendPasswordReset(String email) async {
+  Future<void> sendPasswordReset(String emailOrUsername) async {
     state = const AuthState(isLoading: true);
     try {
-      await _authService.sendPasswordReset(email);
-      state = const AuthState(
-        successMessage: 'Password reset link sent. Check your email.',
+      final targetEmail = await _authService.sendPasswordReset(emailOrUsername);
+      final masked = _maskEmail(targetEmail);
+      state = AuthState(
+        successMessage:
+            'Password reset link sent to $masked. Check your inbox and spam folder.',
       );
     } catch (error) {
       state = AuthState(error: 'Could not send reset link: $error');
     }
+  }
+
+  String _maskEmail(String email) {
+    if (!email.contains('@')) return email;
+    final parts = email.split('@');
+    final name = parts[0];
+    final domain = parts[1];
+    if (name.length <= 2) {
+      return '$name***@$domain';
+    }
+    return '${name[0]}***${name[name.length - 1]}@$domain';
   }
 
   Future<void> signIn({

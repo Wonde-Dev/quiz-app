@@ -40,6 +40,11 @@ class AuthService {
     // Build ordered list of candidate auth emails
     final candidates = <String>[];
 
+    // Priority 0: Direct input if it is a standard external email address
+    if (lower.contains('@') && !lower.endsWith('.edu')) {
+      candidates.add(lower);
+    }
+
     // Priority 1: RPC lookup from public.users
     try {
       final emailResult = await _supabase.rpc(
@@ -269,8 +274,47 @@ class AuthService {
     return publicUrl;
   }
 
-  Future<void> sendPasswordReset(String email) async {
-    await _supabase.auth.resetPasswordForEmail(email.trim());
+  Future<String> sendPasswordReset(String emailOrUsername) async {
+    final input = emailOrUsername.trim();
+    if (input.isEmpty) {
+      throw const FormatException('Enter your email or username.');
+    }
+
+    String targetEmail = input.toLowerCase();
+
+    final isStandardEmail =
+        RegExp(r'^[^\s@]+@[^\s@]+\.[^\s@]+$').hasMatch(input) &&
+            !input.toLowerCase().endsWith('.edu');
+
+    if (!isStandardEmail) {
+      try {
+        final emailResult = await _supabase.rpc(
+          'get_email_by_username',
+          params: {'p_username': input},
+        );
+        if (emailResult is String && emailResult.trim().isNotEmpty) {
+          targetEmail = emailResult.trim().toLowerCase();
+        }
+      } catch (_) {}
+
+      if (targetEmail == input.toLowerCase()) {
+        try {
+          final row = await _supabase
+              .from('users')
+              .select('email')
+              .or('username.ilike.$input,email.ilike.$input')
+              .limit(1)
+              .maybeSingle();
+          final lookedUp = row?['email'] as String?;
+          if (lookedUp != null && lookedUp.trim().isNotEmpty) {
+            targetEmail = lookedUp.trim().toLowerCase();
+          }
+        } catch (_) {}
+      }
+    }
+
+    await _supabase.auth.resetPasswordForEmail(targetEmail);
+    return targetEmail;
   }
 
   /// Sign out the current user.

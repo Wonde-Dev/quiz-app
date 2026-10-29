@@ -942,3 +942,4 @@ grant execute on function public.review_user_registration(uuid, text, uuid, uuid
 grant execute on function public.review_user_registration(jsonb) to authenticated;
 
 commit;
+

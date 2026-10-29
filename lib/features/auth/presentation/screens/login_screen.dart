@@ -265,13 +265,49 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   }
 
   Future<void> _sendReset() async {
-    final input = _usernameController.text.trim();
-    if (!input.contains('@')) {
-      ref.read(authStateProvider.notifier).setMessage(
-            error: 'Enter your email address in the field above to receive a reset link.',
-          );
-      return;
+    String input = _usernameController.text.trim();
+    if (input.isEmpty) {
+      final controller = TextEditingController();
+      final entered = await showDialog<String>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: const Text('Reset Password'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Enter your registered email address or institutional username to receive a password reset link:',
+                style: TextStyle(fontSize: 13),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: controller,
+                autofocus: true,
+                decoration: const InputDecoration(
+                  labelText: 'Email or Username',
+                  hintText: 'e.g. user@gmail.com or User@Teacher.edu',
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, controller.text.trim()),
+              child: const Text('Send Reset Link'),
+            ),
+          ],
+        ),
+      );
+      if (entered == null || entered.isEmpty) return;
+      input = entered;
     }
+
     await ref.read(authStateProvider.notifier).sendPasswordReset(input);
   }
 

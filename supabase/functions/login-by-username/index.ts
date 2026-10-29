@@ -32,29 +32,35 @@ Deno.serve(async (request) => {
     ? body.username.trim().toLowerCase()
     : "";
   const password = typeof body.password === "string" ? body.password : "";
+  const isEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(username);
   const isAppUsername = /^[a-z0-9]{1,50}@(admin|teacher|students?|a|t|s)\.edu$/.test(username);
-  const isLegacyUsername = /^[a-z0-9.-]{3,64}$/.test(username);
-  if ((!isAppUsername && !isLegacyUsername) || password.length === 0) {
+  const isLegacyUsername = /^[a-z0-9.-]{2,64}$/.test(username);
+  if ((!isEmail && !isAppUsername && !isLegacyUsername) || password.length === 0) {
     return json({ error: "Invalid username or password" }, 401);
   }
 
   const admin = createClient(url, serviceRoleKey, {
     auth: { autoRefreshToken: false, persistSession: false },
   });
-  const { data: profile, error: profileError } = await admin
-    .from("users")
-    .select("email, is_active")
-    .ilike("username", username)
-    .maybeSingle();
-  if (profileError || !profile?.email || profile.is_active === false) {
-    return json({ error: "Invalid username or password" }, 401);
+
+  let targetEmail = username;
+  if (!isEmail) {
+    const { data: profile, error: profileError } = await admin
+      .from("users")
+      .select("email, is_active")
+      .or(`username.ilike.${username},email.ilike.${username}`)
+      .maybeSingle();
+    if (profileError || !profile?.email || profile.is_active === false) {
+      return json({ error: "Invalid username or password" }, 401);
+    }
+    targetEmail = profile.email;
   }
 
   const auth = createClient(url, anonKey, {
     auth: { autoRefreshToken: false, persistSession: false },
   });
   const { data, error } = await auth.auth.signInWithPassword({
-    email: profile.email,
+    email: targetEmail,
     password,
   });
   if (error || !data.session) {
