@@ -368,6 +368,43 @@ class AuthNotifier extends Notifier<AuthState> {
     return List<Map<String, dynamic>>.from(rows);
   }
 
+  Future<void> saveProfileDetails({
+    required String fullName,
+    required String email,
+    required String phoneNumber,
+  }) async {
+    final existing = state.user;
+    if (existing == null) return;
+    state = AuthState(
+      user: existing,
+      needsPasswordChange: state.needsPasswordChange,
+      isLoading: true,
+    );
+    try {
+      await _authService.updateProfile(
+        fullName: fullName,
+        email: email,
+        phoneNumber: phoneNumber,
+      );
+      final updatedUser = await _authService.getAppUser(existing.id);
+      if (updatedUser == null) {
+        throw StateError('Profile could not be reloaded after saving.');
+      }
+      state = AuthState(
+        user: updatedUser,
+        needsPasswordChange: updatedUser.mustChangePassword,
+        successMessage: 'Profile details saved successfully.',
+      );
+    } catch (error) {
+      state = AuthState(
+        user: existing,
+        needsPasswordChange: state.needsPasswordChange,
+        error: 'Could not save profile: $error',
+      );
+      rethrow;
+    }
+  }
+
   Future<void> saveFullName(String fullName) async {
     final existing = state.user;
     if (existing == null) return;

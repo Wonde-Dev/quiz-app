@@ -631,6 +631,7 @@ class _QuizCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
     final title = quiz['title'] as String? ?? 'Quiz';
     final desc = quiz['description'] as String? ?? '';
     final timeLimit = quiz['time_limit_minutes'] as int?;
@@ -638,89 +639,251 @@ class _QuizCard extends StatelessWidget {
 
     final sec = quiz['section'] as Map<String, dynamic>?;
     final g = sec?['school_grades'] as Map<String, dynamic>?;
-    final gName = g?['name'] as String? ?? '';
-    final sName = sec?['name'] as String? ?? '';
-    final classLabel = gName.isNotEmpty ? '$gName · $sName' : sName;
+    final gName = (g?['name'] ?? quiz['target_grade']) as String? ?? '';
+    final sName = (sec?['name'] ?? quiz['target_section']) as String? ?? '';
+    final classLabel = gName.isNotEmpty
+        ? (sName.isNotEmpty ? '$gName · Section $sName' : gName)
+        : (sName.isNotEmpty ? 'Section $sName' : 'Ciro High School Assessment');
 
     return Card(
+      elevation: 2,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(20),
+        side: BorderSide(
+          color: isForStudentSection
+              ? const Color(0xFF10B981).withValues(alpha: 0.35)
+              : (isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0)),
+          width: isForStudentSection ? 1.5 : 1.0,
+        ),
+      ),
       child: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(20),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Expanded(
-                  child: Text(
-                    title,
-                    style: theme.textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.bold,
-                    ),
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF10B981).withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  child: const Icon(
+                    Icons.quiz_rounded,
+                    color: Color(0xFF10B981),
+                    size: 26,
                   ),
                 ),
-                if (classLabel.isNotEmpty)
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 8,
-                      vertical: 3,
-                    ),
-                    decoration: BoxDecoration(
-                      color: isForStudentSection
-                          ? theme.colorScheme.primaryContainer
-                          : theme.colorScheme.surfaceContainerHighest,
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Text(
-                      classLabel,
-                      style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w600,
-                        color: isForStudentSection
-                            ? theme.colorScheme.onPrimaryContainer
-                            : theme.colorScheme.onSurfaceVariant,
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        title,
+                        style: theme.textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w900,
+                          fontSize: 17,
+                          letterSpacing: -0.2,
+                        ),
                       ),
-                    ),
+                      const SizedBox(height: 4),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 3,
+                        ),
+                        decoration: BoxDecoration(
+                          color: isForStudentSection
+                              ? const Color(0xFF10B981).withValues(alpha: 0.15)
+                              : (isDark
+                                  ? const Color(0xFF1E293B)
+                                  : const Color(0xFFF1F5F9)),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(
+                            color: isForStudentSection
+                                ? const Color(0xFF10B981).withValues(alpha: 0.3)
+                                : Colors.transparent,
+                          ),
+                        ),
+                        child: Text(
+                          classLabel,
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                            color: isForStudentSection
+                                ? const Color(0xFF047857)
+                                : (isDark
+                                    ? const Color(0xFF94A3B8)
+                                    : const Color(0xFF64748B)),
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
+                ),
               ],
             ),
             if (desc.isNotEmpty) ...[
-              const SizedBox(height: 6),
+              const SizedBox(height: 12),
               Text(
                 desc,
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: theme.colorScheme.onSurfaceVariant,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: isDark
+                      ? const Color(0xFFCBD5E1)
+                      : const Color(0xFF475569),
+                  height: 1.4,
                 ),
               ),
             ],
-            const SizedBox(height: 14),
+            const SizedBox(height: 16),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                // Exam Duration Badge
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 5,
+                  ),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF0284C7).withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(
+                      color: const Color(0xFF0284C7).withValues(alpha: 0.3),
+                    ),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(
+                        Icons.timer_outlined,
+                        size: 15,
+                        color: Color(0xFF0284C7),
+                      ),
+                      const SizedBox(width: 5),
+                      Text(
+                        timeLimit != null && timeLimit > 0
+                            ? '$timeLimit Mins Exam'
+                            : '30 Mins Exam',
+                        style: const TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                          color: Color(0xFF0284C7),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+
+                // Total Points Badge
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 5,
+                  ),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF8B5CF6).withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(
+                      color: const Color(0xFF8B5CF6).withValues(alpha: 0.3),
+                    ),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(
+                        Icons.military_tech_outlined,
+                        size: 15,
+                        color: Color(0xFF8B5CF6),
+                      ),
+                      const SizedBox(width: 5),
+                      Text(
+                        '$totalPoints Points',
+                        style: const TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                          color: Color(0xFF8B5CF6),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+
+                // Anti-Cheat & Screen Protection Badge
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 5,
+                  ),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF10B981).withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(
+                      color: const Color(0xFF10B981).withValues(alpha: 0.3),
+                    ),
+                  ),
+                  child: const Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        Icons.shield_outlined,
+                        size: 15,
+                        color: Color(0xFF10B981),
+                      ),
+                      SizedBox(width: 5),
+                      Text(
+                        'Screen Protected',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                          color: Color(0xFF047857),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 18),
             Row(
               children: [
-                Icon(
-                  Icons.timer_outlined,
-                  size: 16,
-                  color: theme.colorScheme.onSurfaceVariant,
+                Expanded(
+                  child: Text(
+                    'No recordings or screenshots allowed.',
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontStyle: FontStyle.italic,
+                      color: isDark
+                          ? const Color(0xFF94A3B8)
+                          : const Color(0xFF64748B),
+                    ),
+                  ),
                 ),
-                const SizedBox(width: 4),
-                Text(
-                  timeLimit != null ? '$timeLimit mins' : 'No time limit',
-                  style: theme.textTheme.bodySmall,
-                ),
-                const SizedBox(width: 14),
-                Icon(
-                  Icons.quiz_outlined,
-                  size: 16,
-                  color: theme.colorScheme.onSurfaceVariant,
-                ),
-                const SizedBox(width: 4),
-                Text(
-                  '$totalPoints points',
-                  style: theme.textTheme.bodySmall,
-                ),
-                const Spacer(),
                 FilledButton.icon(
+                  style: FilledButton.styleFrom(
+                    backgroundColor: const Color(0xFF10B981),
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 20,
+                      vertical: 12,
+                    ),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    elevation: 2,
+                  ),
                   onPressed: onStart,
-                  icon: const Icon(Icons.arrow_forward_rounded, size: 18),
-                  label: const Text('Take Exam'),
+                  icon: const Icon(Icons.play_arrow_rounded, size: 20),
+                  label: const Text(
+                    'Take Exam',
+                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                  ),
                 ),
               ],
             ),

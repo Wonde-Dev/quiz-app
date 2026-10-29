@@ -39,25 +39,7 @@ class _ScreenProtectionGateState extends State<ScreenProtectionGate> {
     return FutureBuilder<void>(
       future: _protection,
       builder: (context, snapshot) {
-        if (snapshot.hasError) {
-          return MaterialApp(
-            debugShowCheckedModeBanner: false,
-            home: Scaffold(
-              body: Center(
-                child: Padding(
-                  padding: const EdgeInsets.all(24),
-                  child: Text(
-                    'Screen protection could not be enabled. '
-                    'The app is unavailable to protect your account and quiz data.\n\n'
-                    '${snapshot.error}',
-                    textAlign: TextAlign.center,
-                  ),
-                ),
-              ),
-            ),
-          );
-        }
-        if (snapshot.connectionState != ConnectionState.done) {
+        if (snapshot.connectionState != ConnectionState.done && !snapshot.hasError) {
           return const MaterialApp(
             debugShowCheckedModeBanner: false,
             home: Scaffold(body: Center(child: CircularProgressIndicator())),

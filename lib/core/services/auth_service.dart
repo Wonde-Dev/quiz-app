@@ -186,9 +186,16 @@ class AuthService {
     );
   }
 
-  Future<void> updateProfile({String? fullName, String? avatarPath}) async {
+  Future<void> updateProfile({
+    String? fullName,
+    String? email,
+    String? phoneNumber,
+    String? avatarPath,
+  }) async {
     final body = <String, String>{};
     if (fullName != null) body['fullName'] = fullName.trim();
+    if (email != null) body['email'] = email.trim().toLowerCase();
+    if (phoneNumber != null) body['phoneNumber'] = phoneNumber.trim();
     if (avatarPath != null) body['avatarPath'] = avatarPath;
 
     bool updatedViaFn = false;
@@ -209,6 +216,8 @@ class AuthService {
         final rpcParams = <String, dynamic>{};
         if (fullName != null) rpcParams['p_full_name'] = fullName.trim();
         if (avatarPath != null) rpcParams['p_avatar_url'] = avatarPath;
+        if (email != null) rpcParams['p_email'] = email.trim().toLowerCase();
+        if (phoneNumber != null) rpcParams['p_phone_number'] = phoneNumber.trim();
         try {
           await _supabase.rpc(
             'update_own_profile',
@@ -232,11 +241,23 @@ class AuthService {
           final updateMap = <String, dynamic>{};
           if (fullName != null) updateMap['full_name'] = fullName.trim();
           if (avatarPath != null) updateMap['avatar_url'] = avatarPath;
+          if (email != null) updateMap['email'] = email.trim().toLowerCase();
+          if (phoneNumber != null) updateMap['phone_number'] = phoneNumber.trim();
           if (updateMap.isNotEmpty) {
             try {
               await _supabase.from('users').update(updateMap).eq('id', uid);
             } catch (e) {
               debugPrint('Direct user profile update note: $e');
+            }
+          }
+
+          if (email != null && email.trim().isNotEmpty) {
+            try {
+              await _supabase.auth.updateUser(
+                UserAttributes(email: email.trim().toLowerCase()),
+              );
+            } catch (authErr) {
+              debugPrint('auth.updateUser email note: $authErr');
             }
           }
         }

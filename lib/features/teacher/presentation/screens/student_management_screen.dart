@@ -9,6 +9,7 @@ import 'package:quiz_app/features/auth/presentation/providers/auth_provider.dart
 import 'package:quiz_app/core/services/student_password_reset_service.dart';
 import 'package:quiz_app/core/utils/role_username.dart';
 import 'package:quiz_app/core/utils/supabase_error_message.dart';
+import 'package:quiz_app/core/utils/validators.dart';
 
 class StudentManagementScreen extends ConsumerStatefulWidget {
   const StudentManagementScreen({super.key});
@@ -298,6 +299,7 @@ class _StudentManagementScreenState
             'p_subject': account['subject'],
             'p_grade': currentUser?.attendanceGrade,
             'p_class': currentUser?.attendanceClass,
+            'p_phone_number': account['phoneNumber'],
           },
         );
         if (rpcRes is Map && rpcRes['success'] == true) {
@@ -494,6 +496,7 @@ class _StudentManagementScreenState
 
     final nameController = TextEditingController();
     final emailController = TextEditingController();
+    final phoneController = TextEditingController();
     final usernameController = TextEditingController();
     final passwordController = TextEditingController();
     final subjectController = TextEditingController();
@@ -704,10 +707,19 @@ class _StudentManagementScreenState
                           prefixIcon: Icon(Icons.mail_outline_rounded),
                         ),
                         keyboardType: TextInputType.emailAddress,
-                        validator: (value) => value == null ||
-                                !RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(value.trim())
-                            ? 'Enter a valid email address'
-                            : null,
+                        validator: Validators.email,
+                      ),
+                      const SizedBox(height: 12),
+
+                      TextFormField(
+                        controller: phoneController,
+                        decoration: const InputDecoration(
+                          labelText: 'Phone Number',
+                          hintText: '+251 91 123 4567 or 0911234567',
+                          prefixIcon: Icon(Icons.phone_outlined),
+                        ),
+                        keyboardType: TextInputType.phone,
+                        validator: Validators.phone,
                       ),
                       const SizedBox(height: 12),
 
@@ -923,6 +935,7 @@ class _StudentManagementScreenState
                           'fullName': nameController.text.trim(),
                           'username': usernameController.text.trim(),
                           'email': emailController.text.trim(),
+                          'phoneNumber': phoneController.text.trim(),
                           'password': passwordController.text.trim().isNotEmpty
                               ? passwordController.text.trim()
                               : defaultRolePassword(
@@ -949,6 +962,7 @@ class _StudentManagementScreenState
     );
     nameController.dispose();
     emailController.dispose();
+    phoneController.dispose();
     usernameController.dispose();
     passwordController.dispose();
     subjectController.dispose();
