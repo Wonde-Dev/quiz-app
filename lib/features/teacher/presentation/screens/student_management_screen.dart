@@ -1058,9 +1058,6 @@ class _StudentManagementScreenState
           await client.from('student_sections').delete().eq('student_id', id);
         } catch (_) {}
         try {
-          await client.from('answers').delete().eq('student_id', id);
-        } catch (_) {}
-        try {
           await client.from('grades').delete().eq('student_id', id);
         } catch (_) {}
         try {
@@ -1380,9 +1377,6 @@ class _StudentManagementScreenState
         if (!deleted) {
           try {
             await Supabase.instance.client.from('student_sections').delete().eq('student_id', id);
-          } catch (_) {}
-          try {
-            await Supabase.instance.client.from('answers').delete().eq('student_id', id);
           } catch (_) {}
           try {
             await Supabase.instance.client.from('grades').delete().eq('student_id', id);
