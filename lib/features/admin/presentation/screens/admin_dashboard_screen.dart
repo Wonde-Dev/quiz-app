@@ -3,9 +3,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:quiz_app/core/constants/app_roles.dart';
+import 'package:quiz_app/core/services/announcement_service.dart';
 import 'package:quiz_app/core/services/audit_log_service.dart';
 import 'package:quiz_app/features/auth/presentation/providers/auth_provider.dart';
 import 'package:quiz_app/shared/models/audit_log.dart';
+import 'package:quiz_app/shared/models/school_announcement.dart';
 import 'package:quiz_app/shared/widgets/dashboard_shell.dart';
 
 class AdminDashboardScreen extends ConsumerStatefulWidget {
@@ -18,7 +20,10 @@ class AdminDashboardScreen extends ConsumerStatefulWidget {
 
 class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen>
     with SingleTickerProviderStateMixin {
+  static const String _ciroSchoolId = '00000000-0000-4000-8000-000000000001';
+
   int _totalUsersCount = 0;
+  int _schoolUsersCount = 0; // Excludes Super Admin for Director
   int _subadminCount = 0;
   int _studentCount = 0;
   int _teacherCount = 0;
@@ -26,9 +31,12 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen>
   int _pendingCount = 0;
   List<Map<String, dynamic>> _gradeStats = [];
   List<AuditLog> _recentLogs = [];
+  List<SchoolAnnouncement> _announcements = [];
   bool _loading = true;
   late final AnimationController _pulseController;
   RealtimeChannel? _realtimeChannel;
+  RealtimeChannel? _announcementsChannel;
+  final _announcementService = AnnouncementService();
 
   @override
   void initState() {
@@ -54,8 +62,20 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen>
             },
           )
           .subscribe();
+
+      _announcementsChannel = Supabase.instance.client
+          .channel('public:school_announcements_changes')
+          .onPostgresChanges(
+            event: PostgresChangeEvent.all,
+            schema: 'public',
+            table: 'school_announcements',
+            callback: (payload) {
+              if (mounted) _loadStats();
+            },
+          )
+          .subscribe();
     } catch (e) {
-      debugPrint('Realtime user subscription notice: $e');
+      debugPrint('Realtime subscription notice: $e');
     }
   }
 
@@ -65,6 +85,9 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen>
     if (_realtimeChannel != null) {
       Supabase.instance.client.removeChannel(_realtimeChannel!);
     }
+    if (_announcementsChannel != null) {
+      Supabase.instance.client.removeChannel(_announcementsChannel!);
+    }
     super.dispose();
   }
 
@@ -73,32 +96,43 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen>
     final client = Supabase.instance.client;
     final auditService = AuditLogService();
     final currentUser = ref.read(authStateProvider).user;
-    final schoolId = currentUser?.schoolId ?? '00000000-0000-4000-8000-000000000001';
+    final isSubAdmin = currentUser?.role == AppRoles.subadmin;
 
     try {
       final results = await Future.wait<dynamic>([
         client.rpc('get_school_user_stats', params: {
-          'p_school_id': schoolId,
+          'p_school_id': _ciroSchoolId,
         }),
         client.from('quizzes').select('id').eq('is_published', true),
         auditService.fetchLogs(limit: 5),
+        _announcementService.fetchAnnouncements(schoolId: _ciroSchoolId, limit: 6),
       ]);
 
       if (!mounted) return;
       final rpcRes = results[0];
       final publishedQuizzes = results[1] as List;
       final recentLogs = results[2] as List<AuditLog>;
+      final announcements = results[3] as List<SchoolAnnouncement>;
 
       if (rpcRes is Map) {
+        final subadmins = (rpcRes['subadmins'] as num?)?.toInt() ?? 0;
+        final teachers = (rpcRes['teachers'] as num?)?.toInt() ?? 0;
+        final students = (rpcRes['students'] as num?)?.toInt() ?? 0;
+        final schoolUsers = (rpcRes['school_users'] as num?)?.toInt() ?? (subadmins + teachers + students);
+        final pendingTeachers = (rpcRes['pending_teachers'] as num?)?.toInt() ?? 0;
+        final pendingAll = (rpcRes['pending'] as num?)?.toInt() ?? 0;
+
         setState(() {
           _totalUsersCount = (rpcRes['total_users'] as num?)?.toInt() ?? 0;
-          _subadminCount = (rpcRes['subadmins'] as num?)?.toInt() ?? 0;
-          _teacherCount = (rpcRes['teachers'] as num?)?.toInt() ?? 0;
-          _studentCount = (rpcRes['students'] as num?)?.toInt() ?? 0;
-          _pendingCount = (rpcRes['pending'] as num?)?.toInt() ?? 0;
+          _schoolUsersCount = schoolUsers;
+          _subadminCount = subadmins;
+          _teacherCount = teachers;
+          _studentCount = students;
+          _pendingCount = isSubAdmin ? pendingTeachers : pendingAll;
           _gradeStats = List<Map<String, dynamic>>.from(rpcRes['grades'] ?? []);
           _quizCount = publishedQuizzes.length;
           _recentLogs = recentLogs;
+          _announcements = announcements;
           _loading = false;
         });
         return;
@@ -112,33 +146,255 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen>
         client.from('users').select('id, role, is_active, approval_status'),
         client.from('quizzes').select('id').eq('is_published', true),
         auditService.fetchLogs(limit: 5),
+        _announcementService.fetchAnnouncements(schoolId: _ciroSchoolId, limit: 6),
       ]);
 
       if (!mounted) return;
       final allUsers = (results[0] as List).cast<Map<String, dynamic>>();
       final publishedQuizzes = results[1] as List;
       final recentLogs = results[2] as List<AuditLog>;
+      final announcements = results[3] as List<SchoolAnnouncement>;
 
       final activeUsers = allUsers.where((u) => u['is_active'] != false).toList();
       final subadminCount = activeUsers.where((u) => u['role'] == 'subadmin').length;
       final studentCount = activeUsers.where((u) => u['role'] == 'student').length;
       final teacherCount = activeUsers.where((u) => u['role'] == 'teacher').length;
+      final schoolUsers = subadminCount + studentCount + teacherCount;
       final totalUsers = activeUsers.length;
       final pendingCount = allUsers.where((u) => u['approval_status'] == 'pending').length;
+      final pendingTeachers = allUsers
+          .where((u) => u['approval_status'] == 'pending' && u['role'] == 'teacher')
+          .length;
 
       setState(() {
         _totalUsersCount = totalUsers;
+        _schoolUsersCount = schoolUsers;
         _subadminCount = subadminCount;
         _studentCount = studentCount;
         _teacherCount = teacherCount;
         _quizCount = publishedQuizzes.length;
-        _pendingCount = pendingCount;
+        _pendingCount = isSubAdmin ? pendingTeachers : pendingCount;
         _recentLogs = recentLogs;
+        _announcements = announcements;
         _loading = false;
       });
     } catch (e) {
       debugPrint('Admin stats loading note: $e');
       if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _postAnnouncementDialog() async {
+    final titleController = TextEditingController();
+    final contentController = TextEditingController();
+    String selectedAudience = 'all';
+    bool isPinned = false;
+    final currentUser = ref.read(authStateProvider).user;
+    final isSubAdmin = currentUser?.role == AppRoles.subadmin;
+    final authorRole = isSubAdmin ? 'School Director' : 'Administrator';
+    final authorName = currentUser?.fullName?.isNotEmpty == true
+        ? currentUser!.fullName!
+        : (currentUser?.username ?? authorRole);
+
+    final audienceOptions = [
+      {'value': 'all', 'label': 'All Members (School-wide)'},
+      {'value': 'teachers', 'label': 'Faculty Teachers Only'},
+      {'value': 'students', 'label': 'Enrolled Students Only'},
+      {'value': 'Grade 9', 'label': 'Grade 9 Students'},
+      {'value': 'Grade 10', 'label': 'Grade 10 Students'},
+      {'value': 'Grade 11', 'label': 'Grade 11 Students'},
+      {'value': 'Grade 12', 'label': 'Grade 12 Students'},
+    ];
+
+    await showDialog<void>(
+      context: context,
+      builder: (dialogCtx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(22),
+            side: const BorderSide(color: Color(0xFFE2E8F0)),
+          ),
+          title: const Row(
+            children: [
+              Icon(Icons.campaign_rounded, color: Color(0xFF10B981), size: 26),
+              SizedBox(width: 10),
+              Text(
+                'Post School Announcement',
+                style: TextStyle(fontWeight: FontWeight.w900, fontSize: 17),
+              ),
+            ],
+          ),
+          content: SingleChildScrollView(
+            child: SizedBox(
+              width: 460,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Broadcast an official announcement to Ciro High School members.',
+                    style: TextStyle(fontSize: 12, color: Color(0xFF64748B)),
+                  ),
+                  const SizedBox(height: 14),
+                  TextField(
+                    controller: titleController,
+                    decoration: const InputDecoration(
+                      labelText: 'Announcement Title *',
+                      hintText: 'e.g. Midterm Examination Schedule',
+                      prefixIcon: Icon(Icons.title_rounded),
+                    ),
+                    textCapitalization: TextCapitalization.sentences,
+                  ),
+                  const SizedBox(height: 12),
+                  DropdownButtonFormField<String>(
+                    initialValue: selectedAudience,
+                    decoration: const InputDecoration(
+                      labelText: 'Target Audience *',
+                      prefixIcon: Icon(Icons.groups_rounded),
+                    ),
+                    items: audienceOptions
+                        .map((opt) => DropdownMenuItem(
+                              value: opt['value'],
+                              child: Text(opt['label']!),
+                            ))
+                        .toList(),
+                    onChanged: (val) {
+                      if (val != null) setDialogState(() => selectedAudience = val);
+                    },
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: contentController,
+                    maxLines: 4,
+                    decoration: const InputDecoration(
+                      labelText: 'Message / Content *',
+                      hintText: 'Provide details, instructions, or deadlines for school members...',
+                      alignLabelWithHint: true,
+                    ),
+                    textCapitalization: TextCapitalization.sentences,
+                  ),
+                  const SizedBox(height: 12),
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('Pin to Top of Feed',
+                        style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
+                    subtitle: const Text('Highlighted notice displayed prominently for all users',
+                        style: TextStyle(fontSize: 11)),
+                    value: isPinned,
+                    onChanged: (val) => setDialogState(() => isPinned = val),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogCtx),
+              child: const Text('Cancel'),
+            ),
+            FilledButton.icon(
+              style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFF0F172A),
+                foregroundColor: Colors.white,
+              ),
+              icon: const Icon(Icons.send_rounded, size: 16),
+              label: const Text('Broadcast Now'),
+              onPressed: () async {
+                final title = titleController.text.trim();
+                final content = contentController.text.trim();
+                if (title.isEmpty || content.isEmpty) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Please enter both title and content.'),
+                      behavior: SnackBarBehavior.floating,
+                    ),
+                  );
+                  return;
+                }
+
+                Navigator.pop(dialogCtx);
+                try {
+                  await _announcementService.createAnnouncement(
+                    title: title,
+                    content: content,
+                    authorName: authorName,
+                    authorRole: authorRole,
+                    targetAudience: selectedAudience,
+                    isPinned: isPinned,
+                    schoolId: _ciroSchoolId,
+                  );
+                  _loadStats();
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('Announcement broadcasted successfully!'),
+                        backgroundColor: Color(0xFF10B981),
+                        behavior: SnackBarBehavior.floating,
+                      ),
+                    );
+                  }
+                } catch (e) {
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text('Failed to post announcement: $e'),
+                        backgroundColor: Colors.red,
+                        behavior: SnackBarBehavior.floating,
+                      ),
+                    );
+                  }
+                }
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _deleteAnnouncement(SchoolAnnouncement item) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogCtx) => AlertDialog(
+        title: const Text('Delete Announcement?'),
+        content: Text('Remove "${item.title}" from the school bulletin?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogCtx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () => Navigator.pop(dialogCtx, true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      try {
+        await _announcementService.deleteAnnouncement(item.id);
+        _loadStats();
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Announcement removed.'),
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Could not delete announcement: $e'),
+              backgroundColor: Colors.red,
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
+        }
+      }
     }
   }
 
@@ -412,7 +668,7 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen>
         : currentUser?.username ?? (isSubAdmin ? 'Director' : 'Administrator');
 
     return DashboardShell(
-      title: isSubAdmin ? 'Ciro High School · Director' : 'Ciro High School · Admin',
+      title: isSubAdmin ? 'Ciro High School · Director Center' : 'Ciro High School · Admin Center',
       body: RefreshIndicator(
         onRefresh: _loadStats,
         child: ListView(
@@ -625,7 +881,7 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen>
                                   const SizedBox(height: 4),
                                   Text(
                                     isSubAdmin
-                                        ? 'Overseeing Ciro High School faculty teachers, grade enrollments, and academic exams.'
+                                        ? 'Director oversight for Ciro High School faculty teachers, grade enrollment totals, and official announcements.'
                                         : 'Institutional administrative control for Ciro High School. Manage directors, faculty, students, and surveillance.',
                                     style: theme.textTheme.bodyMedium?.copyWith(
                                       color: const Color(0xFFE2E8F0),
@@ -662,8 +918,10 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen>
                                 if (mounted) _loadStats();
                               },
                             ),
-                            OutlinedButton.icon(
-                              style: OutlinedButton.styleFrom(
+                            FilledButton.tonalIcon(
+                              style: FilledButton.styleFrom(
+                                backgroundColor: const Color(0xFF10B981).withValues(alpha: 0.25),
+                                foregroundColor: Colors.white,
                                 padding: const EdgeInsets.symmetric(
                                   horizontal: 16,
                                   vertical: 12,
@@ -671,18 +929,10 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen>
                                 shape: RoundedRectangleBorder(
                                   borderRadius: BorderRadius.circular(12),
                                 ),
-                                side: BorderSide(
-                                  color: isDark
-                                      ? const Color(0xFF475569)
-                                      : const Color(0xFFCBD5E1),
-                                ),
                               ),
-                              icon: const Icon(Icons.history_rounded, size: 18),
-                              label: const Text('System Audit Logs'),
-                              onPressed: () async {
-                                await context.push('/admin/audit-logs');
-                                if (mounted) _loadStats();
-                              },
+                              icon: const Icon(Icons.campaign_rounded, size: 18),
+                              label: const Text('Post Announcement'),
+                              onPressed: _postAnnouncementDialog,
                             ),
                           ],
                         ),
@@ -697,8 +947,8 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen>
             // Live Metrics Section
             Text(
               isSubAdmin
-                  ? 'Ciro High School Summary & Faculty Counts'
-                  : 'Ciro High School Directory Totals',
+                  ? 'Ciro High School Community Metrics (Excludes Super Admin)'
+                  : 'Ciro High School System Totals',
               style: theme.textTheme.titleMedium?.copyWith(
                 fontWeight: FontWeight.w800,
                 color: isDark ? Colors.white : const Color(0xFF0F172A),
@@ -712,7 +962,8 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen>
                 children: [
                   Expanded(
                     child: _MetricCard(
-                      title: 'Total School Users',
+                      title: 'Total System Users',
+                      subtitle: 'Including all institutional accounts',
                       count: _totalUsersCount,
                       loading: _loading,
                       icon: Icons.groups_rounded,
@@ -725,6 +976,7 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen>
                   Expanded(
                     child: _MetricCard(
                       title: 'School Directors',
+                      subtitle: 'Campus administrative directors',
                       count: _subadminCount,
                       loading: _loading,
                       icon: Icons.admin_panel_settings_rounded,
@@ -739,6 +991,7 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen>
                   Expanded(
                     child: _MetricCard(
                       title: 'Faculty Teachers',
+                      subtitle: 'Teaching & attendance staff',
                       count: _teacherCount,
                       loading: _loading,
                       icon: Icons.co_present_rounded,
@@ -749,6 +1002,7 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen>
                   Expanded(
                     child: _MetricCard(
                       title: 'Enrolled Students',
+                      subtitle: 'Active registered learners',
                       count: _studentCount,
                       loading: _loading,
                       icon: Icons.school_rounded,
@@ -760,6 +1014,7 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen>
               const SizedBox(height: 10),
               _MetricCard(
                 title: 'Faculty Quizzes Prepared (Teacher Created Only)',
+                subtitle: 'Tap to review submissions and delete outdated preparations',
                 count: _quizCount,
                 loading: _loading,
                 icon: Icons.quiz_rounded,
@@ -767,13 +1022,14 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen>
                 onTap: _openQuizzesModerationSheet,
               ),
             ] else ...[
-              // SUB-ADMIN: School total + Grade breakdowns (9, 10, 11, 12, not section)
+              // SUB-ADMIN (DIRECTOR): School total users strictly EXCLUDES Super Admin
               Row(
                 children: [
                   Expanded(
                     child: _MetricCard(
                       title: 'School Total Users',
-                      count: _totalUsersCount,
+                      subtitle: 'Directors, Teachers & Students (Excludes Super Admin)',
+                      count: _schoolUsersCount,
                       loading: _loading,
                       icon: Icons.school_rounded,
                       color: isDark
@@ -785,6 +1041,7 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen>
                   Expanded(
                     child: _MetricCard(
                       title: 'Faculty Teachers',
+                      subtitle: 'Verified teaching staff',
                       count: _teacherCount,
                       loading: _loading,
                       icon: Icons.co_present_rounded,
@@ -799,6 +1056,7 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen>
                   Expanded(
                     child: _MetricCard(
                       title: 'Enrolled Students',
+                      subtitle: 'Official registered students',
                       count: _studentCount,
                       loading: _loading,
                       icon: Icons.groups_rounded,
@@ -809,6 +1067,7 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen>
                   Expanded(
                     child: _MetricCard(
                       title: 'Faculty Quizzes',
+                      subtitle: 'Teacher-prepared exams',
                       count: _quizCount,
                       loading: _loading,
                       icon: Icons.quiz_rounded,
@@ -820,7 +1079,7 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen>
               ),
               const SizedBox(height: 16),
 
-              // Grade Breakdown Card for Subadmin (Grades 9 to 12 only, no sections)
+              // Grade Breakdown Card for Director (Grades 9 to 12 only, strictly no sections)
               Container(
                 padding: const EdgeInsets.all(18),
                 decoration: BoxDecoration(
@@ -858,12 +1117,12 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen>
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(
-                                'Ciro High School Users by Grade Level',
+                                'Ciro High School Enrollment by Grade Level',
                                 style: TextStyle(
                                     fontWeight: FontWeight.w800, fontSize: 14),
                               ),
                               Text(
-                                'Official counts for Grades 9, 10, 11, and 12 (grade totals only)',
+                                'Official teacher and student tallies for Grade 9, 10, 11, and 12 (grade totals only)',
                                 style: TextStyle(
                                     fontSize: 11, color: Color(0xFF64748B)),
                               ),
@@ -949,7 +1208,7 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen>
             ],
             const SizedBox(height: 16),
 
-            // Pending Approvals Alert
+            // Pending Approvals Alert (Shows pending teachers for director)
             if (_pendingCount > 0) ...[
               Card(
                 color: const Color(0xFFFFFBEB),
@@ -970,7 +1229,9 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen>
                     ),
                   ),
                   title: Text(
-                    '$_pendingCount Pending ${isSubAdmin ? 'Teacher' : 'Registration'} Approval${_pendingCount > 1 ? 's' : ''}',
+                    isSubAdmin
+                        ? '$_pendingCount Pending Teacher Approval${_pendingCount > 1 ? 's' : ''}'
+                        : '$_pendingCount Pending Registration Approval${_pendingCount > 1 ? 's' : ''}',
                     style: const TextStyle(
                       fontWeight: FontWeight.bold,
                       color: Color(0xFF92400E),
@@ -978,7 +1239,7 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen>
                   ),
                   subtitle: Text(
                     isSubAdmin
-                        ? 'New faculty teacher applications require director review'
+                        ? 'Newly registered teachers awaiting director verification'
                         : 'New user registration requests awaiting approval',
                     style: const TextStyle(color: Color(0xFFB45309)),
                   ),
@@ -996,6 +1257,73 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen>
               ),
               const SizedBox(height: 16),
             ],
+
+            // OFFICIAL SCHOOL ANNOUNCEMENTS HUB
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Row(
+                  children: [
+                    const Icon(Icons.campaign_rounded, color: Color(0xFF10B981), size: 22),
+                    const SizedBox(width: 8),
+                    Text(
+                      'Ciro High School Announcements',
+                      style: theme.textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w800,
+                        color: isDark ? Colors.white : const Color(0xFF0F172A),
+                      ),
+                    ),
+                  ],
+                ),
+                TextButton.icon(
+                  icon: const Icon(Icons.add_rounded, size: 16),
+                  label: const Text('Post Notice'),
+                  onPressed: _postAnnouncementDialog,
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+
+            if (_loading && _announcements.isEmpty)
+              const Card(
+                child: Padding(
+                  padding: EdgeInsets.all(24),
+                  child: Center(child: CircularProgressIndicator()),
+                ),
+              )
+            else if (_announcements.isEmpty)
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(20),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.info_outline, color: Color(0xFF64748B)),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Text(
+                          'No announcements posted yet. Tap "Post Notice" to broadcast messages to teachers and students.',
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            color: const Color(0xFF64748B),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              )
+            else
+              Column(
+                children: [
+                  for (final item in _announcements) ...[
+                    _AnnouncementCard(
+                      announcement: item,
+                      onDelete: () => _deleteAnnouncement(item),
+                    ),
+                    const SizedBox(height: 10),
+                  ],
+                ],
+              ),
+            const SizedBox(height: 24),
 
             // Recent System & Admin Activities section
             Row(
@@ -1073,7 +1401,7 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen>
             const SizedBox(height: 12),
 
             if (isSubAdmin) ...[
-              // SUB-ADMIN ACTIONS: Strictly Teachers & Oversight (Not students)
+              // SUB-ADMIN ACTIONS: Strictly Teachers, Announcements, Quizzes Oversight
               _ActionTile(
                 icon: Icons.person_add_alt_1_rounded,
                 color: const Color(0xFF10B981),
@@ -1105,9 +1433,9 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen>
               _ActionTile(
                 icon: Icons.co_present_rounded,
                 color: const Color(0xFF6366F1),
-                title: 'Faculty Directory & Passwords',
+                title: 'Faculty Directory & Multi-Class Assignments',
                 subtitle:
-                    'Manage Ciro High School faculty teachers, reset passwords, update subject assignments, or remove teacher accounts.',
+                    'Manage Ciro High School teachers, assign multiple grades and classes, reset passwords, or remove faculty.',
                 buttonText: 'Manage Faculty',
                 onTap: () async {
                   await context.push('/admin/teachers');
@@ -1117,11 +1445,22 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen>
               const SizedBox(height: 10),
 
               _ActionTile(
+                icon: Icons.campaign_rounded,
+                color: const Color(0xFF0284C7),
+                title: 'Broadcast School Announcement',
+                subtitle:
+                    'Post announcements and notices directly to teachers and students of Ciro High School.',
+                buttonText: 'Post Notice',
+                onTap: _postAnnouncementDialog,
+              ),
+              const SizedBox(height: 10),
+
+              _ActionTile(
                 icon: Icons.quiz_rounded,
                 color: const Color(0xFF8B5CF6),
                 title: 'Faculty Quizzes Oversight',
                 subtitle:
-                    'Quizzes are prepared exclusively by faculty teachers. Inspect exam setups and remove outdated submissions.',
+                    'Quizzes are prepared exclusively by faculty teachers. Inspect exam preparations and remove outdated submissions.',
                 buttonText: 'Review Quizzes',
                 onTap: _openQuizzesModerationSheet,
               ),
@@ -1172,9 +1511,9 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen>
               _ActionTile(
                 icon: Icons.co_present_rounded,
                 color: const Color(0xFF6366F1),
-                title: 'Faculty Directory & Passwords',
+                title: 'Faculty Directory & Multi-Class Allocations',
                 subtitle:
-                    'View approved teachers, assign subjects, and reset faculty passwords directly.',
+                    'View approved teachers, assign multiple grades and subjects, and reset faculty passwords directly.',
                 buttonText: 'Faculty Directory',
                 onTap: () async {
                   await context.push('/admin/teachers');
@@ -1202,12 +1541,23 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen>
                 color: const Color(0xFF0284C7),
                 title: 'Class & Section Allocations',
                 subtitle:
-                    'Manage Ciro High School grades (9, 10, 11, 12), classroom sections, and course allocations.',
+                    'Manage Ciro High School grades (9, 10, 11, 12), classroom sections, and teacher multi-class allocations.',
                 buttonText: 'Class Management',
                 onTap: () async {
                   await context.push('/admin/classes');
                   if (mounted) _loadStats();
                 },
+              ),
+              const SizedBox(height: 10),
+
+              _ActionTile(
+                icon: Icons.campaign_rounded,
+                color: const Color(0xFF10B981),
+                title: 'Post School Announcement',
+                subtitle:
+                    'Publish notices, schedules, or announcements for Ciro High School members.',
+                buttonText: 'New Announcement',
+                onTap: _postAnnouncementDialog,
               ),
               const SizedBox(height: 10),
 
@@ -1252,6 +1602,140 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen>
             const SizedBox(height: 32),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _AnnouncementCard extends StatelessWidget {
+  const _AnnouncementCard({
+    required this.announcement,
+    required this.onDelete,
+  });
+
+  final SchoolAnnouncement announcement;
+  final VoidCallback onDelete;
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final diff = DateTime.now().difference(announcement.createdAt);
+    final timeStr = diff.inMinutes < 1
+        ? 'Just now'
+        : diff.inMinutes < 60
+            ? '${diff.inMinutes}m ago'
+            : diff.inHours < 24
+                ? '${diff.inHours}h ago'
+                : '${announcement.createdAt.month}/${announcement.createdAt.day}';
+
+    final audienceLabel = switch (announcement.targetAudience) {
+      'teachers' => 'Teachers Only',
+      'students' => 'Students Only',
+      'Grade 9' => 'Grade 9',
+      'Grade 10' => 'Grade 10',
+      'Grade 11' => 'Grade 11',
+      'Grade 12' => 'Grade 12',
+      _ => 'All School',
+    };
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF1E293B) : Colors.white,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(
+          color: announcement.isPinned
+              ? const Color(0xFF10B981)
+              : (isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0)),
+          width: announcement.isPinned ? 1.5 : 1,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.03),
+            blurRadius: 10,
+            offset: const Offset(0, 3),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              if (announcement.isPinned) ...[
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF10B981).withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: const Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.push_pin_rounded, size: 11, color: Color(0xFF059669)),
+                      SizedBox(width: 4),
+                      Text('PINNED', style: TextStyle(fontSize: 9, fontWeight: FontWeight.w900, color: Color(0xFF059669))),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+              ],
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF6366F1).withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Text(
+                  audienceLabel,
+                  style: const TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w700,
+                    color: Color(0xFF6366F1),
+                  ),
+                ),
+              ),
+              const Spacer(),
+              Text(
+                timeStr,
+                style: const TextStyle(fontSize: 11, color: Color(0xFF94A3B8), fontWeight: FontWeight.w600),
+              ),
+              const SizedBox(width: 4),
+              IconButton(
+                icon: const Icon(Icons.delete_outline_rounded, size: 18, color: Colors.red),
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(),
+                tooltip: 'Delete Announcement',
+                onPressed: onDelete,
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            announcement.title,
+            style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 14.5),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            announcement.content,
+            style: TextStyle(
+              fontSize: 13,
+              color: isDark ? const Color(0xFFCBD5E1) : const Color(0xFF475569),
+              height: 1.35,
+            ),
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              const Icon(Icons.person_pin_rounded, size: 14, color: Color(0xFF059669)),
+              const SizedBox(width: 4),
+              Text(
+                'By ${announcement.authorName} (${announcement.authorRole})',
+                style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Color(0xFF059669)),
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }
@@ -1363,10 +1847,12 @@ class _MetricCard extends StatelessWidget {
     required this.loading,
     required this.icon,
     required this.color,
+    this.subtitle,
     this.onTap,
   });
 
   final String title;
+  final String? subtitle;
   final int count;
   final bool loading;
   final IconData icon;
@@ -1427,11 +1913,22 @@ class _MetricCard extends StatelessWidget {
             title,
             textAlign: TextAlign.center,
             style: TextStyle(
-              color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
-              fontWeight: FontWeight.w600,
-              fontSize: 12,
+              color: isDark ? Colors.white : const Color(0xFF0F172A),
+              fontWeight: FontWeight.w700,
+              fontSize: 12.5,
             ),
           ),
+          if (subtitle != null) ...[
+            const SizedBox(height: 2),
+            Text(
+              subtitle!,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                fontSize: 10,
+              ),
+            ),
+          ],
         ],
       ),
     );

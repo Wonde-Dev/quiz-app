@@ -81,6 +81,17 @@ class _AccountApprovalsScreenState extends ConsumerState<AccountApprovalsScreen>
             )
             .eq('approval_status', 'pending');
 
+        if (currentUser?.role == AppRoles.subadmin) {
+          fallbackQuery = fallbackQuery.or('requested_role.eq.teacher,role.eq.teacher');
+        } else if (currentUser?.role == AppRoles.teacher && currentUser?.isAttendanceTeacher == true) {
+          fallbackQuery = fallbackQuery.or('requested_role.eq.student,role.eq.student');
+          if (currentUser?.attendanceClass != null && currentUser!.attendanceClass!.isNotEmpty) {
+            fallbackQuery = fallbackQuery.or(
+              'requested_class.ilike.%${currentUser.attendanceClass}%,assigned_class.ilike.%${currentUser.attendanceClass}%',
+            );
+          }
+        }
+
         if (targetSchoolId != null && targetSchoolId.isNotEmpty) {
           fallbackQuery = fallbackQuery.eq('school_id', targetSchoolId);
         }
@@ -98,11 +109,9 @@ class _AccountApprovalsScreenState extends ConsumerState<AccountApprovalsScreen>
     final requestedRole = (request['requested_role'] as String?)?.isNotEmpty == true
         ? request['requested_role'] as String
         : (request['role'] as String? ?? 'student');
-    String? schoolId = request['school_id'] as String?;
-    if (decision == 'approve' && requestedRole == 'teacher' && schoolId == null) {
-      schoolId = await _askForSchoolId();
-      if (schoolId == null) return;
-    }
+    String schoolId = (request['school_id'] as String?)?.isNotEmpty == true
+        ? request['school_id'] as String
+        : '00000000-0000-4000-8000-000000000001';
 
     setState(() {
       _working.add(id);
@@ -160,7 +169,7 @@ class _AccountApprovalsScreenState extends ConsumerState<AccountApprovalsScreen>
           'is_active': isApprove,
           'role': isApprove ? requestedRole : 'student',
         };
-        if (isApprove && schoolId != null) {
+        if (isApprove) {
           updateMap['school_id'] = schoolId;
         }
         await Supabase.instance.client
@@ -225,44 +234,6 @@ class _AccountApprovalsScreenState extends ConsumerState<AccountApprovalsScreen>
         setState(() => _working.remove(id));
       }
     }
-  }
-
-  Future<String?> _askForSchoolId() async {
-    final client = Supabase.instance.client;
-    final rows = await client.from('schools').select('id, name');
-    final schools = List<Map<String, dynamic>>.from(rows);
-    if (schools.isEmpty || !mounted) return null;
-    String? selected = schools.first['id'] as String;
-    return showDialog<String>(
-      context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setDialogState) => AlertDialog(
-          title: const Text('Assign School'),
-          content: DropdownButtonFormField<String>(
-            initialValue: selected,
-            decoration: const InputDecoration(labelText: 'School'),
-            items: [
-              for (final s in schools)
-                DropdownMenuItem(
-                  value: s['id'] as String,
-                  child: Text(s['name'] as String? ?? 'School'),
-                ),
-            ],
-            onChanged: (v) => setDialogState(() => selected = v),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx, null),
-              child: const Text('Cancel'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(ctx, selected),
-              child: const Text('Confirm'),
-            ),
-          ],
-        ),
-      ),
-    );
   }
 
   @override
