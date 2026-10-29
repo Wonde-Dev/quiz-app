@@ -181,8 +181,8 @@ class FunctionsScreen extends ConsumerWidget {
             _FunctionTile(
               icon: Icons.person_add_alt_1_rounded,
               color: const Color(0xFF10B981),
-              title: 'Register New User (Admin, Teacher, Student)',
-              subtitle: 'Directly create and activate Administrator, Teacher, or Student accounts.',
+              title: 'Register New User (Director, Teacher, Student)',
+              subtitle: 'Directly create and activate School Director, Faculty Teacher, or Student accounts.',
               onTap: () => context.push('/admin/register-user'),
             ),
             _FunctionTile(
@@ -212,13 +212,6 @@ class FunctionsScreen extends ConsumerWidget {
               title: 'Reset User Passwords',
               subtitle: 'Issue secure temporary passwords for faculty and students.',
               onTap: () => context.push('/teacher/reset-passwords'),
-            ),
-            _FunctionTile(
-              icon: Icons.domain_rounded,
-              color: const Color(0xFF0284C7),
-              title: 'Multi-School Campus Management',
-              subtitle: 'Register new campuses, provision grades & sections, and isolate student rosters.',
-              onTap: () => context.push('/admin/schools'),
             ),
             _FunctionTile(
               icon: Icons.class_outlined,

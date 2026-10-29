@@ -19,7 +19,6 @@ class DashboardShell extends ConsumerWidget {
         currentPath.startsWith('/admin/teachers') ||
         currentPath.startsWith('/admin/classes') ||
         currentPath.startsWith('/admin/audit-logs') ||
-        currentPath.startsWith('/admin/schools') ||
         currentPath.startsWith('/teacher/quizzes/new') ||
         currentPath.startsWith('/teacher/results') ||
         currentPath.startsWith('/teacher/students') ||

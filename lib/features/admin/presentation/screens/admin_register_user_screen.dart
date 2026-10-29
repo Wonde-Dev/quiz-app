@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:quiz_app/core/constants/app_roles.dart';
 import 'package:quiz_app/core/constants/supabase_constants.dart';
@@ -22,6 +21,9 @@ class AdminRegisterUserScreen extends ConsumerStatefulWidget {
 
 class _AdminRegisterUserScreenState
     extends ConsumerState<AdminRegisterUserScreen> {
+  static const String _ciroSchoolId = '00000000-0000-4000-8000-000000000001';
+  static const String _schoolName = 'Ciro High School';
+
   final _formKey = GlobalKey<FormState>();
 
   final _fullNameController = TextEditingController();
@@ -37,9 +39,6 @@ class _AdminRegisterUserScreenState
   bool _obscurePassword = true;
   bool _isLoading = false;
   String? _errorMessage;
-
-  List<Map<String, dynamic>> _schools = [];
-  String? _selectedSchoolId;
 
   List<Map<String, dynamic>> _sections = [];
   String? _selectedSectionId;
@@ -86,24 +85,20 @@ class _AdminRegisterUserScreenState
     final client = Supabase.instance.client;
     try {
       final results = await Future.wait<dynamic>([
-        client.from('schools').select('id, name').order('name'),
+        client.from('sections').select('id, name, grade, school_id').eq('school_id', _ciroSchoolId),
         client.from('users').select('username, email'),
       ]);
 
       if (!mounted) return;
 
-      final schoolRows = results[0] as List;
+      final sectionRows = results[0] as List;
       final userRows = results[1] as List;
       final currentUser = ref.read(authStateProvider).user;
-      final isSubadmin = currentUser?.isSuperAdmin != true;
 
       setState(() {
-        _schools = List<Map<String, dynamic>>.from(schoolRows);
-        if (isSubadmin && currentUser?.schoolId != null) {
-          _selectedSchoolId = currentUser!.schoolId;
-        } else if (_schools.isNotEmpty && _selectedSchoolId == null) {
-          _selectedSchoolId = _schools.first['id'] as String;
-        }
+        _sections = List<Map<String, dynamic>>.from(sectionRows);
+        _resolveMatchingSectionId();
+
         if (currentUser?.role == AppRoles.subadmin) {
           _selectedRole = AppRoles.teacher;
         } else if (currentUser?.isAttendanceTeacher == true) {
@@ -124,33 +119,34 @@ class _AdminRegisterUserScreenState
             .where((e) => e.isNotEmpty)
             .toList();
       });
-
-      if (_selectedSchoolId != null) {
-        _loadSectionsForSchool(_selectedSchoolId!);
-      }
     } catch (e) {
       debugPrint('Error loading initial registration data: $e');
     }
   }
 
-  Future<void> _loadSectionsForSchool(String schoolId) async {
-    final client = Supabase.instance.client;
-    try {
-      final rows = await client
-          .from('grade_sections')
-          .select('id, name, school_grades!inner(name, school_id)')
-          .eq('school_grades.school_id', schoolId)
-          .order('name');
-
-      if (!mounted) return;
-      setState(() {
-        _sections = List<Map<String, dynamic>>.from(rows);
-        _selectedSectionId =
-            _sections.isNotEmpty ? _sections.first['id'] as String : null;
-      });
-    } catch (e) {
-      debugPrint('Error loading sections: $e');
+  void _resolveMatchingSectionId() {
+    if (_sections.isEmpty) {
+      _selectedSectionId = null;
+      return;
     }
+
+    final letterOnly = _selectedClass.replaceAll(RegExp(r'^[0-9]+'), '');
+    Map<String, dynamic>? match;
+    for (final s in _sections) {
+      final sGrade = s['grade']?.toString() ?? '';
+      final sName = s['name']?.toString() ?? '';
+      final gradeMatch = sGrade.toLowerCase() == _selectedGrade.toLowerCase() ||
+          sGrade.toLowerCase().contains(_selectedGrade.toLowerCase());
+      final classMatch = sName.toLowerCase() == _selectedClass.toLowerCase() ||
+          sName.toLowerCase() == letterOnly.toLowerCase() ||
+          '$sGrade $sName'.toLowerCase() == _selectedClass.toLowerCase();
+      if (gradeMatch && classMatch) {
+        match = s;
+        break;
+      }
+    }
+
+    _selectedSectionId = match?['id'] as String? ?? _sections.first['id'] as String;
   }
 
   void _onFullNameChanged(String value) {
@@ -177,7 +173,13 @@ class _AdminRegisterUserScreenState
   }
 
   void _onRoleChanged(String newRole) {
-    setState(() => _selectedRole = newRole);
+    setState(() {
+      _selectedRole = newRole;
+      if (newRole != AppRoles.teacher) {
+        _isAttendanceTeacher = false;
+      }
+    });
+
     if (_fullNameController.text.trim().isNotEmpty) {
       final generated = nextRoleUsername(
         fullName: _fullNameController.text,
@@ -214,7 +216,9 @@ class _AdminRegisterUserScreenState
     final subject = _subjectController.text.trim();
     final phone = _phoneController.text.trim();
 
-    // Check if username already exists in local list, auto-advance to next sequential number
+    _resolveMatchingSectionId();
+
+    // Deduplicate username sequentially if taken
     if (_existingUsernames.map((u) => u.toLowerCase()).contains(username.toLowerCase())) {
       final nextUname = nextRoleUsername(
         fullName: fullName,
@@ -236,7 +240,7 @@ class _AdminRegisterUserScreenState
     try {
       bool createdViaFunction = false;
 
-      // 1. Try dedicated database RPC function (security definer with instant email approval)
+      // 1. Try dedicated database RPC function (security definer with instant verification)
       try {
         final rpcRes = await Supabase.instance.client.rpc(
           'admin_create_user',
@@ -246,13 +250,13 @@ class _AdminRegisterUserScreenState
             'p_email': email,
             'p_password': password,
             'p_role': _selectedRole,
-            'p_school_id': _selectedRole == AppRoles.admin ? null : _selectedSchoolId,
-            'p_section_id': _selectedRole == AppRoles.admin ? null : _selectedSectionId,
+            'p_school_id': _ciroSchoolId,
+            'p_section_id': _selectedRole == AppRoles.subadmin ? null : _selectedSectionId,
             'p_subject': _selectedRole == AppRoles.teacher && subject.isNotEmpty ? subject : null,
             'p_phone_number': phone.isNotEmpty ? phone : null,
             'p_gender': _selectedGender,
-            'p_grade': _selectedGrade,
-            'p_class': _selectedClass,
+            'p_grade': _selectedRole == AppRoles.subadmin ? null : _selectedGrade,
+            'p_class': _selectedRole == AppRoles.subadmin ? null : _selectedClass,
             'p_is_attendance_teacher': _selectedRole == AppRoles.teacher && _isAttendanceTeacher,
             'p_attendance_grade': _selectedRole == AppRoles.teacher && _isAttendanceTeacher ? _selectedGrade : null,
             'p_attendance_class': _selectedRole == AppRoles.teacher && _isAttendanceTeacher ? _selectedClass : null,
@@ -305,16 +309,16 @@ class _AdminRegisterUserScreenState
               'username': username,
               'email': email,
               'password': password,
-              if (_selectedRole != AppRoles.admin) 'schoolId': _selectedSchoolId,
-              if (_selectedRole != AppRoles.admin) 'sectionId': _selectedSectionId,
+              'schoolId': _ciroSchoolId,
+              if (_selectedRole != AppRoles.subadmin) 'sectionId': _selectedSectionId,
               if (phone.isNotEmpty) 'phoneNumber': phone,
               'gender': _selectedGender,
               if (_selectedRole == AppRoles.teacher)
                 'subject': subject.isNotEmpty ? subject : 'General',
-              'grade': _selectedGrade,
-              'class': _selectedClass,
+              if (_selectedRole != AppRoles.subadmin) 'grade': _selectedGrade,
+              if (_selectedRole != AppRoles.subadmin) 'class': _selectedClass,
               'is_attendance_teacher': _selectedRole == AppRoles.teacher && _isAttendanceTeacher,
-              'attendance_class': _selectedClass,
+              'attendance_class': _isAttendanceTeacher ? _selectedClass : null,
               'approval_status': 'approved',
               'is_active': true,
             },
@@ -344,13 +348,13 @@ class _AdminRegisterUserScreenState
               'role': _selectedRole,
               'approval_status': 'approved',
               'is_active': true,
-              if (_selectedRole != AppRoles.admin) 'school_id': _selectedSchoolId,
-              if (_selectedRole != AppRoles.admin) 'section_id': _selectedSectionId,
+              'school_id': _ciroSchoolId,
+              if (_selectedRole != AppRoles.subadmin) 'section_id': _selectedSectionId,
               if (phone.isNotEmpty) 'phone_number': phone,
               'gender': _selectedGender,
               if (_selectedRole == AppRoles.teacher) 'subject': subject,
-              'assigned_grade': _selectedGrade,
-              'assigned_class': _selectedClass,
+              if (_selectedRole != AppRoles.subadmin) 'assigned_grade': _selectedGrade,
+              if (_selectedRole != AppRoles.subadmin) 'assigned_class': _selectedClass,
               'is_attendance_teacher': _selectedRole == AppRoles.teacher && _isAttendanceTeacher,
               'attendance_class': _selectedRole == AppRoles.teacher && _isAttendanceTeacher ? _selectedClass : null,
             },
@@ -366,15 +370,15 @@ class _AdminRegisterUserScreenState
               'role': _selectedRole,
               'approval_status': 'approved',
               'is_active': true,
-              if (_selectedRole != AppRoles.admin) 'school_id': _selectedSchoolId,
-              if (_selectedRole != AppRoles.admin) 'section_id': _selectedSectionId,
+              'school_id': _ciroSchoolId,
+              if (_selectedRole != AppRoles.subadmin) 'section_id': _selectedSectionId,
               if (phone.isNotEmpty) 'phone_number': phone,
               'gender': _selectedGender,
-              'assigned_grade': _selectedGrade,
-              'assigned_class': _selectedClass,
+              if (_selectedRole != AppRoles.subadmin) 'assigned_grade': _selectedGrade,
+              if (_selectedRole != AppRoles.subadmin) 'assigned_class': _selectedClass,
               'is_attendance_teacher': _selectedRole == AppRoles.teacher && _isAttendanceTeacher,
               'attendance_class': _selectedRole == AppRoles.teacher && _isAttendanceTeacher ? _selectedClass : null,
-              'assigned_subject': subject,
+              if (_selectedRole == AppRoles.teacher) 'assigned_subject': subject,
             });
             createdViaFunction = true;
           }
@@ -385,21 +389,20 @@ class _AdminRegisterUserScreenState
 
       if (!mounted) return;
 
-      // Track registered username in local deduplication list
       _existingUsernames.add(username);
       _existingEmails.add(email.toLowerCase());
 
-      // Show animated success dialog with copy options
       await _showSuccessDialog(
         fullName: fullName,
         username: username,
         password: password,
         role: _selectedRole,
-        assignedClass: _selectedClass,
+        assignedGrade: _selectedRole == AppRoles.subadmin ? null : _selectedGrade,
+        assignedClass: _selectedRole == AppRoles.subadmin ? null : _selectedClass,
         isAttendanceTeacher: _selectedRole == AppRoles.teacher && _isAttendanceTeacher,
       );
 
-      // Reset form fields
+      // Reset form
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
         _fullNameController.clear();
@@ -432,14 +435,15 @@ class _AdminRegisterUserScreenState
     required String username,
     required String password,
     required String role,
+    String? assignedGrade,
     String? assignedClass,
     bool isAttendanceTeacher = false,
   }) async {
     final roleName = switch (role) {
-      AppRoles.subadmin => 'Sub-Admin / Director',
+      AppRoles.subadmin => 'School Director / Sub-Admin',
       AppRoles.teacher => isAttendanceTeacher
           ? 'Attendance Teacher ($assignedClass)'
-          : 'Teacher',
+          : 'Faculty Teacher',
       AppRoles.student => 'Student ($assignedClass)',
       _ => 'Administrator',
     };
@@ -483,7 +487,7 @@ class _AdminRegisterUserScreenState
               ),
               const SizedBox(height: 6),
               Text(
-                'Account for $fullName has been created and immediately activated.',
+                'Account for $fullName has been created and immediately activated for $_schoolName.',
                 style: const TextStyle(color: Color(0xFF64748B), fontSize: 13),
                 textAlign: TextAlign.center,
               ),
@@ -554,7 +558,7 @@ class _AdminRegisterUserScreenState
                         ),
                       ],
                     ),
-                    if (isAttendanceTeacher && assignedClass != null) ...[
+                    if (assignedGrade != null && assignedClass != null) ...[
                       const SizedBox(height: 8),
                       Row(
                         children: [
@@ -566,7 +570,9 @@ class _AdminRegisterUserScreenState
                             ),
                           ),
                           Text(
-                            'Attendance Master for $assignedClass',
+                            isAttendanceTeacher
+                                ? 'Attendance Master for Class $assignedClass ($assignedGrade)'
+                                : 'Class $assignedClass ($assignedGrade)',
                             style: const TextStyle(
                               fontWeight: FontWeight.bold,
                               fontSize: 13,
@@ -596,7 +602,7 @@ class _AdminRegisterUserScreenState
                         Clipboard.setData(
                           ClipboardData(
                             text:
-                                'Role: $roleName\nFull Name: $fullName\nUsername: $username\nPassword: $password${isAttendanceTeacher ? "\nAttendance Class: $assignedClass" : ""}',
+                                'Institution: $_schoolName\nRole: $roleName\nFull Name: $fullName\nUsername: $username\nPassword: $password${assignedClass != null ? "\nClass: $assignedClass ($assignedGrade)" : ""}',
                           ),
                         );
                         ScaffoldMessenger.of(dialogCtx).showSnackBar(
@@ -648,7 +654,7 @@ class _AdminRegisterUserScreenState
       body: ListView(
         padding: const EdgeInsets.all(20),
         children: [
-          // Banner
+          // Institutional Banner (Ciro High School)
           Container(
             clipBehavior: Clip.hardEdge,
             decoration: BoxDecoration(
@@ -670,7 +676,7 @@ class _AdminRegisterUserScreenState
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 SizedBox(
-                  height: 130,
+                  height: 120,
                   width: double.infinity,
                   child: Stack(
                     fit: StackFit.expand,
@@ -729,15 +735,37 @@ class _AdminRegisterUserScreenState
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text(
-                              'Institutional Account Creation',
-                              style: theme.textTheme.titleMedium?.copyWith(
-                                fontWeight: FontWeight.w900,
-                              ),
+                            Row(
+                              children: [
+                                Text(
+                                  'Ciro High School',
+                                  style: theme.textTheme.titleMedium?.copyWith(
+                                    fontWeight: FontWeight.w900,
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 6, vertical: 2),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFF10B981).withValues(alpha: 0.15),
+                                    borderRadius: BorderRadius.circular(6),
+                                  ),
+                                  child: const Text(
+                                    'OFFICIAL CAMPUS',
+                                    style: TextStyle(
+                                      fontSize: 9,
+                                      fontWeight: FontWeight.w900,
+                                      color: Color(0xFF047857),
+                                      letterSpacing: 0.5,
+                                    ),
+                                  ),
+                                ),
+                              ],
                             ),
                             const SizedBox(height: 2),
                             Text(
-                              'Directly register and activate students, faculty, attendance teachers, or sub-administrators.',
+                              'Register and activate School Directors, Faculty Teachers (with Grade & Section), or Students.',
                               style: TextStyle(
                                 fontSize: 12,
                                 color: isDark
@@ -802,7 +830,7 @@ class _AdminRegisterUserScreenState
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  // Role Selector
+                  // 1. Role Selector
                   const Text(
                     '1. Select Institutional Role',
                     style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800),
@@ -861,7 +889,7 @@ class _AdminRegisterUserScreenState
                           ),
                           ChoiceChip(
                             avatar: const Icon(Icons.co_present_outlined, size: 16),
-                            label: const Text('Teacher',
+                            label: const Text('Faculty Teacher',
                                 style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
                             selected: _selectedRole == AppRoles.teacher,
                             onSelected: (selected) {
@@ -871,7 +899,7 @@ class _AdminRegisterUserScreenState
                           if (currentUser?.isSuperAdmin == true || currentUser?.role == AppRoles.admin)
                             ChoiceChip(
                               avatar: const Icon(Icons.admin_panel_settings_outlined, size: 16),
-                              label: const Text('Sub-Admin / Director',
+                              label: const Text('Sub-Admin / School Director',
                                   style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
                               selected: _selectedRole == AppRoles.subadmin,
                               onSelected: (selected) {
@@ -884,7 +912,7 @@ class _AdminRegisterUserScreenState
                   ),
                   const SizedBox(height: 20),
 
-                  // Sub-Admin info notice
+                  // Sub-Admin role informative banner
                   if (_selectedRole == AppRoles.subadmin) ...[
                     Container(
                       padding: const EdgeInsets.all(14),
@@ -902,12 +930,12 @@ class _AdminRegisterUserScreenState
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Text(
-                                  'Sub-Admin / School Director Role',
+                                  'Ciro High School Director / Sub-Admin',
                                   style: TextStyle(fontWeight: FontWeight.w800, fontSize: 13),
                                 ),
                                 SizedBox(height: 3),
                                 Text(
-                                  'Sub-Admins have institutional authority to register & approve teachers, assign attendance classes, and manage student enrollment. For system security, they cannot delete or demote the Main Admin account.',
+                                  'School Directors oversee Ciro High School faculty teachers, grade enrollment totals, and curriculum exams. No grade or section is required for this administrative role.',
                                   style: TextStyle(fontSize: 12, color: Color(0xFF475569)),
                                 ),
                               ],
@@ -919,7 +947,7 @@ class _AdminRegisterUserScreenState
                     const SizedBox(height: 20),
                   ],
 
-                  // User Identity Details
+                  // 2. User Identity Details
                   const Text(
                     '2. User Identity & Institutional Credentials',
                     style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800),
@@ -1104,99 +1132,57 @@ class _AdminRegisterUserScreenState
                   ),
                   const SizedBox(height: 20),
 
-                  // Campus & Academic Allocations
+                  // 3. Campus & Academic Allocations
                   const Text(
                     '3. Campus & Academic Assignment',
                     style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800),
                   ),
                   const SizedBox(height: 12),
 
-                  if (_schools.isNotEmpty) ...[
-                    if (ref.watch(authStateProvider).user?.isSuperAdmin != true)
-                      Container(
-                        padding: const EdgeInsets.all(14),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFF10B981).withValues(alpha: 0.12),
-                          borderRadius: BorderRadius.circular(14),
-                          border: Border.all(
-                            color: const Color(0xFF10B981).withValues(alpha: 0.3),
-                          ),
-                        ),
-                        child: Row(
-                          children: [
-                            const Icon(Icons.domain_rounded, color: Color(0xFF047857), size: 22),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  const Text(
-                                    'Institutional Campus (Sub-Admin Scope):',
-                                    style: TextStyle(
-                                      fontSize: 11,
-                                      fontWeight: FontWeight.w600,
-                                      color: Color(0xFF047857),
-                                    ),
-                                  ),
-                                  Text(
-                                    _schools.firstWhere(
-                                      (s) => s['id'] == _selectedSchoolId,
-                                      orElse: () => {'name': 'Assigned Campus'},
-                                    )['name'] as String,
-                                    style: const TextStyle(
-                                      fontSize: 14,
-                                      fontWeight: FontWeight.w800,
-                                      color: Color(0xFF047857),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ],
-                        ),
-                      )
-                    else
-                      Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Expanded(
-                            child: DropdownButtonFormField<String>(
-                              key: ValueKey('admin_reg_school_$_selectedSchoolId'),
-                              initialValue: _selectedSchoolId,
-                              decoration: const InputDecoration(
-                                labelText: 'School Campus *',
-                                prefixIcon: Icon(Icons.location_city_rounded),
-                              ),
-                              items: [
-                                for (final s in _schools)
-                                  DropdownMenuItem(
-                                    value: s['id'] as String,
-                                    child: Text(s['name'] as String? ?? 'School'),
-                                  ),
-                              ],
-                              onChanged: (val) {
-                                if (val != null) {
-                                  setState(() => _selectedSchoolId = val);
-                                  _loadSectionsForSchool(val);
-                                }
-                              },
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          IconButton.filledTonal(
-                            tooltip: 'Add New School Campus',
-                            onPressed: () async {
-                              await context.push('/admin/schools');
-                              _loadInitialData();
-                            },
-                            icon: const Icon(Icons.add_business_rounded),
-                          ),
-                        ],
+                  // Fixed Ciro High School Badge (No multi-school dropdowns!)
+                  Container(
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF10B981).withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(
+                        color: const Color(0xFF10B981).withValues(alpha: 0.35),
                       ),
-                    const SizedBox(height: 14),
-                  ],
+                    ),
+                    child: const Row(
+                      children: [
+                        Icon(Icons.domain_rounded, color: Color(0xFF047857), size: 24),
+                        SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Institution Campus',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w600,
+                                  color: Color(0xFF047857),
+                                ),
+                              ),
+                              Text(
+                                'Ciro High School',
+                                style: TextStyle(
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w900,
+                                  color: Color(0xFF047857),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        Icon(Icons.verified_rounded, color: Color(0xFF10B981), size: 20),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 14),
 
-                  // Attendance Teacher fixed classroom indicator
+                  // Attendance Teacher fixed homeroom indicator
                   if (ref.watch(authStateProvider).user?.isAttendanceTeacher == true) ...[
                     Container(
                       padding: const EdgeInsets.all(14),
@@ -1210,14 +1196,17 @@ class _AdminRegisterUserScreenState
                       child: Row(
                         children: [
                           const Icon(Icons.how_to_reg_rounded, color: Color(0xFF047857), size: 24),
-                          const SizedBox(width: 12),
+                          SizedBox(width: 12),
                           Expanded(
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Text(
                                   'Homeroom Target: Class $_selectedClass ($_selectedGrade)',
-                                  style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13.5, color: Color(0xFF065F46)),
+                                  style: const TextStyle(
+                                      fontWeight: FontWeight.w800,
+                                      fontSize: 13.5,
+                                      color: Color(0xFF065F46)),
                                 ),
                                 const SizedBox(height: 2),
                                 const Text(
@@ -1231,8 +1220,8 @@ class _AdminRegisterUserScreenState
                       ),
                     ),
                     const SizedBox(height: 14),
-                  ] else if (!AppRoles.isAdmin(_selectedRole)) ...[
-                    // Grade Dropdown
+                  ] else if (_selectedRole != AppRoles.subadmin) ...[
+                    // Grade Dropdown for Teachers and Students
                     DropdownButtonFormField<String>(
                       initialValue: _selectedGrade,
                       decoration: const InputDecoration(
@@ -1254,15 +1243,16 @@ class _AdminRegisterUserScreenState
                             if (!classes.contains(_selectedClass)) {
                               _selectedClass = classes.first;
                             }
+                            _resolveMatchingSectionId();
                           });
                         }
                       },
                     ),
                     const SizedBox(height: 14),
 
-                    // Class Dropdown (e.g. 9A, 9B, 9C)
+                    // Class / Section Dropdown (e.g. 9A, 9B, 9C)
                     DropdownButtonFormField<String>(
-                      key: ValueKey('admin_reg_class_${_selectedGrade}_$_selectedClass'),
+                      key: ValueKey('ciro_class_${_selectedGrade}_$_selectedClass'),
                       initialValue: _selectedClass,
                       decoration: InputDecoration(
                         labelText: _selectedRole == AppRoles.teacher
@@ -1279,12 +1269,16 @@ class _AdminRegisterUserScreenState
                       ],
                       onChanged: (val) {
                         if (val != null) {
-                          setState(() => _selectedClass = val);
+                          setState(() {
+                            _selectedClass = val;
+                            _resolveMatchingSectionId();
+                          });
                         }
                       },
                     ),
                     const SizedBox(height: 14),
 
+                    // TEACHER SPECIFIC: Subject & Attendance Designation
                     if (_selectedRole == AppRoles.teacher) ...[
                       TextFormField(
                         controller: _subjectController,
@@ -1340,7 +1334,7 @@ class _AdminRegisterUserScreenState
                               subtitle: Padding(
                                 padding: const EdgeInsets.only(top: 4),
                                 child: Text(
-                                  'Appoint this teacher as the official Attendance Master for Class $_selectedClass. They can register students and review pending registrations for $_selectedClass.',
+                                  'Appoint this faculty member as the official Attendance Master for Class $_selectedClass ($_selectedGrade). They can register students and review pending registrations for this homeroom class.',
                                   style: const TextStyle(fontSize: 12),
                                 ),
                               ),
