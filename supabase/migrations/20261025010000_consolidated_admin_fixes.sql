@@ -237,7 +237,7 @@ set search_path = 'public', 'auth', 'pg_temp'
 as $$
 declare
   caller_id uuid := auth.uid();
-  caller_role text;
+  caller record;
   target_user record;
   is_approve boolean := (p_decision = 'approve');
 begin
@@ -245,17 +245,45 @@ begin
     raise exception 'Authentication required' using errcode = '42501';
   end if;
 
-  select role into caller_role from public.users where id = caller_id;
-  if caller_role is null or caller_role <> 'admin' then
-    raise exception 'Permission denied: only administrators can review registration requests' using errcode = '42501';
+  if caller_id = p_user_id then
+    raise exception 'Permission denied: Self-approval is prohibited' using errcode = '42501';
   end if;
 
-  select id, requested_role, school_id, section_id into target_user
+  select id, role, is_super_admin, is_attendance_teacher, attendance_grade, attendance_class, school_id
+  into caller
+  from public.users
+  where id = caller_id;
+
+  select id, role, requested_role, school_id, section_id, requested_grade, requested_class
+  into target_user
   from public.users
   where id = p_user_id;
 
   if target_user.id is null then
     return jsonb_build_object('success', false, 'error', 'User record not found');
+  end if;
+
+  -- Role Hierarchy Validation:
+  if caller.role = 'admin' or caller.is_super_admin is true then
+    -- Super Admin can review any account across all schools
+    null;
+  elsif caller.role = 'subadmin' then
+    if coalesce(target_user.requested_role, target_user.role) in ('admin', 'subadmin') then
+      raise exception 'Permission denied: Only the Super Administrator can review administrator accounts' using errcode = '42501';
+    end if;
+    if caller.school_id is not null and target_user.school_id is not null and target_user.school_id <> caller.school_id then
+      raise exception 'Permission denied: Sub-admins can only review accounts for their own school' using errcode = '42501';
+    end if;
+  elsif caller.role = 'teacher' and caller.is_attendance_teacher is true then
+    if coalesce(target_user.requested_role, target_user.role) <> 'student' then
+      raise exception 'Permission denied: Attendance teachers can only review student registrations' using errcode = '42501';
+    end if;
+    if caller.attendance_class is not null and
+       (target_user.requested_class is null or lower(trim(target_user.requested_class)) <> lower(trim(caller.attendance_class))) then
+      raise exception 'Permission denied: You can only review students for your designated class (%)', caller.attendance_class using errcode = '42501';
+    end if;
+  else
+    raise exception 'Permission denied: You do not have permission to review registrations' using errcode = '42501';
   end if;
 
   -- Update public.users record

@@ -1,11 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:quiz_app/core/constants/app_roles.dart';
 import 'package:quiz_app/core/constants/supabase_constants.dart';
 import 'package:quiz_app/core/utils/role_username.dart';
 import 'package:quiz_app/core/utils/supabase_error_message.dart';
+import 'package:quiz_app/core/utils/validators.dart';
+import 'package:quiz_app/features/auth/presentation/providers/auth_provider.dart';
+import 'package:quiz_app/shared/widgets/animated_press_button.dart';
 import 'package:quiz_app/shared/widgets/dashboard_shell.dart';
 
 class AdminRegisterUserScreen extends ConsumerStatefulWidget {
@@ -25,6 +29,9 @@ class _AdminRegisterUserScreenState
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   final _subjectController = TextEditingController();
+  final _phoneController = TextEditingController();
+  String _selectedGender = 'Male';
+  final List<String> _genders = const ['Male', 'Female', 'Other'];
 
   String _selectedRole = AppRoles.student;
   bool _obscurePassword = true;
@@ -71,6 +78,7 @@ class _AdminRegisterUserScreenState
     _emailController.dispose();
     _passwordController.dispose();
     _subjectController.dispose();
+    _phoneController.dispose();
     super.dispose();
   }
 
@@ -86,11 +94,24 @@ class _AdminRegisterUserScreenState
 
       final schoolRows = results[0] as List;
       final userRows = results[1] as List;
+      final currentUser = ref.read(authStateProvider).user;
+      final isSubadmin = currentUser?.isSuperAdmin != true;
 
       setState(() {
         _schools = List<Map<String, dynamic>>.from(schoolRows);
-        if (_schools.isNotEmpty) {
+        if (isSubadmin && currentUser?.schoolId != null) {
+          _selectedSchoolId = currentUser!.schoolId;
+        } else if (_schools.isNotEmpty && _selectedSchoolId == null) {
           _selectedSchoolId = _schools.first['id'] as String;
+        }
+        if (currentUser?.isAttendanceTeacher == true) {
+          _selectedRole = AppRoles.student;
+          if (currentUser?.attendanceGrade != null && currentUser!.attendanceGrade!.isNotEmpty) {
+            _selectedGrade = currentUser.attendanceGrade!;
+          }
+          if (currentUser?.attendanceClass != null && currentUser!.attendanceClass!.isNotEmpty) {
+            _selectedClass = currentUser.attendanceClass!;
+          }
         }
         _existingUsernames = userRows
             .map((u) => u['username'] as String? ?? '')
@@ -189,6 +210,7 @@ class _AdminRegisterUserScreenState
     var email = _emailController.text.trim();
     final password = _passwordController.text.trim();
     final subject = _subjectController.text.trim();
+    final phone = _phoneController.text.trim();
 
     // Check if username already exists in local list, auto-advance to next sequential number
     if (_existingUsernames.map((u) => u.toLowerCase()).contains(username.toLowerCase())) {
@@ -225,6 +247,8 @@ class _AdminRegisterUserScreenState
             'p_school_id': !AppRoles.isAdmin(_selectedRole) ? _selectedSchoolId : null,
             'p_section_id': !AppRoles.isAdmin(_selectedRole) ? _selectedSectionId : null,
             'p_subject': _selectedRole == AppRoles.teacher && subject.isNotEmpty ? subject : null,
+            'p_phone_number': phone.isNotEmpty ? phone : null,
+            'p_gender': _selectedGender,
             'p_grade': _selectedGrade,
             'p_class': _selectedClass,
             'p_is_attendance_teacher': _selectedRole == AppRoles.teacher && _isAttendanceTeacher,
@@ -281,6 +305,8 @@ class _AdminRegisterUserScreenState
               'password': password,
               if (!AppRoles.isAdmin(_selectedRole)) 'schoolId': _selectedSchoolId,
               if (!AppRoles.isAdmin(_selectedRole)) 'sectionId': _selectedSectionId,
+              if (phone.isNotEmpty) 'phoneNumber': phone,
+              'gender': _selectedGender,
               if (_selectedRole == AppRoles.teacher)
                 'subject': subject.isNotEmpty ? subject : 'General',
               'grade': _selectedGrade,
@@ -318,6 +344,8 @@ class _AdminRegisterUserScreenState
               'is_active': true,
               if (!AppRoles.isAdmin(_selectedRole)) 'school_id': _selectedSchoolId,
               if (!AppRoles.isAdmin(_selectedRole)) 'section_id': _selectedSectionId,
+              if (phone.isNotEmpty) 'phone_number': phone,
+              'gender': _selectedGender,
               if (_selectedRole == AppRoles.teacher) 'subject': subject,
               'assigned_grade': _selectedGrade,
               'assigned_class': _selectedClass,
@@ -338,6 +366,8 @@ class _AdminRegisterUserScreenState
               'is_active': true,
               if (!AppRoles.isAdmin(_selectedRole)) 'school_id': _selectedSchoolId,
               if (!AppRoles.isAdmin(_selectedRole)) 'section_id': _selectedSectionId,
+              if (phone.isNotEmpty) 'phone_number': phone,
+              'gender': _selectedGender,
               'assigned_grade': _selectedGrade,
               'assigned_class': _selectedClass,
               'is_attendance_teacher': _selectedRole == AppRoles.teacher && _isAttendanceTeacher,
@@ -375,8 +405,10 @@ class _AdminRegisterUserScreenState
         _emailController.clear();
         _passwordController.clear();
         _subjectController.clear();
+        _phoneController.clear();
         setState(() {
           _isAttendanceTeacher = false;
+          _selectedGender = 'Male';
         });
       });
     } catch (e) {
@@ -787,24 +819,26 @@ class _AdminRegisterUserScreenState
                           if (selected) _onRoleChanged(AppRoles.student);
                         },
                       ),
-                      ChoiceChip(
-                        avatar: const Icon(Icons.co_present_outlined, size: 16),
-                        label: const Text('Teacher',
-                            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-                        selected: _selectedRole == AppRoles.teacher,
-                        onSelected: (selected) {
-                          if (selected) _onRoleChanged(AppRoles.teacher);
-                        },
-                      ),
-                      ChoiceChip(
-                        avatar: const Icon(Icons.admin_panel_settings_outlined, size: 16),
-                        label: const Text('Administrator',
-                            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-                        selected: _selectedRole == AppRoles.subadmin,
-                        onSelected: (selected) {
-                          if (selected) _onRoleChanged(AppRoles.subadmin);
-                        },
-                      ),
+                      if (ref.watch(authStateProvider).user?.isAttendanceTeacher != true)
+                        ChoiceChip(
+                          avatar: const Icon(Icons.co_present_outlined, size: 16),
+                          label: const Text('Teacher',
+                              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                          selected: _selectedRole == AppRoles.teacher,
+                          onSelected: (selected) {
+                            if (selected) _onRoleChanged(AppRoles.teacher);
+                          },
+                        ),
+                      if (ref.watch(authStateProvider).user?.isSuperAdmin == true)
+                        ChoiceChip(
+                          avatar: const Icon(Icons.admin_panel_settings_outlined, size: 16),
+                          label: const Text('Sub-Admin / Director',
+                              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                          selected: _selectedRole == AppRoles.subadmin,
+                          onSelected: (selected) {
+                            if (selected) _onRoleChanged(AppRoles.subadmin);
+                          },
+                        ),
                     ],
                   ),
                   const SizedBox(height: 20),
@@ -899,6 +933,48 @@ class _AdminRegisterUserScreenState
                   ),
                   const SizedBox(height: 14),
 
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(
+                        flex: 3,
+                        child: TextFormField(
+                          controller: _phoneController,
+                          decoration: const InputDecoration(
+                            labelText: 'Phone Number',
+                            hintText: '+251 91 123 4567',
+                            prefixIcon: Icon(Icons.phone_outlined),
+                          ),
+                          keyboardType: TextInputType.phone,
+                          validator: Validators.phone,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        flex: 2,
+                        child: DropdownButtonFormField<String>(
+                          initialValue: _selectedGender,
+                          decoration: const InputDecoration(
+                            labelText: 'Gender',
+                            prefixIcon: Icon(Icons.person_outline_rounded),
+                          ),
+                          items: _genders
+                              .map(
+                                (g) => DropdownMenuItem(
+                                  value: g,
+                                  child: Text(g),
+                                ),
+                              )
+                              .toList(),
+                          onChanged: (val) {
+                            if (val != null) setState(() => _selectedGender = val);
+                          },
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 14),
+
                   // Dynamic Password Card
                   Container(
                     padding: const EdgeInsets.all(14),
@@ -987,38 +1063,134 @@ class _AdminRegisterUserScreenState
                   ),
                   const SizedBox(height: 20),
 
-                  // School, Grade & Class Allocations (for Student and Teacher)
-                  if (!AppRoles.isAdmin(_selectedRole)) ...[
-                    const Text(
-                      '3. Academic Assignment (Grade & Class)',
-                      style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800),
-                    ),
-                    const SizedBox(height: 12),
+                  // Campus & Academic Allocations
+                  const Text(
+                    '3. Campus & Academic Assignment',
+                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800),
+                  ),
+                  const SizedBox(height: 12),
 
-                    if (_schools.isNotEmpty)
-                      DropdownButtonFormField<String>(
-                        key: ValueKey('admin_reg_school_$_selectedSchoolId'),
-                        initialValue: _selectedSchoolId,
-                        decoration: const InputDecoration(
-                          labelText: 'School Campus',
-                          prefixIcon: Icon(Icons.location_city_rounded),
+                  if (_schools.isNotEmpty) ...[
+                    if (ref.watch(authStateProvider).user?.isSuperAdmin != true)
+                      Container(
+                        padding: const EdgeInsets.all(14),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF10B981).withValues(alpha: 0.12),
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(
+                            color: const Color(0xFF10B981).withValues(alpha: 0.3),
+                          ),
                         ),
-                        items: [
-                          for (final s in _schools)
-                            DropdownMenuItem(
-                              value: s['id'] as String,
-                              child: Text(s['name'] as String? ?? 'School'),
+                        child: Row(
+                          children: [
+                            const Icon(Icons.domain_rounded, color: Color(0xFF047857), size: 22),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  const Text(
+                                    'Institutional Campus (Sub-Admin Scope):',
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w600,
+                                      color: Color(0xFF047857),
+                                    ),
+                                  ),
+                                  Text(
+                                    _schools.firstWhere(
+                                      (s) => s['id'] == _selectedSchoolId,
+                                      orElse: () => {'name': 'Assigned Campus'},
+                                    )['name'] as String,
+                                    style: const TextStyle(
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.w800,
+                                      color: Color(0xFF047857),
+                                    ),
+                                  ),
+                                ],
+                              ),
                             ),
+                          ],
+                        ),
+                      )
+                    else
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Expanded(
+                            child: DropdownButtonFormField<String>(
+                              key: ValueKey('admin_reg_school_$_selectedSchoolId'),
+                              initialValue: _selectedSchoolId,
+                              decoration: const InputDecoration(
+                                labelText: 'School Campus *',
+                                prefixIcon: Icon(Icons.location_city_rounded),
+                              ),
+                              items: [
+                                for (final s in _schools)
+                                  DropdownMenuItem(
+                                    value: s['id'] as String,
+                                    child: Text(s['name'] as String? ?? 'School'),
+                                  ),
+                              ],
+                              onChanged: (val) {
+                                if (val != null) {
+                                  setState(() => _selectedSchoolId = val);
+                                  _loadSectionsForSchool(val);
+                                }
+                              },
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          IconButton.filledTonal(
+                            tooltip: 'Add New School Campus',
+                            onPressed: () async {
+                              await context.push('/admin/schools');
+                              _loadInitialData();
+                            },
+                            icon: const Icon(Icons.add_business_rounded),
+                          ),
                         ],
-                        onChanged: (val) {
-                          if (val != null) {
-                            setState(() => _selectedSchoolId = val);
-                            _loadSectionsForSchool(val);
-                          }
-                        },
                       ),
                     const SizedBox(height: 14),
+                  ],
 
+                  // Attendance Teacher fixed classroom indicator
+                  if (ref.watch(authStateProvider).user?.isAttendanceTeacher == true) ...[
+                    Container(
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF10B981).withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(
+                          color: const Color(0xFF10B981).withValues(alpha: 0.35),
+                        ),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.how_to_reg_rounded, color: Color(0xFF047857), size: 24),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Homeroom Target: Class $_selectedClass ($_selectedGrade)',
+                                  style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13.5, color: Color(0xFF065F46)),
+                                ),
+                                const SizedBox(height: 2),
+                                const Text(
+                                  'As the appointed Attendance Teacher, student registrations created here are registered directly for your homeroom class.',
+                                  style: TextStyle(fontSize: 12, color: Color(0xFF047857)),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                  ] else if (!AppRoles.isAdmin(_selectedRole)) ...[
                     // Grade Dropdown
                     DropdownButtonFormField<String>(
                       initialValue: _selectedGrade,
@@ -1206,34 +1378,48 @@ class _AdminRegisterUserScreenState
                   const SizedBox(height: 20),
 
                   // Submit Button
-                  FilledButton.icon(
-                    style: FilledButton.styleFrom(
-                      backgroundColor: const Color(0xFF0F172A),
-                      foregroundColor: Colors.white,
-                      minimumSize: const Size(double.infinity, 52),
-                      shape: RoundedRectangleBorder(
+                  AnimatedPressButton(
+                    onTap: _isLoading ? null : _registerUser,
+                    child: Container(
+                      height: 52,
+                      width: double.infinity,
+                      decoration: BoxDecoration(
+                        color: _isLoading ? const Color(0xFF334155) : const Color(0xFF0F172A),
                         borderRadius: BorderRadius.circular(14),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withValues(alpha: 0.15),
+                            blurRadius: 10,
+                            offset: const Offset(0, 4),
+                          ),
+                        ],
                       ),
-                    ),
-                    icon: _isLoading
-                        ? const SizedBox(
-                            width: 20,
-                            height: 20,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2.2,
-                              valueColor:
-                                  AlwaysStoppedAnimation<Color>(Colors.white),
+                      alignment: Alignment.center,
+                      child: _isLoading
+                          ? const SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2.2,
+                                valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                              ),
+                            )
+                          : const Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Icon(Icons.person_add_rounded, size: 20, color: Colors.white),
+                                SizedBox(width: 8),
+                                Text(
+                                  'Register & Activate User',
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.w800,
+                                    fontSize: 15,
+                                  ),
+                                ),
+                              ],
                             ),
-                          )
-                        : const Icon(Icons.person_add_rounded, size: 20),
-                    label: Text(
-                      _isLoading ? 'Registering...' : 'Register & Activate User',
-                      style: const TextStyle(
-                        fontWeight: FontWeight.w800,
-                        fontSize: 15,
-                      ),
                     ),
-                    onPressed: _isLoading ? null : _registerUser,
                   ),
                 ],
               ),

@@ -7,6 +7,69 @@ class CourseResourceService {
 
   // Local fallback storage cache in case table hasn't been migrated
   static final List<CourseResource> _fallbackCache = [];
+  static bool _isMaterialsLockedFallback = false;
+
+  /// Checks if study materials (PDFs & Videos) are locked for exam mode
+  Future<bool> isMaterialsLocked({String? schoolId}) async {
+    try {
+      final res = await _supabase.rpc(
+        'get_materials_lock_status',
+        params: {'p_school_id': schoolId},
+      );
+      if (res is Map && res['materials_locked'] != null) {
+        final locked = res['materials_locked'] == true;
+        _isMaterialsLockedFallback = locked;
+        return locked;
+      }
+    } catch (_) {}
+
+    try {
+      if (schoolId != null) {
+        final row = await _supabase
+            .from('schools')
+            .select('materials_locked')
+            .eq('id', schoolId)
+            .maybeSingle();
+        if (row != null && row['materials_locked'] != null) {
+          final locked = row['materials_locked'] == true;
+          _isMaterialsLockedFallback = locked;
+          return locked;
+        }
+      }
+    } catch (_) {}
+
+    return _isMaterialsLockedFallback;
+  }
+
+  /// One-button toggle to lock or unlock study materials (PDFs & Videos)
+  Future<bool> toggleMaterialsLock(bool locked, {String? schoolId}) async {
+    _isMaterialsLockedFallback = locked;
+    try {
+      final res = await _supabase.rpc(
+        'toggle_materials_lock',
+        params: {
+          'p_locked': locked,
+          'p_school_id': schoolId,
+        },
+      );
+      if (res is Map && res['success'] == true) {
+        return res['materials_locked'] == true;
+      }
+    } catch (e) {
+      debugPrint('toggle_materials_lock RPC note: $e');
+    }
+
+    try {
+      if (schoolId != null) {
+        await _supabase
+            .from('schools')
+            .update({'materials_locked': locked})
+            .eq('id', schoolId);
+      }
+    } catch (_) {}
+
+    return locked;
+  }
 
   Future<CourseResource> uploadResource({
     required Uint8List fileBytes,

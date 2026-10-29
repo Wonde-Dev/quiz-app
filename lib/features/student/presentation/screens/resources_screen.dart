@@ -7,7 +7,9 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:quiz_app/core/constants/app_roles.dart';
 import 'package:quiz_app/core/services/course_resource_service.dart';
 import 'package:quiz_app/features/auth/presentation/providers/auth_provider.dart';
+import 'package:go_router/go_router.dart';
 import 'package:quiz_app/shared/models/course_resource.dart';
+import 'package:quiz_app/shared/widgets/animated_press_button.dart';
 import 'package:quiz_app/shared/widgets/dashboard_shell.dart';
 
 class ResourcesScreen extends ConsumerStatefulWidget {
@@ -22,6 +24,8 @@ class _ResourcesScreenState extends ConsumerState<ResourcesScreen> {
   late Future<List<CourseResource>> _resourcesFuture;
   String _searchQuery = '';
   String _filterType = 'all'; // all, pdf, video, worksheet, exam
+  bool _materialsLocked = false;
+  bool _togglingLock = false;
 
   @override
   void initState() {
@@ -36,6 +40,10 @@ class _ResourcesScreenState extends ConsumerState<ResourcesScreen> {
       return;
     }
 
+    _resourceService.isMaterialsLocked(schoolId: user.schoolId).then((locked) {
+      if (mounted) setState(() => _materialsLocked = locked);
+    });
+
     if (user.role == AppRoles.teacher) {
       _resourcesFuture = _resourceService.getResourcesByTeacher(user.id);
     } else {
@@ -43,6 +51,30 @@ class _ResourcesScreenState extends ConsumerState<ResourcesScreen> {
         targetGrade: user.assignedGrade,
         targetSection: user.assignedClass,
         schoolId: user.schoolId,
+      );
+    }
+  }
+
+  Future<void> _toggleMaterialsLock() async {
+    final user = ref.read(authStateProvider).user;
+    setState(() => _togglingLock = true);
+    final nextState = !_materialsLocked;
+    await _resourceService.toggleMaterialsLock(nextState, schoolId: user?.schoolId);
+    if (mounted) {
+      setState(() {
+        _materialsLocked = nextState;
+        _togglingLock = false;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            nextState
+                ? 'Exam Mode Enabled: PDFs and videos are now locked for students.'
+                : 'Exam Mode Disabled: Students can now access study materials.',
+          ),
+          backgroundColor: nextState ? Colors.amber.shade900 : const Color(0xFF10B981),
+          behavior: SnackBarBehavior.floating,
+        ),
       );
     }
   }
@@ -480,11 +512,20 @@ class _ResourcesScreenState extends ConsumerState<ResourcesScreen> {
     final isDark = theme.brightness == Brightness.dark;
     final user = ref.watch(authStateProvider).user;
     final isTeacher = user?.role == AppRoles.teacher;
+    final isFacultyOrAdmin = isTeacher ||
+        user?.isSuperAdmin == true ||
+        user?.role == AppRoles.admin ||
+        user?.role == AppRoles.subadmin;
 
     return DashboardShell(
       title: 'Course Materials & Video Lessons',
       body: RefreshIndicator(
-        onRefresh: () async => setState(() => _loadResources()),
+        onRefresh: () async {
+          setState(() {
+            _loadResources();
+          });
+          await _resourcesFuture;
+        },
         child: ListView(
           padding: const EdgeInsets.all(20),
           children: [
@@ -646,8 +687,199 @@ class _ResourcesScreenState extends ConsumerState<ResourcesScreen> {
             ),
             const SizedBox(height: 20),
 
-            // Search Bar
-            TextField(
+            // Teacher & Administration Exam Lockdown One-Button Toggle
+            if (isFacultyOrAdmin) ...[
+              Container(
+                margin: const EdgeInsets.only(bottom: 20),
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: _materialsLocked
+                      ? const Color(0xFF78350F).withValues(alpha: isDark ? 0.35 : 0.12)
+                      : const Color(0xFF10B981).withValues(alpha: isDark ? 0.18 : 0.08),
+                  borderRadius: BorderRadius.circular(18),
+                  border: Border.all(
+                    color: _materialsLocked ? const Color(0xFFD97706) : const Color(0xFF10B981),
+                    width: 1.5,
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: _materialsLocked ? const Color(0xFFD97706) : const Color(0xFF10B981),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Icon(
+                        _materialsLocked ? Icons.lock_rounded : Icons.lock_open_rounded,
+                        color: Colors.white,
+                        size: 22,
+                      ),
+                    ),
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            _materialsLocked
+                                ? 'EXAM LOCKDOWN: ACTIVE'
+                                : 'STUDY MATERIALS: ONLINE',
+                            style: TextStyle(
+                              fontWeight: FontWeight.w900,
+                              fontSize: 13,
+                              letterSpacing: 0.4,
+                              color: _materialsLocked ? const Color(0xFFD97706) : const Color(0xFF047857),
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            _materialsLocked
+                                ? 'Students cannot view PDFs or videos during the exam period.'
+                                : 'Students can view and download worksheets and watch video lessons.',
+                            style: theme.textTheme.bodySmall,
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    AnimatedPressButton(
+                      onTap: _togglingLock ? null : _toggleMaterialsLock,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                        decoration: BoxDecoration(
+                          color: _materialsLocked ? const Color(0xFF10B981) : const Color(0xFFD97706),
+                          borderRadius: BorderRadius.circular(12),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withValues(alpha: 0.15),
+                              blurRadius: 6,
+                              offset: const Offset(0, 2),
+                            ),
+                          ],
+                        ),
+                        child: _togglingLock
+                            ? const SizedBox(
+                                width: 18,
+                                height: 18,
+                                child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                              )
+                            : Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(
+                                    _materialsLocked ? Icons.lock_open_rounded : Icons.lock_rounded,
+                                    size: 16,
+                                    color: Colors.white,
+                                  ),
+                                  const SizedBox(width: 6),
+                                  Text(
+                                    _materialsLocked ? 'Unlock' : 'Lock for Exam',
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.w800,
+                                      fontSize: 13,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+
+            // Student Exam Lockdown Gate: Students cannot access PDFs or videos during exam time
+            if (user?.role == AppRoles.student && _materialsLocked) ...[
+              Container(
+                margin: const EdgeInsets.only(top: 10),
+                padding: const EdgeInsets.all(32),
+                decoration: BoxDecoration(
+                  color: isDark ? const Color(0xFF1E293B) : Colors.white,
+                  borderRadius: BorderRadius.circular(24),
+                  border: Border.all(color: const Color(0xFFD97706), width: 1.5),
+                  boxShadow: [
+                    BoxShadow(
+                      color: const Color(0xFFD97706).withValues(alpha: 0.15),
+                      blurRadius: 20,
+                      offset: const Offset(0, 8),
+                    ),
+                  ],
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(20),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFD97706).withValues(alpha: 0.15),
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(Icons.lock_clock_rounded, color: Color(0xFFD97706), size: 54),
+                    ),
+                    const SizedBox(height: 20),
+                    Text(
+                      'Study Materials Locked for Exam',
+                      style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w900),
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 10),
+                    Text(
+                      'Your teacher has closed access to PDF worksheets and video lessons while an exam is taking place to ensure exam integrity.\n\nPlease focus on your active quiz!',
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: isDark ? const Color(0xFFCBD5E1) : const Color(0xFF475569),
+                        height: 1.5,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 24),
+                    AnimatedPressButton(
+                      onTap: () => context.go('/student/dashboard'),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
+                        decoration: BoxDecoration(
+                          gradient: const LinearGradient(
+                            colors: [Color(0xFF10B981), Color(0xFF059669)],
+                          ),
+                          borderRadius: BorderRadius.circular(14),
+                          boxShadow: [
+                            BoxShadow(
+                              color: const Color(0xFF10B981).withValues(alpha: 0.35),
+                              blurRadius: 10,
+                              offset: const Offset(0, 4),
+                            ),
+                          ],
+                        ),
+                        child: const Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.quiz_rounded, color: Colors.white, size: 20),
+                            SizedBox(width: 8),
+                            Text(
+                              'Go to Quizzes & Exams',
+                              style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 14),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    TextButton.icon(
+                      onPressed: () {
+                        setState(() {
+                          _loadResources();
+                        });
+                      },
+                      icon: const Icon(Icons.refresh_rounded, size: 18),
+                      label: const Text('Check / Refresh Status'),
+                    ),
+                  ],
+                ),
+              ),
+            ] else ...[
+              // Search Bar
+              TextField(
               decoration: InputDecoration(
                 hintText: 'Search worksheets and video lessons...',
                 prefixIcon: const Icon(Icons.search_rounded),
@@ -784,14 +1016,45 @@ class _ResourcesScreenState extends ConsumerState<ResourcesScreen> {
                   separatorBuilder: (_, _) => const SizedBox(height: 14),
                   itemBuilder: (context, index) {
                     final res = filtered[index];
+                    final canDelete = isTeacher ||
+                        user?.isSuperAdmin == true ||
+                        user?.role == AppRoles.admin ||
+                        (user?.role == AppRoles.subadmin &&
+                            (res.schoolId == null || res.schoolId == user?.schoolId));
+
                     return _ResourceCard(
                       resource: res,
                       isDark: isDark,
                       isTeacher: isTeacher,
-                      onDelete: isTeacher
+                      onDelete: canDelete
                           ? () async {
-                              await _resourceService.deleteResource(res.id);
-                              setState(() => _loadResources());
+                              final confirmed = await showDialog<bool>(
+                                context: context,
+                                builder: (ctx) => AlertDialog(
+                                  title: const Text('Delete Learning Material?'),
+                                  content: Text(
+                                    'Are you sure you want to delete "${res.title}"?\n\n'
+                                    'This document or video prepared for students will be removed permanently.',
+                                  ),
+                                  actions: [
+                                    TextButton(
+                                      onPressed: () => Navigator.pop(ctx, false),
+                                      child: const Text('Cancel'),
+                                    ),
+                                    FilledButton(
+                                      style: FilledButton.styleFrom(backgroundColor: Colors.red),
+                                      onPressed: () => Navigator.pop(ctx, true),
+                                      child: const Text('Delete'),
+                                    ),
+                                  ],
+                                ),
+                              );
+                              if (confirmed == true) {
+                                await _resourceService.deleteResource(res.id);
+                                if (context.mounted) {
+                                  setState(() => _loadResources());
+                                }
+                              }
                             }
                           : null,
                     );
@@ -799,12 +1062,13 @@ class _ResourcesScreenState extends ConsumerState<ResourcesScreen> {
                 );
               },
             ),
-            const SizedBox(height: 32),
           ],
-        ),
+          const SizedBox(height: 32),
+        ],
       ),
-    );
-  }
+    ),
+  );
+}
 }
 
 class _ResourceCard extends StatelessWidget {

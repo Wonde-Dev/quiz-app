@@ -41,6 +41,7 @@ class _ScreenProtectionGateState extends State<ScreenProtectionGate> {
       builder: (context, snapshot) {
         if (snapshot.hasError) {
           return MaterialApp(
+            debugShowCheckedModeBanner: false,
             home: Scaffold(
               body: Center(
                 child: Padding(
@@ -58,6 +59,7 @@ class _ScreenProtectionGateState extends State<ScreenProtectionGate> {
         }
         if (snapshot.connectionState != ConnectionState.done) {
           return const MaterialApp(
+            debugShowCheckedModeBanner: false,
             home: Scaffold(body: Center(child: CircularProgressIndicator())),
           );
         }

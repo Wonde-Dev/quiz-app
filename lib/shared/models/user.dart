@@ -23,6 +23,8 @@ class AppUser {
   final String? assignedGrade; // e.g. 'Grade 9'
   final String? assignedClass; // e.g. '9A'
   final String? assignedSubject; // e.g. 'Mathematics'
+  final String? phoneNumber;
+  final String? gender;
 
   const AppUser({
     required this.id,
@@ -46,6 +48,8 @@ class AppUser {
     this.assignedGrade,
     this.assignedClass,
     this.assignedSubject,
+    this.phoneNumber,
+    this.gender,
   });
 
   factory AppUser.fromMap(Map<String, dynamic> map) {
@@ -83,6 +87,8 @@ class AppUser {
           map['requested_class'] as String?,
       assignedSubject: map['assigned_subject'] as String? ??
           map['requested_subject'] as String?,
+      phoneNumber: map['phone_number'] as String? ?? map['phone'] as String?,
+      gender: map['gender'] as String?,
     );
   }
 
@@ -109,6 +115,8 @@ class AppUser {
       'assigned_grade': assignedGrade,
       'assigned_class': assignedClass,
       'assigned_subject': assignedSubject,
+      'phone_number': phoneNumber,
+      'gender': gender,
     };
   }
 
@@ -134,6 +142,8 @@ class AppUser {
     String? assignedGrade,
     String? assignedClass,
     String? assignedSubject,
+    String? phoneNumber,
+    String? gender,
   }) {
     return AppUser(
       id: id ?? this.id,
@@ -157,6 +167,8 @@ class AppUser {
       assignedGrade: assignedGrade ?? this.assignedGrade,
       assignedClass: assignedClass ?? this.assignedClass,
       assignedSubject: assignedSubject ?? this.assignedSubject,
+      phoneNumber: phoneNumber ?? this.phoneNumber,
+      gender: gender ?? this.gender,
     );
   }
 

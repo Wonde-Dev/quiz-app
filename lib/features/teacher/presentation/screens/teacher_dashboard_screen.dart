@@ -3,7 +3,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:quiz_app/core/constants/app_roles.dart';
+import 'package:quiz_app/core/services/course_resource_service.dart';
 import 'package:quiz_app/features/auth/presentation/providers/auth_provider.dart';
+import 'package:quiz_app/shared/widgets/animated_press_button.dart';
 import 'package:quiz_app/shared/widgets/dashboard_shell.dart';
 
 class TeacherDashboardScreen extends ConsumerStatefulWidget {
@@ -22,6 +24,8 @@ class _TeacherDashboardScreenState
   int _submissionCount = 0;
   List<Map<String, dynamic>> _myQuizzes = [];
   bool _loading = true;
+  bool _materialsLocked = false;
+  bool _togglingLock = false;
   late final AnimationController _pulseController;
   RealtimeChannel? _realtimeChannel;
 
@@ -34,6 +38,30 @@ class _TeacherDashboardScreenState
     )..repeat(reverse: true);
     _loadStats();
     _setupRealtime();
+  }
+
+  Future<void> _toggleMaterialsLock() async {
+    final user = ref.read(authStateProvider).user;
+    setState(() => _togglingLock = true);
+    final nextState = !_materialsLocked;
+    await CourseResourceService().toggleMaterialsLock(nextState, schoolId: user?.schoolId);
+    if (mounted) {
+      setState(() {
+        _materialsLocked = nextState;
+        _togglingLock = false;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            nextState
+                ? 'Exam Mode Enabled: PDFs & video lessons are locked for students!'
+                : 'Exam Mode Disabled: Students can now access study materials.',
+          ),
+          backgroundColor: nextState ? Colors.amber.shade900 : const Color(0xFF10B981),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
   }
 
   void _setupRealtime() {
@@ -80,6 +108,10 @@ class _TeacherDashboardScreenState
       if (mounted) setState(() => _loading = false);
       return;
     }
+
+    CourseResourceService().isMaterialsLocked(schoolId: user.schoolId).then((locked) {
+      if (mounted) setState(() => _materialsLocked = locked);
+    });
 
     try {
       var studentsQuery = client
@@ -331,59 +363,70 @@ class _TeacherDashboardScreenState
                           spacing: 10,
                           runSpacing: 8,
                           children: [
-                            FilledButton.icon(
-                              style: FilledButton.styleFrom(
-                                backgroundColor: const Color(0xFF0F172A),
-                                foregroundColor: Colors.white,
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 16,
-                                  vertical: 12,
-                                ),
-                                shape: RoundedRectangleBorder(
+                            AnimatedPressButton(
+                              onTap: () => context.push('/teacher/quizzes/new'),
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFF0F172A),
                                   borderRadius: BorderRadius.circular(12),
                                 ),
+                                child: const Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(Icons.add_circle_outline_rounded, size: 18, color: Colors.white),
+                                    SizedBox(width: 8),
+                                    Text(
+                                      'Prepare New Quiz',
+                                      style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
+                                    ),
+                                  ],
+                                ),
                               ),
-                              icon: const Icon(Icons.add_circle_outline_rounded, size: 18),
-                              label: const Text('Prepare New Quiz'),
-                              onPressed: () => context.push('/teacher/quizzes/new'),
                             ),
-                            OutlinedButton.icon(
-                              style: OutlinedButton.styleFrom(
-                                backgroundColor: Colors.white.withValues(alpha: 0.15),
-                                foregroundColor: Colors.white,
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 16,
-                                  vertical: 12,
-                                ),
-                                shape: RoundedRectangleBorder(
+                            AnimatedPressButton(
+                              onTap: () => context.push('/teacher/results'),
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                                decoration: BoxDecoration(
+                                  color: Colors.white.withValues(alpha: 0.15),
                                   borderRadius: BorderRadius.circular(12),
+                                  border: Border.all(color: Colors.white38),
                                 ),
-                                side: const BorderSide(
-                                  color: Colors.white38,
+                                child: const Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(Icons.fact_check_rounded, size: 18, color: Colors.white),
+                                    SizedBox(width: 8),
+                                    Text(
+                                      'Evaluate Submissions',
+                                      style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
+                                    ),
+                                  ],
                                 ),
                               ),
-                              icon: const Icon(Icons.fact_check_rounded, size: 18),
-                              label: const Text('Evaluate Submissions'),
-                              onPressed: () => context.push('/teacher/results'),
                             ),
-                            OutlinedButton.icon(
-                              style: OutlinedButton.styleFrom(
-                                backgroundColor: Colors.white.withValues(alpha: 0.15),
-                                foregroundColor: Colors.white,
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 16,
-                                  vertical: 12,
-                                ),
-                                shape: RoundedRectangleBorder(
+                            AnimatedPressButton(
+                              onTap: () => context.push('/resources'),
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                                decoration: BoxDecoration(
+                                  color: Colors.white.withValues(alpha: 0.15),
                                   borderRadius: BorderRadius.circular(12),
+                                  border: Border.all(color: Colors.white38),
                                 ),
-                                side: const BorderSide(
-                                  color: Colors.white38,
+                                child: const Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(Icons.video_library_rounded, size: 18, color: Colors.white),
+                                    SizedBox(width: 8),
+                                    Text(
+                                      'Worksheets & Videos',
+                                      style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
+                                    ),
+                                  ],
                                 ),
                               ),
-                              icon: const Icon(Icons.video_library_rounded, size: 18),
-                              label: const Text('Worksheets & Videos'),
-                              onPressed: () => context.push('/resources'),
                             ),
                           ],
                         ),
@@ -393,7 +436,108 @@ class _TeacherDashboardScreenState
                 ],
               ),
             ),
-            const SizedBox(height: 24),
+            const SizedBox(height: 16),
+
+            // Exam Mode One-Button Toggle Card
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: _materialsLocked
+                    ? const Color(0xFF78350F).withValues(alpha: isDark ? 0.35 : 0.12)
+                    : const Color(0xFF10B981).withValues(alpha: isDark ? 0.18 : 0.08),
+                borderRadius: BorderRadius.circular(18),
+                border: Border.all(
+                  color: _materialsLocked ? const Color(0xFFD97706) : const Color(0xFF10B981),
+                  width: 1.5,
+                ),
+              ),
+              child: Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: _materialsLocked ? const Color(0xFFD97706) : const Color(0xFF10B981),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Icon(
+                      _materialsLocked ? Icons.lock_rounded : Icons.lock_open_rounded,
+                      color: Colors.white,
+                      size: 22,
+                    ),
+                  ),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          _materialsLocked
+                              ? 'EXAM LOCKDOWN: ACTIVE'
+                              : 'STUDY MATERIALS: ACCESSIBLE',
+                          style: TextStyle(
+                            fontWeight: FontWeight.w900,
+                            fontSize: 13,
+                            letterSpacing: 0.3,
+                            color: _materialsLocked ? const Color(0xFFD97706) : const Color(0xFF047857),
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          _materialsLocked
+                              ? 'PDFs and videos are blocked for all students during quiz time.'
+                              : 'Students can open and watch worksheets & video lessons.',
+                          style: theme.textTheme.bodySmall,
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  AnimatedPressButton(
+                    onTap: _togglingLock ? null : _toggleMaterialsLock,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                      decoration: BoxDecoration(
+                        color: _materialsLocked ? const Color(0xFF10B981) : const Color(0xFFD97706),
+                        borderRadius: BorderRadius.circular(12),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withValues(alpha: 0.15),
+                            blurRadius: 6,
+                            offset: const Offset(0, 2),
+                          ),
+                        ],
+                      ),
+                      child: _togglingLock
+                          ? const SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                            )
+                          : Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  _materialsLocked ? Icons.lock_open_rounded : Icons.lock_clock_rounded,
+                                  size: 16,
+                                  color: Colors.white,
+                                ),
+                                const SizedBox(width: 6),
+                                Text(
+                                  _materialsLocked ? 'Unlock' : 'Lock for Exam',
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.w800,
+                                    fontSize: 13,
+                                  ),
+                                ),
+                              ],
+                            ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
 
             // Live metrics
             Text(

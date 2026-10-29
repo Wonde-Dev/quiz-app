@@ -34,4 +34,16 @@ class Validators {
     }
     return null;
   }
+
+  static String? phone(String? value) {
+    if (value == null || value.trim().isEmpty) {
+      return 'Phone number is required';
+    }
+    final clean = value.replaceAll(RegExp(r'[\s\-()]'), '');
+    final phoneRegex = RegExp(r'^\+?[0-9]{9,15}$');
+    if (!phoneRegex.hasMatch(clean)) {
+      return 'Enter a valid phone number (e.g. +251 91 123 4567 or 0911234567)';
+    }
+    return null;
+  }
 }

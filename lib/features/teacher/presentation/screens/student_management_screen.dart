@@ -41,9 +41,15 @@ class _StudentManagementScreenState
     super.dispose();
   }
 
-  bool get _isAdmin => ref.read(authStateProvider).user?.role == AppRoles.admin;
+  bool get _isAdmin =>
+      ref.read(authStateProvider).user?.role == AppRoles.admin ||
+      ref.read(authStateProvider).user?.role == AppRoles.subadmin;
 
   Future<List<Map<String, dynamic>>> _loadAccounts() async {
+    final currentUser = ref.read(authStateProvider).user;
+    final isSuperAdmin = currentUser?.isSuperAdmin == true;
+    final isSubadmin = currentUser?.role == AppRoles.subadmin || (!isSuperAdmin && _isAdmin);
+
     try {
       final response = await Supabase.instance.client.functions.invoke(
         'manage-account',
@@ -51,9 +57,15 @@ class _StudentManagementScreenState
       );
       final data = response.data;
       if (data is Map<String, dynamic> && data['accounts'] is List) {
-        return (data['accounts'] as List)
+        var accounts = (data['accounts'] as List)
             .map((account) => Map<String, dynamic>.from(account as Map))
             .toList();
+        if (isSubadmin && currentUser?.schoolId != null) {
+          accounts = accounts
+              .where((a) => a['school_id'] == currentUser!.schoolId)
+              .toList();
+        }
+        return accounts;
       }
     } catch (e) {
       debugPrint('manage-account list fallback: $e');
@@ -66,10 +78,15 @@ class _StudentManagementScreenState
         .select('id, username, full_name, role, requested_role, school_id')
         .neq('is_active', false);
 
-    if (!_isAdmin) {
+    final userSchoolId = currentUser?.schoolId;
+    if (isSubadmin && userSchoolId != null) {
+      query = query.eq('school_id', userSchoolId);
+      if (_filterRole != 'all') {
+        query = query.eq('role', _filterRole);
+      }
+    } else if (!_isAdmin) {
       query = query.eq('role', AppRoles.student);
-      final schoolId = ref.read(authStateProvider).user?.schoolId;
-      if (schoolId != null) query = query.eq('school_id', schoolId);
+      if (userSchoolId != null) query = query.eq('school_id', userSchoolId);
     } else if (_filterRole != 'all') {
       query = query.eq('role', _filterRole);
     }

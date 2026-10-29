@@ -61,7 +61,13 @@ class _ActivityListState extends State<_ActivityList> {
         }
         final items = snapshot.data!;
         return RefreshIndicator(
-          onRefresh: () async => setState(() => _activities = _load()),
+          onRefresh: () async {
+            final future = _load();
+            setState(() {
+              _activities = future;
+            });
+            await future;
+          },
           child: ListView(
             padding: const EdgeInsets.all(24),
             children: [

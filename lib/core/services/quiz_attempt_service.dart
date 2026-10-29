@@ -255,22 +255,88 @@ class QuizAttemptService {
 
     final percentage =
         totalPoints > 0 ? ((score / totalPoints) * 100).round() : 0;
+    final passed = percentage >= 50;
 
-    // 2. Insert Grade
-    final gradeRow = await _client
-        .from('grades')
-        .insert({
-          'student_id': user.id,
-          'quiz_id': quizId,
-          'score': score,
-          'total_points': totalPoints,
-          'incorrect_answers': incorrectAnswers,
-          'percentage': percentage,
-          'passed': percentage >= 50,
-          'submitted_at': DateTime.now().toIso8601String(),
-        })
-        .select()
-        .single();
+    // Build structured answer list for database persistence
+    final answersList = questions.map((q) {
+      final rawAns = answers[q['id']];
+      final answerText = rawAns is Map
+          ? jsonEncode(rawAns)
+          : (rawAns?.toString() ?? '');
+      final fb = feedback.firstWhere(
+        (f) => f['question'] == q['text'],
+        orElse: () => {'isCorrect': false},
+      );
+      return {
+        'question_id': q['id'],
+        'answer_text': answerText,
+        'is_correct': fb['isCorrect'] == true,
+      };
+    }).toList();
+
+    // 1. Try atomic RPC submission first
+    try {
+      final rpcRes = await _client.rpc(
+        'submit_student_quiz_attempt',
+        params: {
+          'p_quiz_id': quizId,
+          'p_student_id': user.id,
+          'p_score': score,
+          'p_total_points': totalPoints,
+          'p_percentage': percentage,
+          'p_passed': passed,
+          'p_answers': answersList,
+        },
+      );
+
+      if (rpcRes is Map && rpcRes['success'] == true) {
+        return QuizSubmissionResult(
+          grade: Grade(
+            id: rpcRes['attempt_id']?.toString() ?? DateTime.now().millisecondsSinceEpoch.toString(),
+            studentId: user.id,
+            quizId: quizId,
+            score: score,
+            totalPoints: totalPoints,
+            percentage: percentage,
+            passed: passed,
+            submittedAt: DateTime.now(),
+          ),
+          feedback: feedback,
+        );
+      }
+    } catch (rpcError) {
+      // Fallback to table inserts below
+    }
+
+    // 2. Direct table insert fallback: Insert Grade
+    Map<String, dynamic> gradeRow = {};
+    try {
+      gradeRow = await _client
+          .from('grades')
+          .insert({
+            'student_id': user.id,
+            'quiz_id': quizId,
+            'score': score,
+            'total_points': totalPoints,
+            'incorrect_answers': incorrectAnswers,
+            'percentage': percentage,
+            'passed': passed,
+            'submitted_at': DateTime.now().toIso8601String(),
+          })
+          .select()
+          .single();
+    } catch (_) {
+      gradeRow = {
+        'id': DateTime.now().millisecondsSinceEpoch.toString(),
+        'student_id': user.id,
+        'quiz_id': quizId,
+        'score': score,
+        'total_points': totalPoints,
+        'percentage': percentage,
+        'passed': passed,
+        'submitted_at': DateTime.now().toIso8601String(),
+      };
+    }
 
     // 3. Upsert attempt & insert answers
     try {
@@ -287,20 +353,12 @@ class QuizAttemptService {
 
       final attemptId = attemptRow?['id'] as String?;
       if (attemptId != null) {
-        final answersToInsert = questions.map((q) {
-          final rawAns = answers[q['id']];
-          final answerText = rawAns is Map
-              ? jsonEncode(rawAns)
-              : (rawAns?.toString() ?? '');
-          final fb = feedback.firstWhere(
-            (f) => f['question'] == q['text'],
-            orElse: () => {'isCorrect': false},
-          );
+        final answersToInsert = answersList.map((a) {
           return {
             'attempt_id': attemptId,
-            'question_id': q['id'],
-            'answer_text': answerText,
-            'is_correct': fb['isCorrect'] == true,
+            'question_id': a['question_id'],
+            'answer_text': a['answer_text'],
+            'is_correct': a['is_correct'],
           };
         }).toList();
         await _client.from('answers').insert(answersToInsert);

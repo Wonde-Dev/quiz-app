@@ -15,4 +15,18 @@ void main() {
       expect(Validators.email('  '), 'Email is required');
     });
   });
+
+  group('Validators.phone', () {
+    test('accepts valid international and local phone numbers', () {
+      expect(Validators.phone('+251 91 123 4567'), isNull);
+      expect(Validators.phone('0911234567'), isNull);
+      expect(Validators.phone('+1 (555) 123-4567'), isNull);
+    });
+
+    test('rejects short or invalid phone numbers', () {
+      expect(Validators.phone('12345'), isNotNull);
+      expect(Validators.phone('phone12345'), isNotNull);
+      expect(Validators.phone(''), 'Phone number is required');
+    });
+  });
 }

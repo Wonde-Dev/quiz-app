@@ -160,6 +160,8 @@ class AuthService {
     String? requestedGrade,
     String? requestedClass,
     String? requestedSubject,
+    String? phoneNumber,
+    String? gender,
   }) async {
     return _supabase.auth.signUp(
       email: email.trim().toLowerCase(),
@@ -173,6 +175,8 @@ class AuthService {
         'requested_grade': requestedGrade,
         'requested_class': requestedClass,
         'requested_subject': requestedSubject,
+        'phone_number': phoneNumber,
+        'gender': gender,
       },
     );
   }

@@ -188,6 +188,8 @@ class AuthNotifier extends Notifier<AuthState> {
     String? requestedGrade,
     String? requestedClass,
     String? requestedSubject,
+    String? phoneNumber,
+    String? gender,
   }) async {
     state = const AuthState(isLoading: true);
     try {
@@ -202,6 +204,8 @@ class AuthNotifier extends Notifier<AuthState> {
         requestedGrade: requestedGrade,
         requestedClass: requestedClass,
         requestedSubject: requestedSubject,
+        phoneNumber: phoneNumber,
+        gender: gender,
       );
       if (response.user == null) {
         throw StateError('The registration did not return a user account.');

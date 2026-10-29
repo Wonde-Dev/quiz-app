@@ -14,6 +14,7 @@ import 'package:quiz_app/features/admin/presentation/screens/admin_register_user
 import 'package:quiz_app/features/admin/presentation/screens/course_assignment_screen.dart';
 import 'package:quiz_app/features/admin/presentation/screens/audit_log_screen.dart';
 import 'package:quiz_app/features/admin/presentation/screens/teacher_management_screen.dart';
+import 'package:quiz_app/features/admin/presentation/screens/school_management_screen.dart';
 import 'package:quiz_app/features/about/presentation/screens/about_screen.dart';
 import 'package:quiz_app/features/functions/presentation/screens/functions_screen.dart';
 import 'package:quiz_app/features/profile/presentation/screens/profile_screen.dart';
@@ -82,6 +83,14 @@ final routerProvider = Provider<GoRouter>((ref) {
       }
 
       if (user.role == AppRoles.admin || user.role == AppRoles.subadmin) return null;
+
+      // Attendance teachers have authority to review approvals and register students for their assigned class
+      if (user.role == AppRoles.teacher && user.isAttendanceTeacher) {
+        if (location == '/admin/approvals' || location == '/admin/register-user') {
+          return null;
+        }
+      }
+
       if (location.startsWith('/admin') ||
           (user.role == AppRoles.student && location.startsWith('/teacher')) ||
           (user.role == AppRoles.teacher && location.startsWith('/student'))) {
@@ -142,6 +151,10 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/admin/teachers',
         builder: (context, state) => const TeacherManagementScreen(),
+      ),
+      GoRoute(
+        path: '/admin/schools',
+        builder: (context, state) => const SchoolManagementScreen(),
       ),
       GoRoute(
         path: '/teacher/dashboard',

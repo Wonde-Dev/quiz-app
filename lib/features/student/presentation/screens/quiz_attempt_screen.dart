@@ -25,6 +25,8 @@ class _QuizAttemptScreenState extends State<QuizAttemptScreen>
   final _service = QuizAttemptService();
   late Future<QuizAttemptData> _attempt;
   final Map<String, dynamic> _answers = {};
+  final Set<int> _flaggedQuestions = {};
+  bool _warnedAt5Minutes = false;
   Timer? _timer;
   QuizAttemptData? _data;
   int _currentIndex = 0;
@@ -131,12 +133,230 @@ class _QuizAttemptScreenState extends State<QuizAttemptScreen>
       if (_secondsRemaining! <= 1) {
         timer.cancel();
         if (!_isSubmitting) {
-          unawaited(_submit());
+          unawaited(_submit(autoSubmittedReason: 'Time has expired. Exam auto-submitted.'));
         }
       } else {
-        setState(() => _secondsRemaining = _secondsRemaining! - 1);
+        setState(() {
+          _secondsRemaining = _secondsRemaining! - 1;
+          if (_secondsRemaining == 300 && !_warnedAt5Minutes) {
+            _warnedAt5Minutes = true;
+            _showFiveMinuteWarning();
+          }
+        });
       }
     });
+  }
+
+  void _showFiveMinuteWarning() {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Row(
+          children: [
+            Icon(Icons.alarm_on_rounded, color: Colors.white),
+            SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                '5 minutes remaining! Please review and finalize your answers.',
+                style: TextStyle(fontWeight: FontWeight.bold),
+              ),
+            ),
+          ],
+        ),
+        backgroundColor: Colors.orange,
+        duration: Duration(seconds: 5),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
+
+  bool _isQuestionAnswered(String questionId) {
+    final val = _answers[questionId];
+    if (val == null) return false;
+    if (val is String && val.trim().isEmpty) return false;
+    return true;
+  }
+
+  void _openQuestionNavigator(QuizAttemptData data) {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (ctx) {
+        final total = data.questions.length;
+        final answeredCount = data.questions.where((q) => _isQuestionAnswered(q.id)).length;
+        final flaggedCount = _flaggedQuestions.length;
+        final unansweredCount = total - answeredCount;
+
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Center(
+                  child: Container(
+                    width: 40,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: Colors.grey.withValues(alpha: 0.4),
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 14),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text(
+                      'Question Navigator',
+                      style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.close_rounded),
+                      onPressed: () => Navigator.pop(ctx),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceAround,
+                  children: [
+                    _navigatorLegend(
+                      color: const Color(0xFF10B981),
+                      label: 'Answered ($answeredCount)',
+                    ),
+                    _navigatorLegend(
+                      color: Colors.amber,
+                      label: 'Flagged ($flaggedCount)',
+                    ),
+                    _navigatorLegend(
+                      color: Colors.grey.shade400,
+                      label: 'Unanswered ($unansweredCount)',
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                const Divider(height: 1),
+                const SizedBox(height: 16),
+                ConstrainedBox(
+                  constraints: BoxConstraints(
+                    maxHeight: MediaQuery.of(context).size.height * 0.45,
+                  ),
+                  child: GridView.builder(
+                    shrinkWrap: true,
+                    gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                      crossAxisCount: 5,
+                      mainAxisSpacing: 10,
+                      crossAxisSpacing: 10,
+                      childAspectRatio: 1.1,
+                    ),
+                    itemCount: total,
+                    itemBuilder: (context, idx) {
+                      final isAnswered = _isQuestionAnswered(data.questions[idx].id);
+                      final isFlagged = _flaggedQuestions.contains(idx);
+                      final isCurrent = idx == _currentIndex;
+
+                      Color bgColor = Colors.grey.shade100;
+                      Color textColor = Colors.black87;
+                      Color borderColor = Colors.transparent;
+
+                      if (isAnswered) {
+                        bgColor = const Color(0xFF10B981).withValues(alpha: 0.18);
+                        textColor = const Color(0xFF047857);
+                      }
+                      if (isFlagged) {
+                        bgColor = Colors.amber.withValues(alpha: 0.2);
+                        textColor = Colors.amber.shade900;
+                      }
+                      if (isCurrent) {
+                        borderColor = Theme.of(context).colorScheme.primary;
+                      }
+
+                      return InkWell(
+                        borderRadius: BorderRadius.circular(12),
+                        onTap: () {
+                          Navigator.pop(ctx);
+                          setState(() => _currentIndex = idx);
+                        },
+                        child: Container(
+                          decoration: BoxDecoration(
+                            color: bgColor,
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(
+                              color: isCurrent ? borderColor : Colors.grey.shade300,
+                              width: isCurrent ? 2 : 1,
+                            ),
+                          ),
+                          child: Stack(
+                            alignment: Alignment.center,
+                            children: [
+                              Text(
+                                '${idx + 1}',
+                                style: TextStyle(
+                                  fontWeight: isCurrent ? FontWeight.w900 : FontWeight.bold,
+                                  fontSize: 15,
+                                  color: textColor,
+                                ),
+                              ),
+                              if (isFlagged)
+                                const Positioned(
+                                  top: 3,
+                                  right: 3,
+                                  child: Icon(Icons.flag_rounded, size: 12, color: Colors.amber),
+                                ),
+                              if (isAnswered && !isFlagged)
+                                const Positioned(
+                                  top: 3,
+                                  right: 3,
+                                  child: Icon(Icons.check_rounded, size: 12, color: Color(0xFF059669)),
+                                ),
+                            ],
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+                const SizedBox(height: 16),
+                FilledButton.icon(
+                  onPressed: () {
+                    Navigator.pop(ctx);
+                    _confirmAndSubmit();
+                  },
+                  icon: const Icon(Icons.check_circle_outline, size: 18),
+                  label: const Text('Finish & Submit Exam'),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _navigatorLegend({required Color color, required String label}) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 10,
+          height: 10,
+          decoration: BoxDecoration(
+            color: color,
+            shape: BoxShape.circle,
+          ),
+        ),
+        const SizedBox(width: 5),
+        Text(
+          label,
+          style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+        ),
+      ],
+    );
   }
 
   Future<void> _confirmAndSubmit() async {
@@ -343,6 +563,11 @@ class _QuizAttemptScreenState extends State<QuizAttemptScreen>
                 title: Text(data.quiz.title),
                 automaticallyImplyLeading: false,
                 actions: [
+                  IconButton(
+                    icon: const Icon(Icons.grid_view_rounded),
+                    tooltip: 'Exam Question Navigator',
+                    onPressed: () => _openQuestionNavigator(data),
+                  ),
                   if (_secondsRemaining != null)
                     Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -490,11 +715,43 @@ class _QuizAttemptScreenState extends State<QuizAttemptScreen>
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      Text(
-                        'Question ${_currentIndex + 1} of ${data.questions.length}',
-                        style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                              fontWeight: FontWeight.bold,
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            'Question ${_currentIndex + 1} of ${data.questions.length}',
+                            style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                                  fontWeight: FontWeight.bold,
+                                ),
+                          ),
+                          const SizedBox(width: 8),
+                          IconButton(
+                            visualDensity: VisualDensity.compact,
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints(),
+                            icon: Icon(
+                              _flaggedQuestions.contains(_currentIndex)
+                                  ? Icons.flag_rounded
+                                  : Icons.flag_outlined,
+                              color: _flaggedQuestions.contains(_currentIndex)
+                                  ? Colors.amber.shade700
+                                  : Colors.grey,
+                              size: 20,
                             ),
+                            tooltip: _flaggedQuestions.contains(_currentIndex)
+                                ? 'Flagged for review (Tap to unflag)'
+                                : 'Flag for review',
+                            onPressed: () {
+                              setState(() {
+                                if (_flaggedQuestions.contains(_currentIndex)) {
+                                  _flaggedQuestions.remove(_currentIndex);
+                                } else {
+                                  _flaggedQuestions.add(_currentIndex);
+                                }
+                              });
+                            },
+                          ),
+                        ],
                       ),
                       Text(
                         question.type == 'short_answer' || question.type == 'description'

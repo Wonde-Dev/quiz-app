@@ -4,6 +4,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:quiz_app/core/constants/app_roles.dart';
 import 'package:quiz_app/core/services/student_password_reset_service.dart';
+import 'package:quiz_app/features/auth/presentation/providers/auth_provider.dart';
+import 'package:quiz_app/shared/widgets/animated_press_button.dart';
 import 'package:quiz_app/shared/widgets/dashboard_shell.dart';
 
 class TeacherManagementScreen extends ConsumerStatefulWidget {
@@ -19,6 +21,8 @@ class _TeacherManagementScreenState
   final _searchController = TextEditingController();
   final _resetService = StudentPasswordResetService();
   late Future<List<Map<String, dynamic>>> _teachersFuture;
+  List<Map<String, dynamic>> _schools = [];
+  String? _selectedSchoolId;
   bool _isResetting = false;
   String? _error;
 
@@ -36,15 +40,29 @@ class _TeacherManagementScreenState
 
   Future<List<Map<String, dynamic>>> _loadTeachers() async {
     final client = Supabase.instance.client;
-    final rows = await client
+    final currentUser = ref.read(authStateProvider).user;
+    final isSubadmin = currentUser?.isSuperAdmin != true;
+    final targetSchoolId = isSubadmin ? currentUser?.schoolId : _selectedSchoolId;
+
+    try {
+      final sRows = await client.from('schools').select('id, name').order('name');
+      _schools = List<Map<String, dynamic>>.from(sRows);
+    } catch (_) {}
+
+    var query = client
         .from('users')
         .select(
           'id, full_name, username, email, school_id, approval_status, is_active, created_at, '
           'is_attendance_teacher, attendance_grade, attendance_class, assigned_grade, assigned_class, assigned_subject, requested_subject, schools(name)',
         )
         .eq('role', AppRoles.teacher)
-        .neq('is_active', false)
-        .order('full_name', ascending: true);
+        .neq('is_active', false);
+
+    if (targetSchoolId != null && targetSchoolId.isNotEmpty) {
+      query = query.eq('school_id', targetSchoolId);
+    }
+
+    final rows = await query.order('full_name', ascending: true);
     return List<Map<String, dynamic>>.from(rows);
   }
 
@@ -262,7 +280,9 @@ class _TeacherManagementScreenState
       }
 
       if (!mounted) return;
-      setState(() => _teachersFuture = _loadTeachers());
+      setState(() {
+        _teachersFuture = _loadTeachers();
+      });
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Account for $name was removed.'),
@@ -473,7 +493,9 @@ class _TeacherManagementScreenState
       }
 
       if (!mounted) return;
-      setState(() => _teachersFuture = _loadTeachers());
+      setState(() {
+        _teachersFuture = _loadTeachers();
+      });
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Faculty account updated successfully!'),
@@ -496,7 +518,13 @@ class _TeacherManagementScreenState
     return DashboardShell(
       title: 'Teacher Directory & Credentials',
       body: RefreshIndicator(
-        onRefresh: () async => setState(() => _teachersFuture = _loadTeachers()),
+        onRefresh: () async {
+          final future = _loadTeachers();
+          setState(() {
+            _teachersFuture = future;
+          });
+          await future;
+        },
         child: ListView(
           padding: const EdgeInsets.all(20),
           children: [
@@ -577,6 +605,67 @@ class _TeacherManagementScreenState
             ),
             const SizedBox(height: 18),
 
+            // Campus Scope / Filter
+            if (_schools.isNotEmpty) ...[
+              if (ref.watch(authStateProvider).user?.isSuperAdmin == true) ...[
+                SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
+                    children: [
+                      ChoiceChip(
+                        label: const Text('All Schools'),
+                        selected: _selectedSchoolId == null,
+                        onSelected: (_) {
+                          setState(() {
+                            _selectedSchoolId = null;
+                            _teachersFuture = _loadTeachers();
+                          });
+                        },
+                      ),
+                      const SizedBox(width: 8),
+                      for (final s in _schools) ...[
+                        ChoiceChip(
+                          label: Text(s['name'] as String? ?? 'School'),
+                          selected: _selectedSchoolId == s['id'],
+                          onSelected: (sel) {
+                            setState(() {
+                              _selectedSchoolId = sel ? s['id'] as String : null;
+                              _teachersFuture = _loadTeachers();
+                            });
+                          },
+                        ),
+                        const SizedBox(width: 8),
+                      ],
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 12),
+              ] else ...[
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF10B981).withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.domain_rounded, size: 16, color: Color(0xFF047857)),
+                      const SizedBox(width: 8),
+                      Text(
+                        'School: ${_schools.firstWhere((s) => s['id'] == ref.watch(authStateProvider).user?.schoolId, orElse: () => {'name': 'Your Campus'})['name']}',
+                        style: const TextStyle(
+                          color: Color(0xFF047857),
+                          fontWeight: FontWeight.w800,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 12),
+              ],
+            ],
+
             // Search Bar
             TextField(
               controller: _searchController,
@@ -632,7 +721,9 @@ class _TeacherManagementScreenState
                           Text('Could not load teachers: ${snapshot.error}'),
                           const SizedBox(height: 12),
                           FilledButton(
-                            onPressed: () => setState(() => _teachersFuture = _loadTeachers()),
+                            onPressed: () => setState(() {
+                              _teachersFuture = _loadTeachers();
+                            }),
                             child: const Text('Retry'),
                           ),
                         ],
@@ -826,38 +917,44 @@ class _TeacherDirectoryCard extends StatelessWidget {
                   const SizedBox(height: 10),
                   Row(
                     children: [
-                      FilledButton.tonalIcon(
-                        style: FilledButton.styleFrom(
-                          minimumSize: const Size(0, 34),
-                          padding: const EdgeInsets.symmetric(horizontal: 12),
+                      AnimatedPressButton(
+                        child: FilledButton.tonalIcon(
+                          style: FilledButton.styleFrom(
+                            minimumSize: const Size(0, 34),
+                            padding: const EdgeInsets.symmetric(horizontal: 12),
+                          ),
+                          onPressed: isResetting ? null : onResetPassword,
+                          icon: const Icon(Icons.lock_reset_rounded, size: 16),
+                          label: const Text('Reset Password', style: TextStyle(fontSize: 12)),
                         ),
-                        onPressed: isResetting ? null : onResetPassword,
-                        icon: const Icon(Icons.lock_reset_rounded, size: 16),
-                        label: const Text('Reset Password', style: TextStyle(fontSize: 12)),
                       ),
                       const SizedBox(width: 8),
-                      IconButton.outlined(
-                        tooltip: 'Edit faculty profile & attendance assignment',
-                        style: IconButton.styleFrom(
-                          foregroundColor: const Color(0xFF10B981),
-                          side: const BorderSide(color: Color(0xFF6EE7B7)),
-                          minimumSize: const Size(34, 34),
-                          padding: const EdgeInsets.all(6),
+                      AnimatedPressButton(
+                        child: IconButton.outlined(
+                          tooltip: 'Edit faculty profile & attendance assignment',
+                          style: IconButton.styleFrom(
+                            foregroundColor: const Color(0xFF10B981),
+                            side: const BorderSide(color: Color(0xFF6EE7B7)),
+                            minimumSize: const Size(34, 34),
+                            padding: const EdgeInsets.all(6),
+                          ),
+                          onPressed: isResetting ? null : onEdit,
+                          icon: const Icon(Icons.edit_outlined, size: 16),
                         ),
-                        onPressed: isResetting ? null : onEdit,
-                        icon: const Icon(Icons.edit_outlined, size: 16),
                       ),
                       const SizedBox(width: 8),
-                      IconButton.outlined(
-                        tooltip: 'Delete faculty account',
-                        style: IconButton.styleFrom(
-                          foregroundColor: const Color(0xFFEF4444),
-                          side: const BorderSide(color: Color(0xFFFECACA)),
-                          minimumSize: const Size(34, 34),
-                          padding: const EdgeInsets.all(6),
+                      AnimatedPressButton(
+                        child: IconButton.outlined(
+                          tooltip: 'Delete faculty account',
+                          style: IconButton.styleFrom(
+                            foregroundColor: const Color(0xFFEF4444),
+                            side: const BorderSide(color: Color(0xFFFECACA)),
+                            minimumSize: const Size(34, 34),
+                            padding: const EdgeInsets.all(6),
+                          ),
+                          onPressed: isResetting ? null : onDelete,
+                          icon: const Icon(Icons.delete_outline_rounded, size: 16),
                         ),
-                        onPressed: isResetting ? null : onDelete,
-                        icon: const Icon(Icons.delete_outline_rounded, size: 16),
                       ),
                     ],
                   ),

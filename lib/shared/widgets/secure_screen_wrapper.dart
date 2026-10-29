@@ -1,4 +1,5 @@
 import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:quiz_app/core/services/security/app_lifecycle_service.dart';
 import 'package:quiz_app/core/services/security/screenshot_service.dart';
@@ -123,7 +124,11 @@ class _SecureScreenWrapperState extends State<SecureScreenWrapper> {
     // 2. Lifecycle backgrounding warning dialog
     if (_lifecycleWarnings > 0) {
       return AlertDialog(
-        icon: const Icon(Icons.warning_amber_rounded, size: 40, color: Colors.amber),
+        icon: const Icon(
+          Icons.warning_amber_rounded,
+          size: 40,
+          color: Colors.amber,
+        ),
         title: const Text('Security Alert'),
         content: Text(
           'You left the quiz application. Warning $_lifecycleWarnings of 2.\n\n'
@@ -141,7 +146,11 @@ class _SecureScreenWrapperState extends State<SecureScreenWrapper> {
     // 3. Screenshot warning dialog
     if (_screenshotWarnings > 0) {
       return AlertDialog(
-        icon: const Icon(Icons.no_photography_rounded, size: 40, color: Colors.red),
+        icon: const Icon(
+          Icons.no_photography_rounded,
+          size: 40,
+          color: Colors.red,
+        ),
         title: const Text('Screenshots Prohibited'),
         content: Text(
           'A screenshot capture attempt was detected and blocked. (Incident $_screenshotWarnings)\n\n'

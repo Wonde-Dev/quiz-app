@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:quiz_app/core/constants/app_roles.dart';
 import 'package:quiz_app/features/auth/presentation/providers/auth_provider.dart';
+import 'package:quiz_app/shared/widgets/animated_press_button.dart';
 import 'package:quiz_app/shared/widgets/dashboard_shell.dart';
 
 class FunctionsScreen extends ConsumerWidget {
@@ -213,6 +214,13 @@ class FunctionsScreen extends ConsumerWidget {
               onTap: () => context.push('/teacher/reset-passwords'),
             ),
             _FunctionTile(
+              icon: Icons.domain_rounded,
+              color: const Color(0xFF0284C7),
+              title: 'Multi-School Campus Management',
+              subtitle: 'Register new campuses, provision grades & sections, and isolate student rosters.',
+              onTap: () => context.push('/admin/schools'),
+            ),
+            _FunctionTile(
               icon: Icons.class_outlined,
               color: const Color(0xFF6366F1),
               title: 'Class & Section Allocations',
@@ -326,18 +334,17 @@ class _FunctionTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
-    return Card(
-      margin: const EdgeInsets.only(bottom: 12),
-      elevation: 0,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(18),
-        side: BorderSide(
-          color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0),
+    return AnimatedPressButton(
+      onTap: onTap,
+      child: Card(
+        margin: const EdgeInsets.only(bottom: 12),
+        elevation: 0,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(18),
+          side: BorderSide(
+            color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0),
+          ),
         ),
-      ),
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(18),
         child: Padding(
           padding: const EdgeInsets.all(16),
           child: Row(

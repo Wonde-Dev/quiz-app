@@ -4,6 +4,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:quiz_app/core/constants/app_roles.dart';
 import 'package:quiz_app/core/services/audit_log_service.dart';
 import 'package:quiz_app/features/auth/presentation/providers/auth_provider.dart';
+import 'package:quiz_app/shared/widgets/animated_press_button.dart';
 import 'package:quiz_app/shared/widgets/dashboard_shell.dart';
 
 class AccountApprovalsScreen extends ConsumerStatefulWidget {
@@ -18,6 +19,8 @@ class _AccountApprovalsScreenState extends ConsumerState<AccountApprovalsScreen>
   late Future<List<Map<String, dynamic>>> _requests;
   final Set<String> _working = {};
   String? _error;
+  List<Map<String, dynamic>> _schools = [];
+  String? _selectedSchoolId;
 
   String _filter = 'all';
 
@@ -28,25 +31,46 @@ class _AccountApprovalsScreenState extends ConsumerState<AccountApprovalsScreen>
   }
 
   Future<List<Map<String, dynamic>>> _load() async {
+    final client = Supabase.instance.client;
+    final currentUser = ref.read(authStateProvider).user;
+    final isSubadmin = currentUser?.isSuperAdmin != true;
+    final targetSchoolId = isSubadmin ? currentUser?.schoolId : _selectedSchoolId;
+
     try {
-      final rows = await Supabase.instance.client
+      final sRows = await client.from('schools').select('id, name').order('name');
+      _schools = List<Map<String, dynamic>>.from(sRows);
+    } catch (_) {}
+
+    try {
+      var query = client
           .from('users')
           .select(
             'id, username, email, full_name, role, requested_role, school_id, section_id, '
-            'requested_grade, requested_class, requested_subject, assigned_class, assigned_grade, created_at',
+            'requested_grade, requested_class, requested_subject, assigned_class, assigned_grade, '
+            'phone_number, gender, created_at, schools(name)',
           )
-          .eq('approval_status', 'pending')
-          .order('created_at');
+          .eq('approval_status', 'pending');
+
+      if (targetSchoolId != null && targetSchoolId.isNotEmpty) {
+        query = query.eq('school_id', targetSchoolId);
+      }
+
+      final rows = await query.order('created_at');
       return List<Map<String, dynamic>>.from(rows);
     } catch (e) {
       try {
-        final fallbackRows = await Supabase.instance.client
+        var fallbackQuery = client
             .from('users')
             .select(
-              'id, username, email, full_name, role, requested_role, created_at',
+              'id, username, email, full_name, role, requested_role, school_id, created_at',
             )
-            .eq('approval_status', 'pending')
-            .order('created_at');
+            .eq('approval_status', 'pending');
+
+        if (targetSchoolId != null && targetSchoolId.isNotEmpty) {
+          fallbackQuery = fallbackQuery.eq('school_id', targetSchoolId);
+        }
+
+        final fallbackRows = await fallbackQuery.order('created_at');
         return List<Map<String, dynamic>>.from(fallbackRows);
       } catch (_) {
         rethrow;
@@ -168,7 +192,9 @@ class _AccountApprovalsScreenState extends ConsumerState<AccountApprovalsScreen>
             behavior: SnackBarBehavior.floating,
           ),
         );
-        setState(() => _requests = _load());
+        setState(() {
+          _requests = _load();
+        });
       }
     } catch (error) {
       if (mounted) {
@@ -245,7 +271,9 @@ class _AccountApprovalsScreenState extends ConsumerState<AccountApprovalsScreen>
                     Text('Could not load requests: ${snapshot.error}'),
                     const SizedBox(height: 12),
                     FilledButton(
-                      onPressed: () => setState(() => _requests = _load()),
+                      onPressed: () => setState(() {
+                        _requests = _load();
+                      }),
                       child: const Text('Try again'),
                     ),
                   ],
@@ -269,6 +297,14 @@ class _AccountApprovalsScreenState extends ConsumerState<AccountApprovalsScreen>
               }
             }
 
+            if (currentUser?.role == AppRoles.subadmin) {
+              // Sub-admins can ONLY review teachers and students of their own school
+              if (targetRole != 'teacher' && targetRole != 'student') return false;
+            }
+
+            if (_filter == 'subadmin') {
+              return targetRole == 'subadmin';
+            }
             if (_filter == 'student') {
               return targetRole == 'student';
             }
@@ -282,7 +318,13 @@ class _AccountApprovalsScreenState extends ConsumerState<AccountApprovalsScreen>
           }).toList();
 
           return RefreshIndicator(
-            onRefresh: () async => setState(() => _requests = _load()),
+            onRefresh: () async {
+              final future = _load();
+              setState(() {
+                _requests = future;
+              });
+              await future;
+            },
             child: ListView(
               padding: const EdgeInsets.all(24),
               children: [
@@ -309,6 +351,67 @@ class _AccountApprovalsScreenState extends ConsumerState<AccountApprovalsScreen>
                   ],
                 ),
                 const SizedBox(height: 16),
+
+                // Multi-School Campus Scope / Filter
+                if (_schools.isNotEmpty) ...[
+                  if (currentUser?.isSuperAdmin == true) ...[
+                    SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      child: Row(
+                        children: [
+                          ChoiceChip(
+                            label: const Text('All Campuses'),
+                            selected: _selectedSchoolId == null,
+                            onSelected: (_) {
+                              setState(() {
+                                _selectedSchoolId = null;
+                                _requests = _load();
+                              });
+                            },
+                          ),
+                          const SizedBox(width: 8),
+                          for (final s in _schools) ...[
+                            ChoiceChip(
+                              label: Text(s['name'] as String? ?? 'School'),
+                              selected: _selectedSchoolId == s['id'],
+                              onSelected: (sel) {
+                                setState(() {
+                                  _selectedSchoolId = sel ? s['id'] as String : null;
+                                  _requests = _load();
+                                });
+                              },
+                            ),
+                            const SizedBox(width: 8),
+                          ],
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                  ] else ...[
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF10B981).withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.domain_rounded, size: 16, color: Color(0xFF047857)),
+                          const SizedBox(width: 8),
+                          Text(
+                            'Campus Scope: ${_schools.firstWhere((s) => s['id'] == currentUser?.schoolId, orElse: () => {'name': 'Your School'})['name']}',
+                            style: const TextStyle(
+                              color: Color(0xFF047857),
+                              fontWeight: FontWeight.w800,
+                              fontSize: 12,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                  ],
+                ],
 
                 // Attendance Teacher Notice Banner
                 if (isAttendanceTeacher) ...[
@@ -360,15 +463,21 @@ class _AccountApprovalsScreenState extends ConsumerState<AccountApprovalsScreen>
                         label: Text('All (${allRequests.length})'),
                         icon: const Icon(Icons.people_outline, size: 16),
                       ),
-                      ButtonSegment(
-                        value: 'student',
-                        label: Text('Students (${allRequests.where((r) => (r['requested_role'] ?? r['role']) == 'student').length})'),
-                        icon: const Icon(Icons.school_outlined, size: 16),
-                      ),
+                      if (currentUser?.isSuperAdmin == true)
+                        ButtonSegment(
+                          value: 'subadmin',
+                          label: Text('Subadmins (${allRequests.where((r) => (r['requested_role'] ?? r['role']) == 'subadmin').length})'),
+                          icon: const Icon(Icons.admin_panel_settings_outlined, size: 16),
+                        ),
                       ButtonSegment(
                         value: 'teacher',
                         label: Text('Teachers (${allRequests.where((r) => (r['requested_role'] ?? r['role']) == 'teacher').length})'),
                         icon: const Icon(Icons.co_present_outlined, size: 16),
+                      ),
+                      ButtonSegment(
+                        value: 'student',
+                        label: Text('Students (${allRequests.where((r) => (r['requested_role'] ?? r['role']) == 'student').length})'),
+                        icon: const Icon(Icons.school_outlined, size: 16),
                       ),
                     ],
                     selected: {_filter},
@@ -440,6 +549,26 @@ class _AccountApprovalsScreenState extends ConsumerState<AccountApprovalsScreen>
                     final grade = request['requested_grade'] as String? ?? request['assigned_grade'] as String? ?? '';
                     final className = request['requested_class'] as String? ?? request['assigned_class'] as String? ?? '';
                     final subject = request['requested_subject'] as String? ?? '';
+                    final phone = request['phone_number'] as String? ?? '';
+                    final gender = request['gender'] as String? ?? '';
+                    final schoolName = request['schools'] is Map
+                        ? (request['schools'] as Map)['name'] as String?
+                        : _schools.firstWhere(
+                            (s) => s['id'] == request['school_id'],
+                            orElse: () => <String, dynamic>{},
+                          )['name'] as String?;
+
+                    final roleColor = switch (role) {
+                      'subadmin' => const Color(0xFF6366F1),
+                      'teacher' => const Color(0xFF10B981),
+                      _ => const Color(0xFF3B82F6),
+                    };
+
+                    final roleLabel = switch (role) {
+                      'subadmin' => 'Sub-Admin',
+                      'teacher' => 'Teacher',
+                      _ => 'Student',
+                    };
 
                     return Card(
                       margin: const EdgeInsets.only(bottom: 12),
@@ -451,16 +580,14 @@ class _AccountApprovalsScreenState extends ConsumerState<AccountApprovalsScreen>
                             Row(
                               children: [
                                 CircleAvatar(
-                                  backgroundColor: role == 'teacher'
-                                      ? const Color(0xFF10B981).withValues(alpha: 0.15)
-                                      : const Color(0xFF3B82F6).withValues(alpha: 0.15),
+                                  backgroundColor: roleColor.withValues(alpha: 0.15),
                                   child: Icon(
-                                    role == 'teacher'
-                                        ? Icons.co_present_rounded
-                                        : Icons.school_rounded,
-                                    color: role == 'teacher'
-                                        ? const Color(0xFF059669)
-                                        : const Color(0xFF2563EB),
+                                    switch (role) {
+                                      'subadmin' => Icons.admin_panel_settings_outlined,
+                                      'teacher' => Icons.co_present_rounded,
+                                      _ => Icons.school_rounded,
+                                    },
+                                    color: roleColor,
                                   ),
                                 ),
                                 const SizedBox(width: 12),
@@ -491,17 +618,13 @@ class _AccountApprovalsScreenState extends ConsumerState<AccountApprovalsScreen>
                                     vertical: 4,
                                   ),
                                   decoration: BoxDecoration(
-                                    color: role == 'teacher'
-                                        ? const Color(0xFF10B981).withValues(alpha: 0.15)
-                                        : const Color(0xFF3B82F6).withValues(alpha: 0.15),
+                                    color: roleColor.withValues(alpha: 0.15),
                                     borderRadius: BorderRadius.circular(12),
                                   ),
                                   child: Text(
-                                    role == 'teacher' ? 'Teacher' : 'Student',
+                                    roleLabel,
                                     style: TextStyle(
-                                      color: role == 'teacher'
-                                          ? const Color(0xFF047857)
-                                          : const Color(0xFF1D4ED8),
+                                      color: roleColor,
                                       fontSize: 11,
                                       fontWeight: FontWeight.w700,
                                     ),
@@ -514,6 +637,12 @@ class _AccountApprovalsScreenState extends ConsumerState<AccountApprovalsScreen>
                               spacing: 8,
                               runSpacing: 4,
                               children: [
+                                if (schoolName != null && schoolName.isNotEmpty)
+                                  Chip(
+                                    avatar: const Icon(Icons.domain_rounded, size: 14),
+                                    label: Text(schoolName),
+                                    visualDensity: VisualDensity.compact,
+                                  ),
                                 if (className.isNotEmpty)
                                   Chip(
                                     avatar: const Icon(Icons.meeting_room_outlined, size: 14),
@@ -532,41 +661,55 @@ class _AccountApprovalsScreenState extends ConsumerState<AccountApprovalsScreen>
                                     label: Text('Subject: $subject'),
                                     visualDensity: VisualDensity.compact,
                                   ),
+                                if (phone.isNotEmpty)
+                                  Chip(
+                                    avatar: const Icon(Icons.phone_outlined, size: 14),
+                                    label: Text(phone),
+                                    visualDensity: VisualDensity.compact,
+                                  ),
+                                if (gender.isNotEmpty)
+                                  Chip(
+                                    avatar: const Icon(Icons.person_outline_rounded, size: 14),
+                                    label: Text(gender),
+                                    visualDensity: VisualDensity.compact,
+                                  ),
                               ],
                             ),
                             const SizedBox(height: 14),
                             Row(
                               mainAxisAlignment: MainAxisAlignment.end,
                               children: [
-                                OutlinedButton(
-                                  style: OutlinedButton.styleFrom(
-                                    foregroundColor: Colors.red,
-                                    side: const BorderSide(color: Color(0xFFFECACA)),
+                                AnimatedPressButton(
+                                  onTap: isBusy ? null : () => _review(request, 'reject'),
+                                  child: OutlinedButton(
+                                    style: OutlinedButton.styleFrom(
+                                      foregroundColor: Colors.red,
+                                      side: const BorderSide(color: Color(0xFFFECACA)),
+                                    ),
+                                    onPressed: isBusy ? null : () => _review(request, 'reject'),
+                                    child: const Text('Decline'),
                                   ),
-                                  onPressed: isBusy
-                                      ? null
-                                      : () => _review(request, 'reject'),
-                                  child: const Text('Decline'),
                                 ),
                                 const SizedBox(width: 8),
-                                FilledButton.icon(
-                                  style: FilledButton.styleFrom(
-                                    backgroundColor: const Color(0xFF10B981),
+                                AnimatedPressButton(
+                                  onTap: isBusy ? null : () => _review(request, 'approve'),
+                                  child: FilledButton.icon(
+                                    style: FilledButton.styleFrom(
+                                      backgroundColor: const Color(0xFF10B981),
+                                    ),
+                                    onPressed: isBusy ? null : () => _review(request, 'approve'),
+                                    icon: isBusy
+                                        ? const SizedBox(
+                                            width: 14,
+                                            height: 14,
+                                            child: CircularProgressIndicator(
+                                              strokeWidth: 2,
+                                              color: Colors.white,
+                                            ),
+                                          )
+                                        : const Icon(Icons.check_circle_outline, size: 18),
+                                    label: const Text('Approve Account'),
                                   ),
-                                  onPressed: isBusy
-                                      ? null
-                                      : () => _review(request, 'approve'),
-                                  icon: isBusy
-                                      ? const SizedBox(
-                                          width: 14,
-                                          height: 14,
-                                          child: CircularProgressIndicator(
-                                            strokeWidth: 2,
-                                            color: Colors.white,
-                                          ),
-                                        )
-                                      : const Icon(Icons.check_circle_outline, size: 18),
-                                  label: const Text('Approve Account'),
                                 ),
                               ],
                             ),

@@ -158,7 +158,13 @@ class _StudentQuizListState extends ConsumerState<_StudentQuizList> {
         : user?.username ?? 'Student';
 
     return RefreshIndicator(
-      onRefresh: () async => setState(() => _dashboard = _loadDashboard()),
+      onRefresh: () async {
+        final future = _loadDashboard();
+        setState(() {
+          _dashboard = future;
+        });
+        await future;
+      },
       child: FutureBuilder<
         ({
           List<Map<String, dynamic>> quizzes,
@@ -179,8 +185,11 @@ class _StudentQuizListState extends ConsumerState<_StudentQuizList> {
                 ),
                 const SizedBox(height: 12),
                 OutlinedButton.icon(
-                  onPressed: () =>
-                      setState(() => _dashboard = _loadDashboard()),
+                  onPressed: () {
+                    setState(() {
+                      _dashboard = _loadDashboard();
+                    });
+                  },
                   icon: const Icon(Icons.refresh),
                   label: const Text('Try again'),
                 ),

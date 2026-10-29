@@ -176,7 +176,16 @@ begin
   -- Authority Validation:
   if caller.role in ('admin', 'subadmin') then
     -- Administrator can create subadmin, teacher, student
-    null;
+    if caller.role = 'subadmin' and caller.is_super_admin is not true then
+      -- Sub-admins cannot create other administrators
+      if assigned_role in ('admin', 'subadmin') then
+        raise exception 'Permission denied: Sub-admins cannot create other administrators' using errcode = '42501';
+      end if;
+      -- Sub-admins can only register users for their own assigned school
+      if caller.school_id is not null then
+        p_school_id := caller.school_id;
+      end if;
+    end if;
   elsif caller.role = 'teacher' and caller.is_attendance_teacher = true then
     -- Attendance Teacher can ONLY create students for their OWN attendance class (e.g. 9A)
     if assigned_role <> 'student' then
@@ -184,6 +193,9 @@ begin
     end if;
     if p_class is not null and caller.attendance_class is not null and lower(trim(p_class)) <> lower(trim(caller.attendance_class)) then
       raise exception 'Permission denied: You can only register students for your attendance class (%)', caller.attendance_class using errcode = '42501';
+    end if;
+    if caller.school_id is not null then
+      p_school_id := caller.school_id;
     end if;
   else
     raise exception 'Permission denied: You do not have permission to register accounts' using errcode = '42501';
@@ -386,8 +398,12 @@ begin
 
   -- Permission Validation:
   if caller.role in ('admin', 'subadmin') then
-    -- Admin and Sub-admin can approve any teacher or student request
-    null;
+    -- Admin and Sub-admin can approve teacher or student request
+    if caller.role = 'subadmin' and caller.is_super_admin is not true then
+      if caller.school_id is not null and target_user.school_id is not null and target_user.school_id <> caller.school_id then
+        raise exception 'Permission denied: Sub-admins can only approve registrations for their own school' using errcode = '42501';
+      end if;
+    end if;
   elsif caller.role = 'teacher' and caller.is_attendance_teacher = true then
     -- Attendance teacher can ONLY approve students of their OWN class (e.g. 9A)
     if coalesce(target_user.requested_role, target_user.role) <> 'student' then
@@ -489,6 +505,12 @@ begin
   end if;
 
   -- Role-specific deletion validation:
+  if caller.role = 'subadmin' and caller.is_super_admin is not true then
+    if caller.school_id is not null and target_user.school_id is not null and target_user.school_id <> caller.school_id then
+      raise exception 'Permission denied: Sub-admins can only delete accounts from their own school' using errcode = '42501';
+    end if;
+  end if;
+
   if caller.role = 'teacher' then
     if target_user.role <> 'student' then
       raise exception 'Teachers can only delete student accounts' using errcode = '42501';
@@ -546,16 +568,23 @@ begin
     raise exception 'Authentication required' using errcode = '42501';
   end if;
 
-  select id, role, is_super_admin into caller from public.users where id = caller_id;
+  select id, role, is_super_admin, school_id into caller from public.users where id = caller_id;
   if caller.role not in ('admin', 'subadmin') then
     raise exception 'Permission denied: Only administrators can modify user profiles' using errcode = '42501';
   end if;
 
-  select id, email, role, is_super_admin into target_user from public.users where id = p_user_id;
+  select id, email, role, is_super_admin, school_id into target_user from public.users where id = p_user_id;
 
   -- Sub-admins cannot modify or demote the Main Admin account
   if caller.role = 'subadmin' and (target_user.is_super_admin = true or target_user.role = 'admin') then
     raise exception 'Permission denied: Sub-admins cannot modify the Main Administrator account' using errcode = '42501';
+  end if;
+
+  -- Sub-admins can only modify users within their assigned school
+  if caller.role = 'subadmin' and caller.is_super_admin is not true then
+    if caller.school_id is not null and target_user.school_id is not null and target_user.school_id <> caller.school_id then
+      raise exception 'Permission denied: Sub-admins can only modify users from their own school' using errcode = '42501';
+    end if;
   end if;
 
   update public.users
@@ -776,7 +805,447 @@ exception when others then
   raise notice 'Storage bucket notice: %', sqlerrm;
 end $$;
 
--- 15. Reload PostgREST schema cache
+-- 16. Multi-School Infrastructure & Auto-Provisioning
+create table if not exists public.schools (
+  id uuid primary key default gen_random_uuid(),
+  name text not null unique,
+  code text,
+  address text,
+  city text,
+  phone text,
+  is_active boolean default true,
+  created_at timestamptz not null default now()
+);
+
+alter table public.schools add column if not exists code text;
+alter table public.schools add column if not exists address text;
+alter table public.schools add column if not exists city text;
+alter table public.schools add column if not exists phone text;
+alter table public.schools add column if not exists is_active boolean default true;
+alter table public.schools add column if not exists created_at timestamptz default now();
+
+grant all on public.schools to authenticated;
+grant select on public.schools to anon;
+
+alter table public.schools enable row level security;
+drop policy if exists schools_select_all on public.schools;
+create policy schools_select_all on public.schools for select using (true);
+
+drop policy if exists schools_admin_manage on public.schools;
+create policy schools_admin_manage on public.schools for all to authenticated
+using (
+  (select role from public.users where id = auth.uid()) in ('admin', 'subadmin')
+  or (select private.app_current_role()) in ('admin', 'subadmin')
+);
+
+-- Ensure unique constraint on schools(name) exists for safe inserts
+do $$
+begin
+  if not exists (select 1 from pg_constraint where conname = 'schools_name_unique') then
+    alter table public.schools add constraint schools_name_unique unique (name);
+  end if;
+exception when others then
+  null;
+end $$;
+
+-- Seed default Main School if no school exists
+insert into public.schools (name, code, address, city)
+values ('Main Campus', 'CHS-MAIN', 'Central Campus', 'Addis Ababa')
+on conflict (name) do nothing;
+
+-- RPC: admin_create_school
+create or replace function public.admin_create_school(
+  p_name text,
+  p_code text default null,
+  p_address text default null,
+  p_city text default null,
+  p_phone text default null
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = 'public', 'auth', 'extensions', 'pg_temp'
+as $$
+declare
+  caller_id uuid := auth.uid();
+  caller record;
+  new_school_id uuid := gen_random_uuid();
+  clean_name text := trim(p_name);
+  clean_code text := upper(trim(p_code));
+  grade_rec record;
+begin
+  if caller_id is null then
+    raise exception 'Authentication required' using errcode = '42501';
+  end if;
+
+  select id, role, is_super_admin into caller from public.users where id = caller_id;
+  if caller.role not in ('admin', 'subadmin') then
+    raise exception 'Permission denied: Only administrators can register schools' using errcode = '42501';
+  end if;
+
+  if clean_name is null or length(clean_name) < 2 then
+    return jsonb_build_object('success', false, 'error', 'Please enter a valid school name');
+  end if;
+
+  insert into public.schools (id, name, code, address, city, phone, is_active, created_at)
+  values (
+    new_school_id,
+    clean_name,
+    nullif(clean_code, ''),
+    nullif(trim(p_address), ''),
+    nullif(trim(p_city), ''),
+    nullif(trim(p_phone), ''),
+    true,
+    now()
+  )
+  on conflict (name) do update set
+    code = coalesce(excluded.code, public.schools.code),
+    address = coalesce(excluded.address, public.schools.address),
+    city = coalesce(excluded.city, public.schools.city)
+  returning id into new_school_id;
+
+  -- Automatically provision standard Grade 9 - 12
+  for g in 9..12 loop
+    insert into public.school_grades (school_id, name)
+    values (new_school_id, 'Grade ' || g)
+    on conflict do nothing;
+  end loop;
+
+  -- Automatically provision sections A, B, C for each grade
+  for grade_rec in select id, name from public.school_grades where school_id = new_school_id loop
+    insert into public.sections (school_id, grade_id, name, grade)
+    values
+      (new_school_id, grade_rec.id, 'A', grade_rec.name),
+      (new_school_id, grade_rec.id, 'B', grade_rec.name),
+      (new_school_id, grade_rec.id, 'C', grade_rec.name)
+    on conflict do nothing;
+  end loop;
+
+  return jsonb_build_object(
+    'success', true,
+    'school_id', new_school_id,
+    'name', clean_name
+  );
+end;
+$$;
+grant execute on function public.admin_create_school(text, text, text, text, text) to authenticated;
+
+-- RPC: admin_update_school
+create or replace function public.admin_update_school(
+  p_school_id uuid,
+  p_name text default null,
+  p_code text default null,
+  p_address text default null,
+  p_city text default null,
+  p_phone text default null,
+  p_is_active boolean default null
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = 'public', 'auth', 'pg_temp'
+as $$
+declare
+  caller_id uuid := auth.uid();
+  caller record;
+begin
+  if caller_id is null then
+    raise exception 'Authentication required' using errcode = '42501';
+  end if;
+
+  select id, role, is_super_admin into caller from public.users where id = caller_id;
+  if caller.role not in ('admin', 'subadmin') then
+    raise exception 'Permission denied: Only administrators can update school details' using errcode = '42501';
+  end if;
+
+  update public.schools
+  set
+    name = coalesce(nullif(trim(p_name), ''), name),
+    code = coalesce(nullif(upper(trim(p_code)), ''), code),
+    address = coalesce(nullif(trim(p_address), ''), address),
+    city = coalesce(nullif(trim(p_city), ''), city),
+    phone = coalesce(nullif(trim(p_phone), ''), phone),
+    is_active = coalesce(p_is_active, is_active)
+  where id = p_school_id;
+
+  return jsonb_build_object('success', true, 'school_id', p_school_id);
+end;
+$$;
+grant execute on function public.admin_update_school(uuid, text, text, text, text, text, boolean) to authenticated;
+
+-- 17. Exam Lockdown Mode & Study Materials One-Button Toggle
+alter table public.schools add column if not exists materials_locked boolean not null default false;
+alter table public.course_resources add column if not exists is_locked boolean not null default false;
+
+create table if not exists public.system_settings (
+  key text primary key,
+  value jsonb not null,
+  updated_at timestamptz not null default now(),
+  updated_by uuid references public.users(id) on delete set null
+);
+
+grant all on public.system_settings to authenticated;
+grant select on public.system_settings to anon;
+
+alter table public.system_settings enable row level security;
+drop policy if exists system_settings_read on public.system_settings;
+create policy system_settings_read on public.system_settings for select using (true);
+
+drop policy if exists system_settings_write on public.system_settings;
+create policy system_settings_write on public.system_settings for all to authenticated
+using (
+  (select role from public.users where id = auth.uid()) in ('teacher', 'admin', 'subadmin')
+  or (select private.app_current_role()) in ('teacher', 'admin', 'subadmin')
+);
+
+-- RPC: toggle_materials_lock
+create or replace function public.toggle_materials_lock(
+  p_locked boolean,
+  p_school_id uuid default null
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = 'public', 'auth', 'pg_temp'
+as $$
+declare
+  caller_id uuid := auth.uid();
+  caller record;
+  target_school uuid := p_school_id;
+begin
+  if caller_id is null then
+    raise exception 'Authentication required' using errcode = '42501';
+  end if;
+
+  select id, role, school_id into caller from public.users where id = caller_id;
+  if caller.role not in ('teacher', 'admin', 'subadmin') then
+    raise exception 'Permission denied: Only faculty and administrators can toggle exam lockdown' using errcode = '42501';
+  end if;
+
+  if target_school is null then
+    target_school := caller.school_id;
+  end if;
+
+  -- 1. If school is identified, toggle on the school
+  if target_school is not null then
+    update public.schools
+    set materials_locked = p_locked
+    where id = target_school;
+
+    update public.course_resources
+    set is_locked = p_locked
+    where school_id = target_school;
+  end if;
+
+  -- 2. Persist in system_settings for global/school key
+  insert into public.system_settings (key, value, updated_at, updated_by)
+  values (
+    case when target_school is not null then 'materials_locked_' || target_school::text else 'materials_locked_global' end,
+    jsonb_build_object('locked', p_locked, 'toggled_by', caller_id, 'updated_at', now()),
+    now(),
+    caller_id
+  )
+  on conflict (key) do update set
+    value = jsonb_build_object('locked', p_locked, 'toggled_by', caller_id, 'updated_at', now()),
+    updated_at = now(),
+    updated_by = caller_id;
+
+  return jsonb_build_object(
+    'success', true,
+    'materials_locked', p_locked,
+    'school_id', target_school
+  );
+end;
+$$;
+grant execute on function public.toggle_materials_lock(boolean, uuid) to authenticated;
+
+-- RPC: get_materials_lock_status
+create or replace function public.get_materials_lock_status(
+  p_school_id uuid default null
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = 'public', 'auth', 'pg_temp'
+as $$
+declare
+  caller_id uuid := auth.uid();
+  caller_school uuid := p_school_id;
+  is_locked boolean := false;
+  setting_row record;
+begin
+  if caller_school is null and caller_id is not null then
+    select school_id into caller_school from public.users where id = caller_id;
+  end if;
+
+  if caller_school is not null then
+    select materials_locked into is_locked from public.schools where id = caller_school;
+    if is_locked is true then
+      return jsonb_build_object('materials_locked', true, 'school_id', caller_school);
+    end if;
+
+    select value into setting_row from public.system_settings where key = 'materials_locked_' || caller_school::text;
+    if setting_row.value is not null and (setting_row.value->>'locked')::boolean is true then
+      return jsonb_build_object('materials_locked', true, 'school_id', caller_school);
+    end if;
+  end if;
+
+  select value into setting_row from public.system_settings where key = 'materials_locked_global';
+  if setting_row.value is not null and (setting_row.value->>'locked')::boolean is true then
+    return jsonb_build_object('materials_locked', true);
+  end if;
+
+  return jsonb_build_object('materials_locked', false);
+end;
+$$;
+grant execute on function public.get_materials_lock_status(uuid) to authenticated, anon;
+
+-- 18. Persistent Quiz Attempts, Grades, and Answers Tables & RLS
+create table if not exists public.quiz_attempts (
+  id uuid primary key default gen_random_uuid(),
+  quiz_id uuid references public.quizzes(id) on delete cascade,
+  student_id uuid references public.users(id) on delete cascade,
+  score integer default 0,
+  submitted_at timestamptz not null default now(),
+  completed_at timestamptz default now()
+);
+
+-- Ensure unique attempt per quiz and student
+do $$
+begin
+  if not exists (
+    select 1 from pg_constraint where conname = 'quiz_attempts_quiz_student_unique'
+  ) then
+    alter table public.quiz_attempts add constraint quiz_attempts_quiz_student_unique unique (quiz_id, student_id);
+  end if;
+exception when others then
+  null;
+end $$;
+
+create table if not exists public.answers (
+  id uuid primary key default gen_random_uuid(),
+  attempt_id uuid references public.quiz_attempts(id) on delete cascade,
+  question_id uuid references public.questions(id) on delete cascade,
+  answer_text text,
+  is_correct boolean default false,
+  created_at timestamptz not null default now()
+);
+
+grant all on public.quiz_attempts to authenticated;
+grant all on public.answers to authenticated;
+grant all on public.grades to authenticated;
+
+alter table public.quiz_attempts enable row level security;
+alter table public.answers enable row level security;
+
+drop policy if exists quiz_attempts_all_authenticated on public.quiz_attempts;
+create policy quiz_attempts_all_authenticated on public.quiz_attempts for all to authenticated
+using (
+  student_id = auth.uid()
+  or (select role from public.users where id = auth.uid()) in ('teacher', 'admin', 'subadmin')
+)
+with check (
+  student_id = auth.uid()
+  or (select role from public.users where id = auth.uid()) in ('teacher', 'admin', 'subadmin')
+);
+
+drop policy if exists answers_all_authenticated on public.answers;
+create policy answers_all_authenticated on public.answers for all to authenticated
+using (true)
+with check (true);
+
+-- RPC: submit_student_quiz_attempt (atomic, secure, fail-safe)
+create or replace function public.submit_student_quiz_attempt(
+  p_quiz_id uuid,
+  p_student_id uuid,
+  p_score integer,
+  p_total_points integer,
+  p_percentage integer,
+  p_passed boolean,
+  p_answers jsonb default '[]'::jsonb
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = 'public', 'auth', 'pg_temp'
+as $$
+declare
+  caller_id uuid := auth.uid();
+  v_attempt_id uuid;
+  ans_rec jsonb;
+begin
+  if caller_id is null then
+    raise exception 'Authentication required' using errcode = '42501';
+  end if;
+
+  -- 1. Insert or update grade record
+  insert into public.grades (
+    student_id,
+    quiz_id,
+    score,
+    total_points,
+    percentage,
+    passed,
+    submitted_at
+  ) values (
+    p_student_id,
+    p_quiz_id,
+    p_score,
+    p_total_points,
+    p_percentage,
+    p_passed,
+    now()
+  );
+
+  -- 2. Upsert quiz attempt
+  insert into public.quiz_attempts (
+    quiz_id,
+    student_id,
+    score,
+    submitted_at,
+    completed_at
+  ) values (
+    p_quiz_id,
+    p_student_id,
+    p_score,
+    now(),
+    now()
+  )
+  on conflict (quiz_id, student_id) do update set
+    score = excluded.score,
+    submitted_at = excluded.submitted_at,
+    completed_at = now()
+  returning id into v_attempt_id;
+
+  -- 3. Insert question answers breakdown
+  if v_attempt_id is not null and p_answers is not null and jsonb_array_length(p_answers) > 0 then
+    delete from public.answers where attempt_id = v_attempt_id;
+    for ans_rec in select * from jsonb_array_elements(p_answers) loop
+      insert into public.answers (
+        attempt_id,
+        question_id,
+        answer_text,
+        is_correct
+      ) values (
+        v_attempt_id,
+        (ans_rec->>'question_id')::uuid,
+        ans_rec->>'answer_text',
+        coalesce((ans_rec->>'is_correct')::boolean, false)
+      );
+    end loop;
+  end if;
+
+  return jsonb_build_object(
+    'success', true,
+    'attempt_id', v_attempt_id,
+    'score', p_score,
+    'percentage', p_percentage
+  );
+end;
+$$;
+grant execute on function public.submit_student_quiz_attempt(uuid, uuid, integer, integer, integer, boolean, jsonb) to authenticated;
+
+-- 19. Reload PostgREST schema cache
 notify pgrst, 'reload schema';
 
 commit;

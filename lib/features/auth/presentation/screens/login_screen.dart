@@ -8,6 +8,7 @@ import 'package:quiz_app/core/theme/theme_mode_provider.dart';
 import 'package:quiz_app/core/utils/role_username.dart';
 import 'package:quiz_app/core/utils/validators.dart';
 import 'package:quiz_app/features/auth/presentation/providers/auth_provider.dart';
+import 'package:quiz_app/shared/widgets/animated_press_button.dart';
 
 class LoginScreen extends ConsumerStatefulWidget {
   const LoginScreen({this.registrationPage = false, this.role, super.key});
@@ -27,6 +28,9 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   final _passwordController = TextEditingController();
   final _confirmController = TextEditingController();
   final _subjectController = TextEditingController();
+  final _phoneController = TextEditingController();
+  String _selectedGender = 'Male';
+  final List<String> _genders = const ['Male', 'Female', 'Other'];
 
   final _imagePicker = ImagePicker();
   XFile? _pickedAvatarFile;
@@ -62,6 +66,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     _passwordController.dispose();
     _confirmController.dispose();
     _subjectController.dispose();
+    _phoneController.dispose();
     super.dispose();
   }
 
@@ -168,6 +173,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
         requestedSubject: _requestedRole == 'teacher'
             ? _subjectController.text.trim()
             : null,
+        phoneNumber: _phoneController.text.trim(),
+        gender: _selectedGender,
       );
       if (_pickedAvatarFile != null) {
         try {
@@ -288,11 +295,6 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
               )
             : null,
         actions: [
-          IconButton(
-            tooltip: 'App Tour & Features',
-            onPressed: () => context.go('/onboarding'),
-            icon: const Icon(Icons.help_outline_rounded),
-          ),
           IconButton(
             tooltip: isDark ? 'Switch to Light Theme' : 'Switch to Dark Theme',
             onPressed: () {
@@ -592,6 +594,40 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                           ),
                           const SizedBox(height: 14),
 
+                          // Phone Number
+                          TextFormField(
+                            controller: _phoneController,
+                            keyboardType: TextInputType.phone,
+                            autofillHints: const [AutofillHints.telephoneNumber],
+                            decoration: const InputDecoration(
+                              labelText: 'Phone number',
+                              hintText: '+251 91 123 4567 or 0911234567',
+                              prefixIcon: Icon(Icons.phone_outlined),
+                            ),
+                            validator: (value) =>
+                                _isRegistering ? Validators.phone(value) : null,
+                          ),
+                          const SizedBox(height: 14),
+
+                          // Gender Selection Dropdown
+                          DropdownButtonFormField<String>(
+                            initialValue: _selectedGender,
+                            decoration: const InputDecoration(
+                              labelText: 'Gender',
+                              prefixIcon: Icon(Icons.person_pin_circle_outlined),
+                            ),
+                            items: _genders.map((g) {
+                              return DropdownMenuItem(
+                                value: g,
+                                child: Text(g),
+                              );
+                            }).toList(),
+                            onChanged: (val) {
+                              if (val != null) setState(() => _selectedGender = val);
+                            },
+                          ),
+                          const SizedBox(height: 14),
+
                           _schoolSelector(),
                           const SizedBox(height: 14),
 
@@ -828,48 +864,62 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                         const SizedBox(height: 20),
 
                         // Primary Submit Button
-                        FilledButton(
-                          style: FilledButton.styleFrom(
-                            backgroundColor: const Color(0xFF10B981),
-                            foregroundColor: Colors.white,
-                            minimumSize: const Size(0, 50),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(14),
-                            ),
-                          ),
-                          onPressed: authState.isLoading ||
+                        AnimatedPressButton(
+                          onTap: authState.isLoading ||
                                   (_isRegistering && authState.successMessage != null) ||
                                   (_isRegistering && (!_schoolsReady || _selectedSectionId == null))
                               ? null
                               : _submit,
-                          child: authState.isLoading
-                              ? const SizedBox(
-                                  height: 20,
-                                  width: 20,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2,
-                                    color: Colors.white,
-                                  ),
-                                )
-                              : Row(
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  children: [
-                                    Icon(
-                                      _isRegistering
-                                          ? Icons.person_add_alt_1_rounded
-                                          : Icons.login_rounded,
-                                      size: 18,
-                                    ),
-                                    const SizedBox(width: 8),
-                                    Text(
-                                      _isRegistering ? 'Create account' : 'Sign in',
-                                      style: const TextStyle(
-                                        fontSize: 15,
-                                        fontWeight: FontWeight.w700,
-                                      ),
-                                    ),
-                                  ],
+                          child: Container(
+                            height: 50,
+                            width: double.infinity,
+                            decoration: BoxDecoration(
+                              gradient: const LinearGradient(
+                                colors: [Color(0xFF10B981), Color(0xFF059669)],
+                                begin: Alignment.topLeft,
+                                end: Alignment.bottomRight,
+                              ),
+                              borderRadius: BorderRadius.circular(14),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: const Color(0xFF10B981).withValues(alpha: 0.35),
+                                  blurRadius: 12,
+                                  offset: const Offset(0, 4),
                                 ),
+                              ],
+                            ),
+                            alignment: Alignment.center,
+                            child: authState.isLoading
+                                ? const SizedBox(
+                                    height: 20,
+                                    width: 20,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                      color: Colors.white,
+                                    ),
+                                  )
+                                : Row(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      Icon(
+                                        _isRegistering
+                                            ? Icons.person_add_alt_1_rounded
+                                            : Icons.login_rounded,
+                                        size: 18,
+                                        color: Colors.white,
+                                      ),
+                                      const SizedBox(width: 8),
+                                      Text(
+                                        _isRegistering ? 'Create account' : 'Sign in',
+                                        style: const TextStyle(
+                                          fontSize: 15,
+                                          fontWeight: FontWeight.w700,
+                                          color: Colors.white,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                          ),
                         ),
                         const SizedBox(height: 16),
 

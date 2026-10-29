@@ -104,6 +104,231 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen>
     }
   }
 
+  Future<void> _openQuizzesModerationSheet() async {
+    final client = Supabase.instance.client;
+    final currentUser = ref.read(authStateProvider).user;
+    final targetSchool = currentUser?.isSuperAdmin == true ? null : currentUser?.schoolId;
+
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (sheetCtx) => StatefulBuilder(
+        builder: (ctx, setSheetState) => Container(
+          decoration: BoxDecoration(
+            color: Theme.of(context).scaffoldBackgroundColor,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+          ),
+          padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Center(
+                child: Container(
+                  width: 44,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: Colors.grey.withValues(alpha: 0.4),
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 14),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Row(
+                    children: [
+                      Icon(Icons.quiz_rounded, color: Color(0xFF8B5CF6), size: 24),
+                      SizedBox(width: 10),
+                      Text(
+                        'Faculty Quizzes Oversight',
+                        style: TextStyle(fontSize: 18, fontWeight: FontWeight.w900),
+                      ),
+                    ],
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.close_rounded),
+                    onPressed: () => Navigator.pop(ctx),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 4),
+              const Text(
+                'Quizzes are prepared exclusively by teachers. Administrators and sub-admins can review submissions and delete outdated preparations.',
+                style: TextStyle(fontSize: 12, color: Color(0xFF64748B)),
+              ),
+              const SizedBox(height: 16),
+              ConstrainedBox(
+                constraints: BoxConstraints(
+                  maxHeight: MediaQuery.of(context).size.height * 0.6,
+                ),
+                child: FutureBuilder<List<Map<String, dynamic>>>(
+                  future: () async {
+                    var query = client.from('quizzes').select(
+                          'id, title, description, time_limit_minutes, total_points, is_published, created_at, target_grade, target_section, school_id, '
+                          'teacher:users!quizzes_teacher_id_fkey(id, full_name, username)',
+                        );
+                    if (targetSchool != null) {
+                      query = query.eq('school_id', targetSchool);
+                    }
+                    final rows = await query.order('created_at', ascending: false);
+                    return List<Map<String, dynamic>>.from(rows);
+                  }(),
+                  builder: (context, snapshot) {
+                    if (snapshot.connectionState == ConnectionState.waiting) {
+                      return const Center(child: Padding(padding: EdgeInsets.all(32), child: CircularProgressIndicator()));
+                    }
+                    if (snapshot.hasError) {
+                      return Center(child: Text('Could not load quizzes: ${snapshot.error}'));
+                    }
+                    final quizzes = snapshot.data ?? [];
+                    if (quizzes.isEmpty) {
+                      return const Padding(
+                        padding: EdgeInsets.all(32),
+                        child: Center(
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.quiz_outlined, size: 48, color: Colors.grey),
+                              SizedBox(height: 12),
+                              Text('No quizzes prepared yet', style: TextStyle(fontWeight: FontWeight.bold)),
+                              SizedBox(height: 4),
+                              Text('When teachers publish exams or quizzes, they will appear here.', style: TextStyle(fontSize: 12, color: Colors.grey)),
+                            ],
+                          ),
+                        ),
+                      );
+                    }
+                    return ListView.separated(
+                      shrinkWrap: true,
+                      itemCount: quizzes.length,
+                      separatorBuilder: (_, _) => const SizedBox(height: 10),
+                      itemBuilder: (context, idx) {
+                        final q = quizzes[idx];
+                        final teacherMap = q['teacher'] as Map<String, dynamic>?;
+                        final teacherName = teacherMap?['full_name']?.toString().isNotEmpty == true
+                            ? teacherMap!['full_name']
+                            : teacherMap?['username'] ?? 'Faculty Member';
+                        final grade = q['target_grade']?.toString() ?? '';
+                        final section = q['target_section']?.toString() ?? '';
+
+                        return Container(
+                          padding: const EdgeInsets.all(14),
+                          decoration: BoxDecoration(
+                            color: Theme.of(context).cardColor,
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(color: Colors.grey.withValues(alpha: 0.2)),
+                          ),
+                          child: Row(
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.all(10),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFF8B5CF6).withValues(alpha: 0.12),
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                child: const Icon(Icons.description_outlined, color: Color(0xFF8B5CF6), size: 22),
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      q['title']?.toString() ?? 'Untitled Quiz',
+                                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                                    ),
+                                    const SizedBox(height: 2),
+                                    Text(
+                                      'Prepared by $teacherName',
+                                      style: const TextStyle(fontSize: 12, color: Color(0xFF64748B)),
+                                    ),
+                                    const SizedBox(height: 6),
+                                    Wrap(
+                                      spacing: 6,
+                                      runSpacing: 4,
+                                      children: [
+                                        if (grade.isNotEmpty)
+                                          Container(
+                                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                            decoration: BoxDecoration(
+                                              color: Colors.blue.withValues(alpha: 0.1),
+                                              borderRadius: BorderRadius.circular(6),
+                                            ),
+                                            child: Text(grade, style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.blue)),
+                                          ),
+                                        if (section.isNotEmpty)
+                                          Container(
+                                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                            decoration: BoxDecoration(
+                                              color: Colors.green.withValues(alpha: 0.1),
+                                              borderRadius: BorderRadius.circular(6),
+                                            ),
+                                            child: Text('Class $section', style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.green)),
+                                          ),
+                                        Text(
+                                          '${q['time_limit_minutes'] ?? 30} mins · ${q['total_points'] ?? 100} pts',
+                                          style: const TextStyle(fontSize: 11, color: Colors.grey),
+                                        ),
+                                      ],
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              IconButton(
+                                icon: const Icon(Icons.delete_outline_rounded, color: Colors.red),
+                                tooltip: 'Delete Quiz Preparation',
+                                onPressed: () async {
+                                  final confirmed = await showDialog<bool>(
+                                    context: ctx,
+                                    builder: (dialogCtx) => AlertDialog(
+                                      title: const Text('Delete Quiz Preparation?'),
+                                      content: Text(
+                                        'Are you sure you want to delete "${q['title']}" prepared by $teacherName?\n\n'
+                                        'All questions and student attempts will be permanently deleted.',
+                                      ),
+                                      actions: [
+                                        TextButton(
+                                          onPressed: () => Navigator.pop(dialogCtx, false),
+                                          child: const Text('Cancel'),
+                                        ),
+                                        FilledButton(
+                                          style: FilledButton.styleFrom(backgroundColor: Colors.red),
+                                          onPressed: () => Navigator.pop(dialogCtx, true),
+                                          child: const Text('Delete'),
+                                        ),
+                                      ],
+                                    ),
+                                  );
+
+                                  if (confirmed == true) {
+                                    try {
+                                      await client.rpc('admin_delete_quiz', params: {'p_quiz_id': q['id']});
+                                    } catch (_) {
+                                      await client.from('quizzes').delete().eq('id', q['id']);
+                                    }
+                                    setSheetState(() {});
+                                    _loadStats();
+                                  }
+                                },
+                              ),
+                            ],
+                          ),
+                        );
+                      },
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -411,6 +636,7 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen>
                     loading: _loading,
                     icon: Icons.quiz_rounded,
                     color: const Color(0xFF8B5CF6),
+                    onTap: _openQuizzesModerationSheet,
                   ),
                 ),
               ],
@@ -623,6 +849,31 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen>
             const SizedBox(height: 10),
 
             _ActionTile(
+              icon: Icons.quiz_rounded,
+              color: const Color(0xFF8B5CF6),
+              title: 'Faculty Exam & Quiz Oversight',
+              subtitle:
+                  'Inspect quizzes and exams prepared by teachers, review targets, and moderate or remove invalid preparations.',
+              buttonText: 'Moderate Quizzes',
+              onTap: _openQuizzesModerationSheet,
+            ),
+            const SizedBox(height: 10),
+
+            _ActionTile(
+              icon: Icons.auto_stories_rounded,
+              color: const Color(0xFF0284C7),
+              title: 'Learning Materials Oversight',
+              subtitle:
+                  'Review faculty-uploaded study PDFs, worksheets, and educational videos, and moderate content.',
+              buttonText: 'Inspect Materials',
+              onTap: () async {
+                await context.push('/resources');
+                if (mounted) _loadStats();
+              },
+            ),
+            const SizedBox(height: 10),
+
+            _ActionTile(
               icon: Icons.history_rounded,
               color: const Color(0xFF0F172A),
               title: 'System Activity & Audit Logs',
@@ -748,6 +999,7 @@ class _MetricCard extends StatelessWidget {
     required this.loading,
     required this.icon,
     required this.color,
+    this.onTap,
   });
 
   final String title;
@@ -755,13 +1007,14 @@ class _MetricCard extends StatelessWidget {
   final bool loading;
   final IconData icon;
   final Color color;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
 
-    return Container(
+    final cardContent = Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 18),
       decoration: BoxDecoration(
         color: isDark ? const Color(0xFF1E293B) : Colors.white,
@@ -817,6 +1070,19 @@ class _MetricCard extends StatelessWidget {
         ],
       ),
     );
+
+    if (onTap != null) {
+      return Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(20),
+          onTap: onTap,
+          child: cardContent,
+        ),
+      );
+    }
+
+    return cardContent;
   }
 }
 

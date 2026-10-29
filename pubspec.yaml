@@ -16,7 +16,7 @@ dependencies:
   go_router: ^14.8.1
 
   # Backend
-  supabase_flutter: ^2.7.0
+  supabase_flutter: ^2.18.3
 
   # Security
   flutter_screenguard: ^2.0.0

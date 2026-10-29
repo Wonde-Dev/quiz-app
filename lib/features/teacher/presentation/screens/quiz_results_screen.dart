@@ -182,9 +182,13 @@ class _QuizResultsScreenState extends ConsumerState<QuizResultsScreen> {
               : 0;
 
           return RefreshIndicator(
-            onRefresh: () async => setState(() {
-              _resultsFuture = _loadResults();
-            }),
+            onRefresh: () async {
+              final future = _loadResults();
+              setState(() {
+                _resultsFuture = future;
+              });
+              await future;
+            },
             child: ListView(
               padding: const EdgeInsets.all(16),
               children: [
