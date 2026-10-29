@@ -202,6 +202,14 @@ class _AdminRegisterUserScreenState
   }
 
   Future<void> _registerUser() async {
+    final currentUser = ref.read(authStateProvider).user;
+    if (currentUser?.role == AppRoles.subadmin && _selectedRole != AppRoles.teacher) {
+      setState(() {
+        _errorMessage = 'School Directors are authorized to register faculty teachers only. Student registration is handled by Attendance Teachers.';
+      });
+      return;
+    }
+
     if (!_formKey.currentState!.validate()) return;
 
     setState(() {
@@ -850,6 +858,22 @@ class _AdminRegisterUserScreenState
                             ChoiceChip(
                               avatar: const Icon(Icons.co_present_outlined, size: 16),
                               label: const Text('Faculty Teacher',
+                                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                              selected: true,
+                              onSelected: (_) => _onRoleChanged(AppRoles.teacher),
+                            ),
+                          ],
+                        );
+                      }
+
+                      if (currentUser?.role == AppRoles.subadmin) {
+                        return Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: [
+                            ChoiceChip(
+                              avatar: const Icon(Icons.co_present_outlined, size: 16),
+                              label: const Text('Faculty Teacher (Ciro High School)',
                                   style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
                               selected: true,
                               onSelected: (_) => _onRoleChanged(AppRoles.teacher),

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:quiz_app/core/constants/app_roles.dart';
@@ -41,53 +42,61 @@ class _StudentManagementScreenState
     super.dispose();
   }
 
-  bool get _isAdmin =>
-      ref.read(authStateProvider).user?.role == AppRoles.admin ||
+  bool get _isSuperAdmin {
+    final user = ref.read(authStateProvider).user;
+    return user?.isSuperAdmin == true || user?.role == AppRoles.admin;
+  }
+
+  bool get _isSubadmin =>
       ref.read(authStateProvider).user?.role == AppRoles.subadmin;
+
+  bool get _isAttendanceTeacher =>
+      ref.read(authStateProvider).user?.role == AppRoles.teacher &&
+      ref.read(authStateProvider).user?.isAttendanceTeacher == true;
+
+  bool get _canManageStudents => _isSuperAdmin || _isAttendanceTeacher;
+
+  bool get _isAdmin => _isSuperAdmin;
 
   Future<List<Map<String, dynamic>>> _loadAccounts() async {
     final currentUser = ref.read(authStateProvider).user;
-    final isSuperAdmin = currentUser?.isSuperAdmin == true;
-    final isSubadmin = currentUser?.role == AppRoles.subadmin || (!isSuperAdmin && _isAdmin);
-
-    try {
-      final response = await Supabase.instance.client.functions.invoke(
-        'manage-account',
-        body: {'action': 'list', if (_isAdmin) 'role': _filterRole},
-      );
-      final data = response.data;
-      if (data is Map<String, dynamic> && data['accounts'] is List) {
-        var accounts = (data['accounts'] as List)
-            .map((account) => Map<String, dynamic>.from(account as Map))
-            .toList();
-        if (isSubadmin && currentUser?.schoolId != null) {
-          accounts = accounts
-              .where((a) => a['school_id'] == currentUser!.schoolId)
-              .toList();
-        }
-        return accounts;
-      }
-    } catch (e) {
-      debugPrint('manage-account list fallback: $e');
+    if (_isSubadmin) {
+      return [];
     }
 
     final client = Supabase.instance.client;
     final currentUserId = client.auth.currentUser?.id;
+
+    if (_isAttendanceTeacher) {
+      final targetClass = currentUser?.attendanceClass?.trim() ?? '';
+      var query = client
+          .from('users')
+          .select(
+            'id, username, email, full_name, role, requested_role, school_id, '
+            'assigned_class, assigned_grade, requested_class, requested_grade, is_active, approval_status',
+          )
+          .eq('role', AppRoles.student)
+          .neq('is_active', false);
+
+      if (targetClass.isNotEmpty) {
+        query = query.or('assigned_class.ilike.%$targetClass%,requested_class.ilike.%$targetClass%');
+      }
+      if (currentUserId != null) {
+        query = query.neq('id', currentUserId);
+      }
+      final rows = await query.order('full_name');
+      return List<Map<String, dynamic>>.from(rows);
+    }
+
     var query = client
         .from('users')
-        .select('id, username, full_name, role, requested_role, school_id')
+        .select(
+          'id, username, email, full_name, role, requested_role, school_id, '
+          'assigned_class, assigned_grade, requested_class, requested_grade, is_active, approval_status',
+        )
         .neq('is_active', false);
 
-    final userSchoolId = currentUser?.schoolId;
-    if (isSubadmin && userSchoolId != null) {
-      query = query.eq('school_id', userSchoolId);
-      if (_filterRole != 'all') {
-        query = query.eq('role', _filterRole);
-      }
-    } else if (!_isAdmin) {
-      query = query.eq('role', AppRoles.student);
-      if (userSchoolId != null) query = query.eq('school_id', userSchoolId);
-    } else if (_filterRole != 'all') {
+    if (_filterRole != 'all') {
       query = query.eq('role', _filterRole);
     }
 
@@ -467,6 +476,7 @@ class _StudentManagementScreenState
 
   Future<Map<String, dynamic>?> _askForAccount() async {
     final client = Supabase.instance.client;
+    final currentUser = ref.read(authStateProvider).user;
     var schools = <Map<String, dynamic>>[];
     if (_isAdmin) {
       try {
@@ -493,10 +503,10 @@ class _StudentManagementScreenState
     bool obscurePassword = false;
     String? schoolId = _isAdmin
         ? (schools.isEmpty ? null : schools.first['id'] as String)
-        : ref.read(authStateProvider).user?.schoolId;
+        : '00000000-0000-4000-8000-000000000001';
     String? sectionId;
     List<Map<String, dynamic>> availableSections = [];
-    if (schoolId != null) {
+    if (!_isAttendanceTeacher && schoolId != null) {
       try {
         availableSections = await _loadSectionsForSchool(schoolId);
         if (availableSections.isNotEmpty) {
@@ -833,7 +843,29 @@ class _StudentManagementScreenState
                         const SizedBox(height: 12),
                       ],
 
-                      if (schoolId != null && role != AppRoles.admin) ...[
+                      if (_isAttendanceTeacher) ...[
+                        Container(
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF10B981).withValues(alpha: 0.1),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: const Color(0xFF10B981).withValues(alpha: 0.3)),
+                          ),
+                          child: Row(
+                            children: [
+                              const Icon(Icons.class_rounded, color: Color(0xFF10B981), size: 20),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: Text(
+                                  'Class Assignment: ${currentUser?.attendanceGrade ?? "Grade 9"} · Class ${currentUser?.attendanceClass ?? "9A"}',
+                                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Color(0xFF047857)),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                      ] else if (schoolId != null && role != AppRoles.admin) ...[
                         if (availableSections.isEmpty)
                           const Padding(
                             padding: EdgeInsets.only(top: 8),
@@ -881,8 +913,8 @@ class _StudentManagementScreenState
                   ),
                 ),
                 onPressed: (_isAdmin && role != AppRoles.admin && schoolId == null) ||
-                        (role == AppRoles.student && sectionId == null) ||
-                        (role == AppRoles.teacher && sectionId == null)
+                        (!_isAttendanceTeacher && role == AppRoles.student && sectionId == null) ||
+                        (!_isAttendanceTeacher && role == AppRoles.teacher && sectionId == null)
                     ? null
                     : () {
                         if (!formKey.currentState!.validate()) return;
@@ -900,10 +932,12 @@ class _StudentManagementScreenState
                           'subject': subjectController.text.trim().isNotEmpty
                               ? subjectController.text.trim()
                               : 'General',
-                          if (role != AppRoles.admin)
-                            'schoolId': _isAdmin ? schoolId : ref.read(authStateProvider).user?.schoolId,
-                          if (role == AppRoles.student || role == AppRoles.teacher)
-                            'sectionId': sectionId,
+                          'schoolId': _isAttendanceTeacher
+                              ? '00000000-0000-4000-8000-000000000001'
+                              : (_isAdmin ? schoolId : ref.read(authStateProvider).user?.schoolId),
+                          'grade': _isAttendanceTeacher ? currentUser?.attendanceGrade : null,
+                          'class': _isAttendanceTeacher ? currentUser?.attendanceClass : null,
+                          'sectionId': ?sectionId,
                         });
                       },
                 child: const Text('Create Account'),
@@ -986,7 +1020,20 @@ class _StudentManagementScreenState
       return;
     }
 
-    if (!_isAdmin && targetRole != AppRoles.student) {
+    if (_isSubadmin) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'School Directors manage teachers only. Student deletions are managed by Class Attendance Teachers.',
+          ),
+          backgroundColor: Colors.red,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
+
+    if (!_isSuperAdmin && targetRole != AppRoles.student) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text(
@@ -1431,11 +1478,160 @@ class _StudentManagementScreenState
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final currentUser = ref.watch(authStateProvider).user;
+
+    // 1. Director Boundary Screen: Director manages teachers only
+    if (_isSubadmin) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('Student Roster Oversight')),
+        body: Center(
+          child: Container(
+            constraints: const BoxConstraints(maxWidth: 500),
+            margin: const EdgeInsets.all(24),
+            padding: const EdgeInsets.all(24),
+            decoration: BoxDecoration(
+              color: theme.cardColor,
+              borderRadius: BorderRadius.circular(24),
+              border: Border.all(color: const Color(0xFFE2E8F0)),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.05),
+                  blurRadius: 16,
+                  offset: const Offset(0, 4),
+                ),
+              ],
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF6366F1).withValues(alpha: 0.12),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(Icons.school_rounded, color: Color(0xFF6366F1), size: 40),
+                ),
+                const SizedBox(height: 18),
+                const Text(
+                  'Class Attendance Teacher Authority',
+                  style: TextStyle(fontWeight: FontWeight.w900, fontSize: 18),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 10),
+                const Text(
+                  'At Ciro High School, student registrations, approvals, classroom rosters, and deletions are exclusively managed by designated Class Attendance Teachers for their homeroom sections (9A, 9B, etc.).\n\nAs School Director, your authority covers faculty teacher registrations, multi-class allocations, and school announcements.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: Color(0xFF64748B), height: 1.45, fontSize: 13),
+                ),
+                const SizedBox(height: 24),
+                FilledButton.icon(
+                  style: FilledButton.styleFrom(
+                    backgroundColor: const Color(0xFF6366F1),
+                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                  onPressed: () => context.push('/admin/teachers'),
+                  icon: const Icon(Icons.co_present_rounded, size: 18),
+                  label: const Text('Open Faculty Directory'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
+    // 2. Subject Faculty Screen (non-attendance teacher)
+    if (currentUser?.role == AppRoles.teacher && !_isAttendanceTeacher) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('Student Roster')),
+        body: Center(
+          child: Container(
+            constraints: const BoxConstraints(maxWidth: 500),
+            margin: const EdgeInsets.all(24),
+            padding: const EdgeInsets.all(24),
+            decoration: BoxDecoration(
+              color: theme.cardColor,
+              borderRadius: BorderRadius.circular(24),
+              border: Border.all(color: const Color(0xFFE2E8F0)),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF0284C7).withValues(alpha: 0.12),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(Icons.assignment_ind_rounded, color: Color(0xFF0284C7), size: 40),
+                ),
+                const SizedBox(height: 18),
+                const Text(
+                  'Attendance Teacher Role Required',
+                  style: TextStyle(fontWeight: FontWeight.w900, fontSize: 18),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 10),
+                const Text(
+                  'You are registered as a subject faculty teacher. Student registration, homeroom rosters, and student account deletions are managed by the designated Class Attendance Teacher for each classroom section.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: Color(0xFF64748B), height: 1.45, fontSize: 13),
+                ),
+                const SizedBox(height: 24),
+                FilledButton.icon(
+                  style: FilledButton.styleFrom(
+                    backgroundColor: const Color(0xFF0284C7),
+                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                  onPressed: () => context.pop(),
+                  icon: const Icon(Icons.arrow_back_rounded, size: 18),
+                  label: const Text('Back to Teacher Portal'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
+    // 3. Attendance Teacher & Super Admin Roster Management
+    final appBarTitle = _isAttendanceTeacher
+        ? 'Class ${currentUser?.attendanceClass ?? ""} Roster'
+        : 'Student Rosters (Super Admin)';
 
     return Scaffold(
       appBar: AppBar(
-        title: Text(_isAdmin ? 'Manage users' : 'Students'),
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(appBarTitle),
+            if (_isAttendanceTeacher)
+              Text(
+                'Attendance Authority · ${currentUser?.attendanceGrade ?? "Grade 9"}',
+                style: const TextStyle(fontSize: 11, fontWeight: FontWeight.normal, color: Color(0xFF10B981)),
+              ),
+          ],
+        ),
         actions: [
+          if (_isAttendanceTeacher)
+            Padding(
+              padding: const EdgeInsets.only(right: 6),
+              child: OutlinedButton.icon(
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: const Color(0xFF10B981),
+                  side: const BorderSide(color: Color(0xFF10B981)),
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  minimumSize: Size.zero,
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
+                onPressed: () => context.push('/admin/approvals'),
+                icon: const Icon(Icons.verified_user_rounded, size: 16),
+                label: const Text('Review Approvals', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+              ),
+            ),
           if (_selectedIds.isNotEmpty) ...[
             Padding(
               padding: const EdgeInsets.only(right: 8),
@@ -1447,7 +1643,7 @@ class _StudentManagementScreenState
                 label: Text('Reset (${_selectedIds.length})'),
               ),
             ),
-            if (_isAdmin)
+            if (_canManageStudents)
               Padding(
                 padding: const EdgeInsets.only(right: 8),
                 child: FilledButton.icon(
@@ -1460,7 +1656,7 @@ class _StudentManagementScreenState
                 ),
               ),
           ],
-          if (_isAdmin)
+          if (_canManageStudents)
             IconButton(
               tooltip: 'Reset all visible account passwords',
               onPressed: _isResetting ? null : _resetVisibleAccounts,
@@ -1872,7 +2068,11 @@ class _StudentManagementScreenState
       floatingActionButton: FloatingActionButton.extended(
         onPressed: _isResetting ? null : _createAccount,
         icon: const Icon(Icons.person_add_alt_1_rounded),
-        label: Text(_isAdmin ? 'Register user' : 'Register student'),
+        label: Text(
+          _isAttendanceTeacher
+              ? 'Register student for ${currentUser?.attendanceClass ?? "Class"}'
+              : (_isAdmin ? 'Register user' : 'Register student'),
+        ),
       ),
     );
   }

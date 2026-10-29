@@ -17,11 +17,15 @@ class QuizBuilderScreen extends ConsumerStatefulWidget {
 }
 
 class _QuizBuilderScreenState extends ConsumerState<QuizBuilderScreen> {
+  static const String _ciroSchoolId = '00000000-0000-4000-8000-000000000001';
   final _formKey = GlobalKey<FormState>();
   final _titleController = TextEditingController();
   final _descriptionController = TextEditingController();
   final _subjectController = TextEditingController(text: 'General');
   final _timeLimitController = TextEditingController(text: '30');
+  final _scriptController = TextEditingController();
+  final _keyController = TextEditingController();
+  bool _showKeyField = false;
   final _questionController = TextEditingController();
   final _correctAnswerController = TextEditingController();
   final _explanationController = TextEditingController();
@@ -32,13 +36,11 @@ class _QuizBuilderScreenState extends ConsumerState<QuizBuilderScreen> {
   PlatformFile? _attachedPdfFile;
 
   final List<Map<String, dynamic>> _questions = [];
-  List<Map<String, dynamic>> _schools = [];
   List<Map<String, dynamic>> _existingGrades = [];
   List<Map<String, dynamic>> _existingSections = [];
   List<Map<String, dynamic>> _assignedCourses = [];
 
-  String _role = AppRoles.teacher;
-  String? _selectedSchoolId;
+  String? _selectedSchoolId = _ciroSchoolId;
   String _selectedGradeName = 'Grade 9';
   String _selectedSectionName = 'Section A';
   bool _useCustomSection = false;
@@ -78,6 +80,8 @@ class _QuizBuilderScreenState extends ConsumerState<QuizBuilderScreen> {
     _descriptionController.dispose();
     _subjectController.dispose();
     _timeLimitController.dispose();
+    _scriptController.dispose();
+    _keyController.dispose();
     _questionController.dispose();
     _correctAnswerController.dispose();
     _explanationController.dispose();
@@ -98,27 +102,10 @@ class _QuizBuilderScreenState extends ConsumerState<QuizBuilderScreen> {
     try {
       final user = ref.read(authStateProvider).user;
       if (user == null) throw StateError('Sign in again to create a quiz.');
-      _role = user.role;
 
-      final client = Supabase.instance.client;
-
-      if (_role == AppRoles.admin) {
-        final rows = await client
-            .from('schools')
-            .select('id, name')
-            .order('name');
-        _schools = List<Map<String, dynamic>>.from(rows);
-        if (_schools.isNotEmpty) {
-          _selectedSchoolId = _schools.first['id'] as String;
-          await _loadSchoolMetadata(_selectedSchoolId!);
-        }
-      } else {
-        _selectedSchoolId = user.schoolId;
-        if (_selectedSchoolId != null) {
-          await _loadSchoolMetadata(_selectedSchoolId!);
-        }
-        await _loadTeacherCourses(user.id);
-      }
+      _selectedSchoolId = _ciroSchoolId;
+      await _loadSchoolMetadata(_ciroSchoolId);
+      await _loadTeacherCourses(user.id);
     } catch (error) {
       if (mounted) {
         setState(() => _error = 'Could not load classes: $error');
@@ -903,14 +890,375 @@ class _QuizBuilderScreenState extends ConsumerState<QuizBuilderScreen> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final currentUser = ref.watch(authStateProvider).user;
+
+    // Faculty Exclusive Guard: Quizzes are prepared exclusively by Teachers
+    if (currentUser?.role == AppRoles.admin || currentUser?.role == AppRoles.subadmin) {
+      return DashboardShell(
+        title: 'Quiz Oversight',
+        body: Center(
+          child: Container(
+            constraints: const BoxConstraints(maxWidth: 500),
+            margin: const EdgeInsets.all(24),
+            padding: const EdgeInsets.all(24),
+            decoration: BoxDecoration(
+              color: theme.cardColor,
+              borderRadius: BorderRadius.circular(24),
+              border: Border.all(color: const Color(0xFFE2E8F0)),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.05),
+                  blurRadius: 16,
+                  offset: const Offset(0, 4),
+                ),
+              ],
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF10B981).withValues(alpha: 0.12),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(Icons.school_rounded, color: Color(0xFF10B981), size: 40),
+                ),
+                const SizedBox(height: 18),
+                const Text(
+                  'Faculty Preparation Exclusive',
+                  style: TextStyle(fontWeight: FontWeight.w900, fontSize: 18),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 10),
+                const Text(
+                  'At Ciro High School, quizzes and exams are prepared exclusively by Faculty Teachers for their assigned grades and sections.\n\nAdministrators and School Directors oversee published quizzes from the Moderation Panel on the Dashboard.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: Color(0xFF64748B), height: 1.45, fontSize: 13),
+                ),
+                const SizedBox(height: 24),
+                FilledButton.icon(
+                  style: FilledButton.styleFrom(
+                    backgroundColor: const Color(0xFF0F172A),
+                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                  onPressed: () => Navigator.of(context).pop(),
+                  icon: const Icon(Icons.arrow_back_rounded, size: 18),
+                  label: const Text('Return to Dashboard'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
 
     return DashboardShell(
-      title: 'Prepare a quiz',
+      title: 'Prepare an exam or quiz',
       body: _loadingTargets
           ? const Center(child: CircularProgressIndicator())
           : ListView(
               padding: const EdgeInsets.all(20),
               children: [
+                // FAST EXAM SETUP HERO CARD (Teacher Script & Time Limit)
+                Container(
+                  margin: const EdgeInsets.only(bottom: 20),
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(24),
+                    gradient: LinearGradient(
+                      colors: isDark
+                          ? [const Color(0xFF1E1B4B), const Color(0xFF312E81)]
+                          : [const Color(0xFF4338CA), const Color(0xFF6366F1)],
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: const Color(0xFF6366F1).withValues(alpha: 0.25),
+                        blurRadius: 20,
+                        offset: const Offset(0, 8),
+                      ),
+                    ],
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.all(22),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.all(10),
+                              decoration: BoxDecoration(
+                                color: Colors.white.withValues(alpha: 0.18),
+                                borderRadius: BorderRadius.circular(14),
+                              ),
+                              child: const Icon(Icons.auto_awesome_rounded, color: Colors.white, size: 24),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  const Text(
+                                    '⚡ Fast Exam Setup from Script & Time',
+                                    style: TextStyle(color: Colors.white, fontWeight: FontWeight.w900, fontSize: 17),
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    'Give your exam script & time limit — the app formats questions, choices, answers, and points automatically!',
+                                    style: TextStyle(color: Colors.white.withValues(alpha: 0.85), fontSize: 12),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            TextButton.icon(
+                              style: TextButton.styleFrom(
+                                foregroundColor: Colors.white,
+                                backgroundColor: Colors.white.withValues(alpha: 0.18),
+                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                              ),
+                              icon: const Icon(Icons.lightbulb_outline_rounded, size: 15, color: Colors.amberAccent),
+                              label: const Text('Sample', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                              onPressed: () {
+                                setState(() {
+                                  _scriptController.text = ExamScriptParser.sampleScript.trim();
+                                  if (_titleController.text.trim().isEmpty) {
+                                    _titleController.text = 'Biology Semester Examination';
+                                  }
+                                  if (_subjectController.text.trim().isEmpty || _subjectController.text == 'General') {
+                                    _subjectController.text = 'Biology';
+                                  }
+                                  _timeLimitController.text = '45';
+                                });
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text('Loaded sample exam script! Tap "Set Up Exam Questions" below.'),
+                                    behavior: SnackBarBehavior.floating,
+                                  ),
+                                );
+                              },
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 16),
+
+                        // Quick Input Row: Exam Time & Subject
+                        Row(
+                          children: [
+                            Expanded(
+                              flex: 3,
+                              child: Container(
+                                decoration: BoxDecoration(
+                                  color: Colors.white.withValues(alpha: 0.12),
+                                  borderRadius: BorderRadius.circular(14),
+                                  border: Border.all(color: Colors.white.withValues(alpha: 0.25)),
+                                ),
+                                child: TextFormField(
+                                  controller: _timeLimitController,
+                                  keyboardType: TextInputType.number,
+                                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                                  decoration: const InputDecoration(
+                                    labelText: 'Exam Time (Minutes)',
+                                    labelStyle: TextStyle(color: Colors.white70, fontSize: 12),
+                                    prefixIcon: Icon(Icons.timer_outlined, color: Colors.white, size: 20),
+                                    border: InputBorder.none,
+                                    contentPadding: EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                                  ),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              flex: 4,
+                              child: Container(
+                                decoration: BoxDecoration(
+                                  color: Colors.white.withValues(alpha: 0.12),
+                                  borderRadius: BorderRadius.circular(14),
+                                  border: Border.all(color: Colors.white.withValues(alpha: 0.25)),
+                                ),
+                                child: TextFormField(
+                                  controller: _subjectController,
+                                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                                  decoration: const InputDecoration(
+                                    labelText: 'Subject',
+                                    labelStyle: TextStyle(color: Colors.white70, fontSize: 12),
+                                    prefixIcon: Icon(Icons.menu_book_outlined, color: Colors.white, size: 20),
+                                    border: InputBorder.none,
+                                    contentPadding: EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 12),
+
+                        // Script Text Area
+                        Container(
+                          decoration: BoxDecoration(
+                            color: isDark ? const Color(0xFF0F172A) : Colors.white,
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(color: Colors.white.withValues(alpha: 0.3)),
+                          ),
+                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                          child: TextFormField(
+                            controller: _scriptController,
+                            maxLines: 7,
+                            style: TextStyle(
+                              fontFamily: 'monospace',
+                              fontSize: 13,
+                              color: isDark ? Colors.white : const Color(0xFF0F172A),
+                            ),
+                            decoration: InputDecoration(
+                              hintText: '1. Which organelle is powerhouse of cell?\nA. Nucleus\nB. Mitochondria\nAnswer: B\n\n2. Pure water freezes at ______ degrees Celsius.\nAnswer: 0',
+                              hintStyle: TextStyle(
+                                fontFamily: 'monospace',
+                                fontSize: 12,
+                                color: isDark ? const Color(0xFF64748B) : const Color(0xFF94A3B8),
+                              ),
+                              border: InputBorder.none,
+                              labelText: 'Paste Questions Script (Choose, True/False, Blank Space, Description)',
+                              labelStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                              alignLabelWithHint: true,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+
+                        // Separate Answer Key Script (Optional)
+                        Row(
+                          children: [
+                            InkWell(
+                              borderRadius: BorderRadius.circular(8),
+                              onTap: () => setState(() => _showKeyField = !_showKeyField),
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(
+                                      _showKeyField ? Icons.remove_circle_outline_rounded : Icons.add_circle_outline_rounded,
+                                      size: 15,
+                                      color: Colors.white,
+                                    ),
+                                    const SizedBox(width: 6),
+                                    Text(
+                                      _showKeyField ? 'Hide Separate Answer Key' : 'Paste Separate Answer Key Script (Optional)',
+                                      style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+
+                        if (_showKeyField) ...[
+                          const SizedBox(height: 8),
+                          Container(
+                            decoration: BoxDecoration(
+                              color: isDark ? const Color(0xFF0F172A) : Colors.white,
+                              borderRadius: BorderRadius.circular(14),
+                              border: Border.all(color: Colors.white.withValues(alpha: 0.3)),
+                            ),
+                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                            child: TextFormField(
+                              controller: _keyController,
+                              maxLines: 3,
+                              style: TextStyle(
+                                fontFamily: 'monospace',
+                                fontSize: 12,
+                                color: isDark ? Colors.white : const Color(0xFF0F172A),
+                              ),
+                              decoration: const InputDecoration(
+                                hintText: '1. B\n2. False\n3. 0\n4. Description answer...',
+                                border: InputBorder.none,
+                                labelText: 'Separate Answer Key Script',
+                                labelStyle: TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
+                                alignLabelWithHint: true,
+                              ),
+                            ),
+                          ),
+                        ],
+                        const SizedBox(height: 14),
+
+                        // Parse Button
+                        Row(
+                          children: [
+                            Expanded(
+                              child: FilledButton.icon(
+                                style: FilledButton.styleFrom(
+                                  backgroundColor: const Color(0xFF10B981),
+                                  foregroundColor: Colors.white,
+                                  padding: const EdgeInsets.symmetric(vertical: 14),
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                                  elevation: 2,
+                                ),
+                                icon: const Icon(Icons.flash_on_rounded, size: 20),
+                                label: const Text(
+                                  '⚡ Set Up Exam Questions from Script',
+                                  style: TextStyle(fontWeight: FontWeight.w900, fontSize: 14),
+                                ),
+                                onPressed: () {
+                                  final text = _scriptController.text.trim();
+                                  if (text.isEmpty) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      const SnackBar(
+                                        content: Text('Please paste your exam questions script first, or tap "Sample".'),
+                                        behavior: SnackBarBehavior.floating,
+                                      ),
+                                    );
+                                    return;
+                                  }
+
+                                  final parsed = ExamScriptParser.parse(
+                                    text,
+                                    answerKeyScript: _showKeyField ? _keyController.text : null,
+                                  );
+
+                                  if (parsed.isEmpty) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      const SnackBar(
+                                        content: Text('Could not recognize questions. Check question numbering (1., 2., etc.).'),
+                                        backgroundColor: Colors.red,
+                                        behavior: SnackBarBehavior.floating,
+                                      ),
+                                    );
+                                    return;
+                                  }
+
+                                  setState(() {
+                                    _questions.clear();
+                                    for (int i = 0; i < parsed.length; i++) {
+                                      _questions.add(parsed[i].toMap(_questions.length));
+                                    }
+
+                                    if (_titleController.text.trim().isEmpty) {
+                                      _titleController.text = '$_selectedGradeName ${_subjectController.text.trim().isNotEmpty ? _subjectController.text.trim() : "Exam"} ($_selectedSectionName)';
+                                    }
+                                  });
+
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(
+                                      content: Text('⚡ Successfully formatted and loaded ${parsed.length} questions into exam! Preview below and tap Publish.'),
+                                      backgroundColor: const Color(0xFF10B981),
+                                      behavior: SnackBarBehavior.floating,
+                                    ),
+                                  );
+                                },
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+
                 Form(
                   key: _formKey,
                   child: Column(
@@ -1086,37 +1434,6 @@ class _QuizBuilderScreenState extends ConsumerState<QuizBuilderScreen> {
                                 ),
                               ),
                               const SizedBox(height: 16),
-
-                              if (_role == AppRoles.admin &&
-                                  _schools.isNotEmpty) ...[
-                                DropdownButtonFormField<String>(
-                                  isExpanded: true,
-                                  initialValue: _selectedSchoolId,
-                                  decoration: const InputDecoration(
-                                    labelText: 'School',
-                                    prefixIcon: Icon(Icons.school_outlined),
-                                  ),
-                                  items: [
-                                    for (final school in _schools)
-                                      DropdownMenuItem(
-                                        value: school['id'] as String,
-                                        child: Text(
-                                          school['name'] as String? ?? 'School',
-                                        ),
-                                      ),
-                                  ],
-                                  onChanged: _isSaving
-                                      ? null
-                                      : (schoolId) {
-                                          if (schoolId == null) return;
-                                          setState(
-                                            () => _selectedSchoolId = schoolId,
-                                          );
-                                          _loadSchoolMetadata(schoolId);
-                                        },
-                                ),
-                                const SizedBox(height: 12),
-                              ],
 
                               // Grade Picker
                               DropdownButtonFormField<String>(

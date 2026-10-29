@@ -239,6 +239,7 @@ class _AccountApprovalsScreenState extends ConsumerState<AccountApprovalsScreen>
   @override
   Widget build(BuildContext context) {
     final currentUser = ref.watch(authStateProvider).user;
+    final isSubadmin = currentUser?.role == AppRoles.subadmin;
     final isAttendanceTeacher = currentUser?.isAttendanceTeacher == true;
     final attendanceClass = currentUser?.attendanceClass;
 
@@ -284,8 +285,8 @@ class _AccountApprovalsScreenState extends ConsumerState<AccountApprovalsScreen>
             }
 
             if (currentUser?.role == AppRoles.subadmin) {
-              // Sub-admins can ONLY review teachers and students of their own school
-              if (targetRole != 'teacher' && targetRole != 'student') return false;
+              // Sub-admins (Directors) review and approve TEACHERS ONLY
+              if (targetRole != 'teacher') return false;
             }
 
             if (_filter == 'subadmin') {
@@ -318,86 +319,64 @@ class _AccountApprovalsScreenState extends ConsumerState<AccountApprovalsScreen>
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Review Registration Requests',
-                          style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                                fontWeight: FontWeight.bold,
-                              ),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          '${allRequests.length} account registration${allRequests.length == 1 ? '' : 's'} awaiting approval',
-                          style: const TextStyle(color: Color(0xFF64748B), fontSize: 13),
-                        ),
-                      ],
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            isSubadmin
+                                ? 'Faculty Teacher Registrations'
+                                : isAttendanceTeacher
+                                    ? 'Class ${attendanceClass ?? "9A"} Student Registrations'
+                                    : 'Review Registration Requests',
+                            style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                                  fontWeight: FontWeight.bold,
+                                ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            isSubadmin
+                                ? 'School Director Oversight: Review, approve, or decline faculty applications for Ciro High School'
+                                : isAttendanceTeacher
+                                    ? 'Attendance Teacher Authority: Review, approve, or decline student applications for Class ${attendanceClass ?? "9A"}'
+                                    : '${allRequests.length} account registration${allRequests.length == 1 ? '' : 's'} awaiting approval',
+                            style: const TextStyle(color: Color(0xFF64748B), fontSize: 13),
+                          ),
+                        ],
+                      ),
                     ),
                   ],
                 ),
-                const SizedBox(height: 16),
+                const SizedBox(height: 14),
 
-                // Multi-School Campus Scope / Filter
-                if (_schools.isNotEmpty) ...[
-                  if (currentUser?.isSuperAdmin == true) ...[
-                    SingleChildScrollView(
-                      scrollDirection: Axis.horizontal,
-                      child: Row(
-                        children: [
-                          ChoiceChip(
-                            label: const Text('All Campuses'),
-                            selected: _selectedSchoolId == null,
-                            onSelected: (_) {
-                              setState(() {
-                                _selectedSchoolId = null;
-                                _requests = _load();
-                              });
-                            },
-                          ),
-                          const SizedBox(width: 8),
-                          for (final s in _schools) ...[
-                            ChoiceChip(
-                              label: Text(s['name'] as String? ?? 'School'),
-                              selected: _selectedSchoolId == s['id'],
-                              onSelected: (sel) {
-                                setState(() {
-                                  _selectedSchoolId = sel ? s['id'] as String : null;
-                                  _requests = _load();
-                                });
-                              },
-                            ),
-                            const SizedBox(width: 8),
-                          ],
-                        ],
+                // Ciro High School Scope Badge
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF10B981).withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: const Color(0xFF10B981).withValues(alpha: 0.25)),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.domain_rounded, size: 16, color: Color(0xFF047857)),
+                      const SizedBox(width: 8),
+                      Text(
+                        isSubadmin
+                            ? 'Institution: Ciro High School · Faculty Teacher Approvals'
+                            : isAttendanceTeacher
+                                ? 'Institution: Ciro High School · Class ${attendanceClass ?? "9A"} Attendance Master'
+                                : 'Institution: Ciro High School · System Administrator Portal',
+                        style: const TextStyle(
+                          color: Color(0xFF047857),
+                          fontWeight: FontWeight.w800,
+                          fontSize: 12,
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: 14),
-                  ] else ...[
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF10B981).withValues(alpha: 0.12),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Row(
-                        children: [
-                          const Icon(Icons.domain_rounded, size: 16, color: Color(0xFF047857)),
-                          const SizedBox(width: 8),
-                          Text(
-                            'Campus Scope: ${_schools.firstWhere((s) => s['id'] == currentUser?.schoolId, orElse: () => {'name': 'Your School'})['name']}',
-                            style: const TextStyle(
-                              color: Color(0xFF047857),
-                              fontWeight: FontWeight.w800,
-                              fontSize: 12,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 14),
-                  ],
-                ],
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 14),
 
                 // Attendance Teacher Notice Banner
                 if (isAttendanceTeacher) ...[

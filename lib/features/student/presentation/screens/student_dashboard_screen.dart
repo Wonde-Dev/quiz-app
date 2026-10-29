@@ -118,21 +118,21 @@ class _StudentQuizListState extends ConsumerState<_StudentQuizList> {
       }
     }
 
-    // 4. Student profile metadata (requested_grade and requested_class)
+    // 4. Student profile metadata (assigned_grade, assigned_class, requested_grade, requested_class)
     Map<String, dynamic>? studentProfile;
     try {
       final res = await client
           .from('users')
-          .select('id, school_id, requested_grade, requested_class')
+          .select('id, school_id, assigned_grade, assigned_class, requested_grade, requested_class')
           .eq('id', widget.studentId)
           .maybeSingle();
       studentProfile = res;
     } catch (e) {
-      // Fallback: query without requested_class if column is not yet migrated
+      // Fallback: query without assigned_class if column is not yet migrated
       try {
         final res = await client
             .from('users')
-            .select('id, school_id, requested_grade')
+            .select('id, school_id, requested_grade, requested_class')
             .eq('id', widget.studentId)
             .maybeSingle();
         studentProfile = res;
@@ -242,13 +242,19 @@ class _StudentQuizListState extends ConsumerState<_StudentQuizList> {
             }
           }
 
-          final profGrade = result.studentProfile?['requested_grade'] as String?;
-          final profClass = result.studentProfile?['requested_class'] as String?;
+          final profGrade = (result.studentProfile?['assigned_grade'] ??
+                  result.studentProfile?['requested_grade'] ??
+                  user?.assignedGrade) as String?;
+          final profClass = (result.studentProfile?['assigned_class'] ??
+                  result.studentProfile?['requested_class'] ??
+                  user?.assignedClass) as String?;
           if (profGrade != null && profGrade.trim().isNotEmpty) {
             studentGradeNames.add(profGrade.trim().toLowerCase());
+            studentGradeNames.add(profGrade.replaceAll('Grade', '').trim().toLowerCase());
           }
           if (profClass != null && profClass.trim().isNotEmpty) {
             studentSectionNames.add(profClass.trim().toLowerCase());
+            studentSectionNames.add(profClass.replaceAll('Section', '').replaceAll('Class', '').trim().toLowerCase());
           }
 
           // Section labels

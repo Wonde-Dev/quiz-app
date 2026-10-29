@@ -183,3 +183,4 @@ $$;
 grant execute on function public.get_school_user_stats(uuid) to authenticated, anon;
 
 commit;
+
