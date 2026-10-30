@@ -211,7 +211,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     final input = _usernameController.text.trim();
     if (input.isEmpty) {
       ref.read(authStateProvider.notifier).setMessage(
-        error: 'Enter your username or email address to receive an OTP code.',
+        error: 'Enter your email, username, or phone number to receive an OTP code.',
       );
       return;
     }
@@ -352,7 +352,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
               children: [
                 if (!codeSent) ...[
                   const Text(
-                    'Enter your registered email address or institutional username. A 6-digit OTP code will be sent to your email:',
+                    'Enter your registered email, username, or phone number. A 6-digit OTP code will be sent to your email to verify and reset your password:',
                     style: TextStyle(fontSize: 13),
                   ),
                   const SizedBox(height: 14),
@@ -360,8 +360,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                     controller: emailController,
                     autofocus: true,
                     decoration: const InputDecoration(
-                      labelText: 'Email or Username',
-                      hintText: 'e.g. user@gmail.com or YeroG@Teacher.edu',
+                      labelText: 'Email, Username, or Phone',
+                      hintText: 'e.g. user@gmail.com, YonasD, or 0911234567',
                       prefixIcon: Icon(Icons.alternate_email_rounded),
                     ),
                   ),
@@ -816,10 +816,10 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                               ? const [AutofillHints.newUsername]
                               : const [AutofillHints.username],
                           decoration: InputDecoration(
-                            labelText: _isRegistering ? 'Suggested username' : 'Username or email',
+                            labelText: _isRegistering ? 'Suggested username' : 'Email, Username, or Phone',
                             hintText: _isRegistering
                                 ? 'Name@${_requestedRole == 'teacher' ? 'Teacher' : 'Student'}.edu'
-                                : 'e.g. WondeAdmin@Admin.edu or email',
+                                : 'e.g. user@gmail.com, WondeAdmin, or phone',
                             helperText: _isRegistering
                                 ? 'Institutional format: Name@${_requestedRole == 'teacher' ? 'Teacher' : 'Student'}.edu'
                                 : null,

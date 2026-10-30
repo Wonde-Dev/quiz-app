@@ -298,13 +298,11 @@ class AuthService {
   Future<String> resolveEmail(String emailOrUsername) async {
     final input = emailOrUsername.trim();
     if (input.isEmpty) {
-      throw const FormatException('Enter your email or username.');
+      throw const FormatException('Enter your email, username, or phone number.');
     }
     final lower = input.toLowerCase();
-    if (RegExp(r'^[^\s@]+@[^\s@]+\.[^\s@]+$').hasMatch(lower) && !lower.endsWith('.edu')) {
-      return lower;
-    }
 
+    // 1. Check RPC for robust matching against public.users (email, username, phone, name) and auth.users
     try {
       final emailResult = await _supabase.rpc(
         'get_email_by_username',
@@ -315,11 +313,12 @@ class AuthService {
       }
     } catch (_) {}
 
+    // 2. Direct public.users lookup
     try {
       final row = await _supabase
           .from('users')
           .select('email')
-          .or('username.ilike.$input,email.ilike.$input')
+          .or('username.ilike.$input,email.ilike.$input,phone_number.eq.$input')
           .limit(1)
           .maybeSingle();
       final lookedUp = row?['email'] as String?;
@@ -328,23 +327,36 @@ class AuthService {
       }
     } catch (_) {}
 
+    // 3. Known fallback aliases
     if (lower.startsWith('wondedev') || lower.startsWith('wondeadmin') || lower.contains('@admin.edu')) {
       return 'wondedev369@gmail.com';
     }
 
+    // 4. Return as-is
     return lower;
   }
 
   Future<String> sendPasswordReset(String emailOrUsername) async {
     final targetEmail = await resolveEmail(emailOrUsername);
-    await _supabase.auth.resetPasswordForEmail(targetEmail);
+    try {
+      await _supabase.auth.resetPasswordForEmail(targetEmail);
+    } catch (e) {
+      debugPrint('resetPasswordForEmail note: $e, falling back to signInWithOtp');
+      await _supabase.auth.signInWithOtp(
+        email: targetEmail,
+        shouldCreateUser: false,
+      );
+    }
     return targetEmail;
   }
 
   /// Sends a one-time login code (OTP) to the user's email.
   Future<String> sendLoginOtp(String emailOrUsername) async {
     final targetEmail = await resolveEmail(emailOrUsername);
-    await _supabase.auth.signInWithOtp(email: targetEmail);
+    await _supabase.auth.signInWithOtp(
+      email: targetEmail,
+      shouldCreateUser: false,
+    );
     return targetEmail;
   }
 
@@ -362,11 +374,19 @@ class AuthService {
         type: OtpType.email,
       );
     } catch (_) {
-      return await _supabase.auth.verifyOTP(
-        email: targetEmail,
-        token: cleanToken,
-        type: OtpType.magiclink,
-      );
+      try {
+        return await _supabase.auth.verifyOTP(
+          email: targetEmail,
+          token: cleanToken,
+          type: OtpType.magiclink,
+        );
+      } catch (_) {
+        return await _supabase.auth.verifyOTP(
+          email: targetEmail,
+          token: cleanToken,
+          type: OtpType.recovery,
+        );
+      }
     }
   }
 
@@ -378,11 +398,27 @@ class AuthService {
   }) async {
     final targetEmail = await resolveEmail(email);
     final cleanToken = token.trim();
-    await _supabase.auth.verifyOTP(
-      email: targetEmail,
-      token: cleanToken,
-      type: OtpType.recovery,
-    );
+    try {
+      await _supabase.auth.verifyOTP(
+        email: targetEmail,
+        token: cleanToken,
+        type: OtpType.recovery,
+      );
+    } catch (_) {
+      try {
+        await _supabase.auth.verifyOTP(
+          email: targetEmail,
+          token: cleanToken,
+          type: OtpType.email,
+        );
+      } catch (_) {
+        await _supabase.auth.verifyOTP(
+          email: targetEmail,
+          token: cleanToken,
+          type: OtpType.magiclink,
+        );
+      }
+    }
     await updatePassword(newPassword);
   }
 
