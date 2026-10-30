@@ -588,6 +588,74 @@ class _TeacherManagementScreenState
     }
   }
 
+  Future<void> _toggleTeacherStatus(Map<String, dynamic> teacher) async {
+    final id = teacher['id'] as String;
+    final name = teacher['full_name'] as String? ?? teacher['username'] as String? ?? 'Teacher';
+    final currentlyActive = teacher['is_active'] != false;
+    final newActive = !currentlyActive;
+
+    final actionLabel = newActive ? 'Activate' : 'Suspend';
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(20),
+          side: const BorderSide(color: Color(0xFFE2E8F0)),
+        ),
+        title: Text('$actionLabel Faculty Account?'),
+        content: Text(
+          newActive
+              ? 'Re-activate $name\'s account? They will be able to sign in and prepare exams.'
+              : 'Suspend $name\'s account? They will be temporarily blocked from signing in.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: newActive ? const Color(0xFF10B981) : const Color(0xFFD97706),
+            ),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text(actionLabel),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true || !mounted) return;
+
+    setState(() {
+      _isResetting = true;
+      _error = null;
+    });
+
+    try {
+      final res = await Supabase.instance.client.rpc(
+        'toggle_user_status',
+        params: {'p_user_id': id, 'p_is_active': newActive},
+      );
+      if (res is Map && res['success'] == true) {
+        if (!mounted) return;
+        setState(() {
+          _teachersFuture = _loadTeachers();
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(res['message']?.toString() ?? 'Status updated successfully'),
+            backgroundColor: newActive ? const Color(0xFF10B981) : const Color(0xFFD97706),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) setState(() => _error = 'Could not update status: $e');
+    } finally {
+      if (mounted) setState(() => _isResetting = false);
+    }
+  }
+
   Future<void> _deleteTeacher(Map<String, dynamic> teacher) async {
     final id = teacher['id'] as String;
     final name = teacher['full_name'] as String? ?? teacher['username'] as String? ?? 'Teacher';
@@ -1133,6 +1201,7 @@ class _TeacherManagementScreenState
                         onDelete: () => _deleteTeacher(teacher),
                         onEdit: () => _editTeacher(teacher),
                         onManageClasses: () => _manageTeacherClasses(teacher),
+                        onToggleStatus: () => _toggleTeacherStatus(teacher),
                       ),
                       const SizedBox(height: 12),
                     ],
@@ -1155,6 +1224,7 @@ class _TeacherDirectoryCard extends StatelessWidget {
     required this.onDelete,
     required this.onEdit,
     required this.onManageClasses,
+    required this.onToggleStatus,
   });
 
   final Map<String, dynamic> teacher;
@@ -1163,6 +1233,7 @@ class _TeacherDirectoryCard extends StatelessWidget {
   final VoidCallback onDelete;
   final VoidCallback onEdit;
   final VoidCallback onManageClasses;
+  final VoidCallback onToggleStatus;
 
   @override
   Widget build(BuildContext context) {
@@ -1414,6 +1485,25 @@ class _TeacherDirectoryCard extends StatelessWidget {
                   ),
                 ),
                 const Spacer(),
+                AnimatedPressButton(
+                  child: IconButton.outlined(
+                    tooltip: teacher['is_active'] != false ? 'Suspend faculty account' : 'Activate faculty account',
+                    style: IconButton.styleFrom(
+                      foregroundColor: teacher['is_active'] != false ? const Color(0xFFD97706) : const Color(0xFF10B981),
+                      side: BorderSide(
+                        color: teacher['is_active'] != false ? const Color(0xFFFDE68A) : const Color(0xFF6EE7B7),
+                      ),
+                      minimumSize: const Size(36, 36),
+                      padding: const EdgeInsets.all(6),
+                    ),
+                    onPressed: isResetting ? null : onToggleStatus,
+                    icon: Icon(
+                      teacher['is_active'] != false ? Icons.block_rounded : Icons.check_circle_outline_rounded,
+                      size: 17,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 6),
                 AnimatedPressButton(
                   child: IconButton.outlined(
                     tooltip: 'Edit faculty profile',

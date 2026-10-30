@@ -22,3 +22,4 @@ end;
 $$;
 
 grant execute on function public.debug_users_indexes() to anon, authenticated;
+

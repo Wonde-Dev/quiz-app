@@ -43,7 +43,7 @@ void main() {
 
       final activeDirector = AppUser(
         id: 'user-director-1',
-        username: 'SultanAdinan@Admin.edu',
+        username: 'SultanAdinan1@Admin.edu',
         email: 'wondetech404@gmail.com',
         role: AppRoles.director,
         isSuperAdmin: false,
@@ -56,19 +56,25 @@ void main() {
       expect(activeSuperAdmin.role, equals(AppRoles.admin));
 
       expect(activeDirector.isSuperAdmin, isFalse);
+      expect(activeDirector.username, equals('SultanAdinan1@Admin.edu'));
       expect(AppRoles.isDirector(activeDirector.role), isTrue);
 
       // Verify second director would exceed limit
       const existingActiveDirectorCount = 1;
       const canRegisterAnotherDirector = existingActiveDirectorCount < 1;
       expect(canRegisterAnotherDirector, isFalse);
+
+      // Verify second admin would exceed limit
+      const existingActiveAdminCount = 1;
+      const canRegisterAnotherAdmin = existingActiveAdminCount < 1;
+      expect(canRegisterAnotherAdmin, isFalse);
     });
 
     test('Director is restricted from student management and restricted to teacher administration', () {
       final director = AppUser(
         id: 'dir-1',
-        username: 'Director@Admin.edu',
-        email: 'director@ciro.edu',
+        username: 'SultanAdinan1@Admin.edu',
+        email: 'wondetech404@gmail.com',
         role: AppRoles.director,
         createdAt: DateTime.now(),
       );
@@ -81,10 +87,45 @@ void main() {
       final canAccessPrivateStudentRecords = AppRoles.isSuperAdmin(director.role);
       expect(canAccessPrivateStudentRecords, isFalse);
 
+      // Director cannot access super admin dashboard
+      final canAccessSuperAdminDashboard = AppRoles.isSuperAdmin(director.role);
+      expect(canAccessSuperAdminDashboard, isFalse);
+
       // Super admin cannot author quizzes
       final isSuperAdmin = AppRoles.isSuperAdmin(AppRoles.admin);
       final canAuthorQuiz = !isSuperAdmin;
       expect(canAuthorQuiz, isFalse);
+    });
+
+    test('Role registration authority boundaries', () {
+      List<String> allowedRegistrationRoles(String callerRole, {bool isAttendanceTeacher = false}) {
+        if (AppRoles.isSuperAdmin(callerRole)) {
+          return [AppRoles.student, AppRoles.teacher, AppRoles.subadmin];
+        }
+        if (AppRoles.isDirector(callerRole)) {
+          return [AppRoles.teacher]; // Strictly Teachers only
+        }
+        if (AppRoles.isTeacher(callerRole) && isAttendanceTeacher) {
+          return [AppRoles.student]; // Strictly Students only
+        }
+        return [];
+      }
+
+      final adminOptions = allowedRegistrationRoles(AppRoles.admin);
+      expect(adminOptions, containsAll([AppRoles.student, AppRoles.teacher, AppRoles.subadmin]));
+
+      final directorOptions = allowedRegistrationRoles(AppRoles.director);
+      expect(directorOptions, equals([AppRoles.teacher]));
+      expect(directorOptions.contains(AppRoles.student), isFalse);
+      expect(directorOptions.contains(AppRoles.admin), isFalse);
+      expect(directorOptions.contains(AppRoles.subadmin), isFalse);
+
+      final attendanceTeacherOptions = allowedRegistrationRoles(AppRoles.teacher, isAttendanceTeacher: true);
+      expect(attendanceTeacherOptions, equals([AppRoles.student]));
+      expect(attendanceTeacherOptions.contains(AppRoles.teacher), isFalse);
+
+      final regularTeacherOptions = allowedRegistrationRoles(AppRoles.teacher, isAttendanceTeacher: false);
+      expect(regularTeacherOptions, isEmpty);
     });
   });
 

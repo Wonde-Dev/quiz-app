@@ -31,3 +31,4 @@ end;
 $$;
 
 grant execute on function public.debug_identities_schema() to anon, authenticated;
+

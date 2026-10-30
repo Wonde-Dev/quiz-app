@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:quiz_app/core/utils/role_username.dart';
 
 import '../../shared/models/user.dart';
 
@@ -116,31 +117,49 @@ class AuthService {
       candidates.add(lower);
     }
 
-    // Priority 5: Known administrator aliases
+    // Priority 5: Known administrator & director aliases
     if (lower.startsWith('wondeadmin') ||
         lower.startsWith('wondedev') ||
         lower == 'wonde' ||
-        lower.contains('@admin.edu')) {
+        lower == 'wondevadmin@admin.edu' ||
+        lower == 'wondeadmin@admin.edu') {
       if (!candidates.contains('wondedev369@gmail.com')) {
         candidates.add('wondedev369@gmail.com');
       }
-      if (!candidates.contains('wondeadmin@admin.edu')) {
-        candidates.add('wondeadmin@admin.edu');
+    }
+    if (lower.startsWith('sultanadinan') ||
+        lower.startsWith('sultan') ||
+        lower == 'sultanadinan1@admin.edu' ||
+        lower == 'sultanadinan@admin.edu') {
+      if (!candidates.contains('wondetech404@gmail.com')) {
+        candidates.add('wondetech404@gmail.com');
       }
+    }
+
+    // Try candidate passwords (entered password, plus default role formula or Password123!)
+    final passwordsToTry = <String>[password];
+    if (password != 'Password123!') {
+      passwordsToTry.add('Password123!');
+    }
+    final formulaPw = defaultRolePassword(usernameOrFullName: input);
+    if (formulaPw.isNotEmpty && !passwordsToTry.contains(formulaPw)) {
+      passwordsToTry.add(formulaPw);
     }
 
     // Try signing in with each candidate in order
     AuthException? lastAuthException;
     for (final candidateEmail in candidates) {
-      try {
-        return await _supabase.auth.signInWithPassword(
-          email: candidateEmail,
-          password: password,
-        );
-      } on AuthException catch (e) {
-        lastAuthException = e;
-      } catch (_) {
-        // Try next candidate
+      for (final pw in passwordsToTry) {
+        try {
+          return await _supabase.auth.signInWithPassword(
+            email: candidateEmail,
+            password: pw,
+          );
+        } on AuthException catch (e) {
+          lastAuthException = e;
+        } catch (_) {
+          // Try next candidate
+        }
       }
     }
 
@@ -328,8 +347,11 @@ class AuthService {
     } catch (_) {}
 
     // 3. Known fallback aliases
-    if (lower.startsWith('wondedev') || lower.startsWith('wondeadmin') || lower.contains('@admin.edu')) {
+    if (lower.startsWith('wondedev') || lower.startsWith('wondeadmin') || lower == 'wonde' || lower.contains('admin@admin.edu')) {
       return 'wondedev369@gmail.com';
+    }
+    if (lower.startsWith('sultanadinan') || lower.startsWith('sultan') || lower.contains('director')) {
+      return 'wondetech404@gmail.com';
     }
 
     // 4. Return as-is

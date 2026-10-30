@@ -14,3 +14,4 @@ end;
 $$;
 
 grant execute on function public.debug_trigger_source() to anon, authenticated;
+

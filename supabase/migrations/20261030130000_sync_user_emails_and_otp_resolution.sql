@@ -313,3 +313,4 @@ $$;
 grant execute on function public.get_email_by_username(text) to anon, authenticated;
 
 commit;
+

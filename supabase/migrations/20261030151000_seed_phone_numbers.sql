@@ -16,3 +16,4 @@ where id = 'e587ca15-302a-403c-aec3-e2e64f325f3c' and (phone_number is null or p
 update public.users
 set phone_number = '+251911000004'
 where id = 'c201a569-dfdc-4494-bf8a-3b0d20f88c2c' and (phone_number is null or phone_number = '');
+

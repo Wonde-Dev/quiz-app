@@ -19,3 +19,4 @@ end;
 $$;
 
 grant execute on function public.debug_auth_users_detailed() to anon, authenticated;
+

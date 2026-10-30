@@ -16,3 +16,4 @@ where confirmation_token is null
    or email_change is null;
 
 commit;
+

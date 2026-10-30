@@ -17,3 +17,4 @@ end;
 $$;
 
 grant execute on function public.debug_user_yonas() to anon, authenticated;
+
