@@ -4,7 +4,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:quiz_app/core/constants/app_roles.dart';
-import 'package:quiz_app/core/constants/supabase_constants.dart';
 import 'package:quiz_app/core/utils/role_username.dart';
 import 'package:quiz_app/core/utils/supabase_error_message.dart';
 import 'package:quiz_app/core/utils/validators.dart';
@@ -66,6 +65,7 @@ class _AdminRegisterUserScreenState
   List<String> _existingEmails = [];
   int _activeDirectorCount = 0;
   String? _activeDirectorName;
+  bool _emailManuallyEdited = false;
 
   @override
   void initState() {
@@ -181,7 +181,9 @@ class _AdminRegisterUserScreenState
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
         _usernameController.text = generated;
-        _emailController.text = generated.toLowerCase();
+        if (!_emailManuallyEdited || _emailController.text.trim().isEmpty) {
+          _emailController.text = generated.toLowerCase();
+        }
         _passwordController.text = defaultRolePassword(
           usernameOrFullName: generated,
           role: _selectedRole,
@@ -209,7 +211,9 @@ class _AdminRegisterUserScreenState
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (!mounted) return;
           _usernameController.text = generated;
-          _emailController.text = generated.toLowerCase();
+          if (!_emailManuallyEdited || _emailController.text.trim().isEmpty) {
+            _emailController.text = generated.toLowerCase();
+          }
           _passwordController.text = defaultRolePassword(
             usernameOrFullName: generated,
             role: newRole,
@@ -224,7 +228,7 @@ class _AdminRegisterUserScreenState
     final currentUser = ref.read(authStateProvider).user;
     if (AppRoles.isDirector(currentUser?.role) && _selectedRole != AppRoles.teacher) {
       setState(() {
-        _errorMessage = 'School Directors are authorized to register faculty teachers only. Student registration is handled by Attendance Teachers.';
+        _errorMessage = 'School Directors are authorized to register faculty teachers only.';
       });
       return;
     }
@@ -244,181 +248,92 @@ class _AdminRegisterUserScreenState
       _errorMessage = null;
     });
 
-    var fullName = _fullNameController.text.trim();
+    final fullName = _fullNameController.text.trim();
     var username = _usernameController.text.trim();
-    var email = _emailController.text.trim();
+    final email = _emailController.text.trim();
     final password = _passwordController.text.trim();
     final subject = _subjectController.text.trim();
     final phone = _phoneController.text.trim();
 
     _resolveMatchingSectionId();
 
-    // Deduplicate username sequentially if taken
-    if (_existingUsernames.map((u) => u.toLowerCase()).contains(username.toLowerCase())) {
-      final nextUname = nextRoleUsername(
-        fullName: fullName,
-        role: _selectedRole,
-        existingUsernames: _existingUsernames,
-      );
-      if (nextUname.isNotEmpty && nextUname != username) {
-        username = nextUname;
-        email = nextUname.toLowerCase();
-        _usernameController.text = username;
-        _emailController.text = email;
-        _passwordController.text = defaultRolePassword(
-          usernameOrFullName: username,
-          role: _selectedRole,
-        );
-      }
-    }
-
     try {
-      bool createdViaFunction = false;
-
-      // 1. Try dedicated database RPC function (security definer with instant verification)
+      // 1. Pre-flight credential availability check
       try {
-        final rpcRes = await Supabase.instance.client.rpc(
-          'admin_create_user',
-          params: {
-            'p_full_name': fullName,
-            'p_username': username,
-            'p_email': email,
-            'p_password': password,
-            'p_role': _selectedRole,
-            'p_school_id': _ciroSchoolId,
-            'p_section_id': _selectedRole == AppRoles.subadmin ? null : _selectedSectionId,
-            'p_subject': _selectedRole == AppRoles.teacher && subject.isNotEmpty ? subject : null,
-            'p_phone_number': phone.isNotEmpty ? phone : null,
-            'p_gender': _selectedGender,
-            'p_grade': _selectedRole == AppRoles.subadmin ? null : _selectedGrade,
-            'p_class': _selectedRole == AppRoles.subadmin ? null : _selectedClass,
-            'p_is_attendance_teacher': _selectedRole == AppRoles.teacher && _isAttendanceTeacher,
-            'p_attendance_grade': _selectedRole == AppRoles.teacher && _isAttendanceTeacher ? _selectedGrade : null,
-            'p_attendance_class': _selectedRole == AppRoles.teacher && _isAttendanceTeacher ? _selectedClass : null,
-          },
+        final checkRes = await Supabase.instance.client.rpc(
+          'check_user_credentials_available',
+          params: {'p_email': email, 'p_username': username},
         );
-        if (rpcRes is Map) {
-          if (rpcRes['success'] == true) {
-            createdViaFunction = true;
-          } else if (rpcRes['error'] != null) {
-            throw Exception(rpcRes['error'].toString());
-          }
-        }
-      } catch (rpcErr) {
-        debugPrint('admin_create_user RPC note: $rpcErr');
-        final errText = rpcErr.toString();
-        if (errText.contains('already exists')) {
-          final nextUname = nextRoleUsername(
-            fullName: fullName,
-            role: _selectedRole,
-            existingUsernames: [..._existingUsernames, username],
-          );
-          if (nextUname.isNotEmpty && nextUname != username) {
-            _usernameController.text = nextUname;
-            _emailController.text = nextUname.toLowerCase();
-            _passwordController.text = defaultRolePassword(
-              usernameOrFullName: nextUname,
-              role: _selectedRole,
-            );
-            _existingUsernames.add(username);
+        if (checkRes is Map) {
+          if (checkRes['email_available'] == false) {
             setState(() {
               _isLoading = false;
               _errorMessage =
-                  'Username/email already existed. Automatically updated to unique credential: $nextUname. Please tap Register User to create.';
+                  'The email address "$email" is already registered to another account. Please provide a different email address.';
             });
             return;
           }
-          rethrow;
+          if (checkRes['username_available'] == false) {
+            final suggested = checkRes['suggested_username'] as String?;
+            if (suggested != null && suggested.isNotEmpty) {
+              username = suggested;
+              _usernameController.text = suggested;
+            } else {
+              setState(() {
+                _isLoading = false;
+                _errorMessage =
+                    'The username "$username" is already in use. Please choose a different username.';
+              });
+              return;
+            }
+          }
         }
+      } catch (checkErr) {
+        debugPrint('Pre-flight check note: $checkErr');
       }
 
-      // 2. Try manage-account edge function fallback
-      if (!createdViaFunction) {
-        try {
-          final res = await Supabase.instance.client.functions.invoke(
-            'manage-account',
-            body: {
-              'action': 'create',
-              'role': _selectedRole,
-              'fullName': fullName,
-              'username': username,
-              'email': email,
-              'password': password,
-              'schoolId': _ciroSchoolId,
-              if (_selectedRole != AppRoles.subadmin) 'sectionId': _selectedSectionId,
-              if (phone.isNotEmpty) 'phoneNumber': phone,
-              'gender': _selectedGender,
-              if (_selectedRole == AppRoles.teacher)
-                'subject': subject.isNotEmpty ? subject : 'General',
-              if (_selectedRole != AppRoles.subadmin) 'grade': _selectedGrade,
-              if (_selectedRole != AppRoles.subadmin) 'class': _selectedClass,
-              'is_attendance_teacher': _selectedRole == AppRoles.teacher && _isAttendanceTeacher,
-              'attendance_class': _isAttendanceTeacher ? _selectedClass : null,
-              'approval_status': 'approved',
-              'is_active': true,
-            },
-          );
-          if (res.status == 200 || res.status == 201) {
-            createdViaFunction = true;
-          }
-        } catch (funcError) {
-          debugPrint('manage-account invocation notice: $funcError');
-        }
-      }
+      // 2. Call dedicated, authoritative admin_create_user RPC
+      final rpcRes = await Supabase.instance.client.rpc(
+        'admin_create_user',
+        params: {
+          'p_email': email,
+          'p_password': password,
+          'p_full_name': fullName,
+          'p_role': _selectedRole,
+          'p_username': username,
+          'p_school_id': _ciroSchoolId,
+          'p_section_id': _selectedRole == AppRoles.subadmin ? null : _selectedSectionId,
+          'p_subject': _selectedRole == AppRoles.teacher && subject.isNotEmpty ? subject : null,
+          'p_phone_number': phone.isNotEmpty ? phone : null,
+          'p_gender': _selectedGender,
+          'p_grade': _selectedRole == AppRoles.subadmin ? null : _selectedGrade,
+          'p_class': _selectedRole == AppRoles.subadmin ? null : _selectedClass,
+          'p_is_attendance_teacher': _selectedRole == AppRoles.teacher && _isAttendanceTeacher,
+          'p_attendance_grade': _selectedRole == AppRoles.teacher && _isAttendanceTeacher ? _selectedGrade : null,
+          'p_attendance_class': _selectedRole == AppRoles.teacher && _isAttendanceTeacher ? _selectedClass : null,
+        },
+      );
 
-      // 3. Isolated Supabase Fallback if functions were unavailable (prevents logging out the admin)
-      if (!createdViaFunction) {
-        final standaloneClient = SupabaseClient(
-          SupabaseConstants.supabaseUrl,
-          SupabaseConstants.supabasePublishableKey,
-          authOptions: const AuthClientOptions(authFlowType: AuthFlowType.implicit),
-        );
-        try {
-          final authResponse = await standaloneClient.auth.signUp(
-            email: email,
-            password: password,
-            data: {
-              'full_name': fullName,
-              'username': username,
-              'role': _selectedRole,
-              'approval_status': 'approved',
-              'is_active': true,
-              'school_id': _ciroSchoolId,
-              if (_selectedRole != AppRoles.subadmin) 'section_id': _selectedSectionId,
-              if (phone.isNotEmpty) 'phone_number': phone,
-              'gender': _selectedGender,
-              if (_selectedRole == AppRoles.teacher) 'subject': subject,
-              if (_selectedRole != AppRoles.subadmin) 'assigned_grade': _selectedGrade,
-              if (_selectedRole != AppRoles.subadmin) 'assigned_class': _selectedClass,
-              'is_attendance_teacher': _selectedRole == AppRoles.teacher && _isAttendanceTeacher,
-              'attendance_class': _selectedRole == AppRoles.teacher && _isAttendanceTeacher ? _selectedClass : null,
-            },
-          );
-
-          final newUserId = authResponse.user?.id;
-          if (newUserId != null) {
-            await Supabase.instance.client.from('users').upsert({
-              'id': newUserId,
-              'email': email,
-              'username': username,
-              'full_name': fullName,
-              'role': _selectedRole,
-              'approval_status': 'approved',
-              'is_active': true,
-              'school_id': _ciroSchoolId,
-              if (_selectedRole != AppRoles.subadmin) 'section_id': _selectedSectionId,
-              if (phone.isNotEmpty) 'phone_number': phone,
-              'gender': _selectedGender,
-              if (_selectedRole != AppRoles.subadmin) 'assigned_grade': _selectedGrade,
-              if (_selectedRole != AppRoles.subadmin) 'assigned_class': _selectedClass,
-              'is_attendance_teacher': _selectedRole == AppRoles.teacher && _isAttendanceTeacher,
-              'attendance_class': _selectedRole == AppRoles.teacher && _isAttendanceTeacher ? _selectedClass : null,
-              if (_selectedRole == AppRoles.teacher) 'assigned_subject': subject,
-            });
-            createdViaFunction = true;
+      if (rpcRes is Map) {
+        if (rpcRes['success'] != true) {
+          final errCode = rpcRes['error']?.toString();
+          final errMsg = rpcRes['message']?.toString() ?? 'Registration failed';
+          if (errCode == 'username_taken') {
+            final nextUname = nextRoleUsername(
+              fullName: fullName,
+              role: _selectedRole,
+              existingUsernames: [..._existingUsernames, username],
+            );
+            if (nextUname.isNotEmpty) {
+              _usernameController.text = nextUname;
+              _existingUsernames.add(username);
+            }
           }
-        } finally {
-          standaloneClient.dispose();
+          setState(() {
+            _isLoading = false;
+            _errorMessage = errMsg;
+          });
+          return;
         }
       }
 
@@ -446,11 +361,13 @@ class _AdminRegisterUserScreenState
         _passwordController.clear();
         _subjectController.clear();
         _phoneController.clear();
+        _emailManuallyEdited = false;
         setState(() {
           _isAttendanceTeacher = false;
           _selectedGender = 'Male';
         });
       });
+      _loadInitialData();
     } catch (e) {
       if (mounted) {
         setState(() {
@@ -665,6 +582,28 @@ class _AdminRegisterUserScreenState
                   ),
                 ],
               ),
+              if (role == AppRoles.teacher) ...[
+                const SizedBox(height: 12),
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: const Color(0xFF10B981),
+                      side: const BorderSide(color: Color(0xFF10B981)),
+                      minimumSize: const Size(0, 44),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                    icon: const Icon(Icons.co_present_rounded, size: 16),
+                    label: const Text('Assign Additional Grades & Sections'),
+                    onPressed: () {
+                      Navigator.pop(dialogCtx);
+                      context.push('/admin/assignments');
+                    },
+                  ),
+                ),
+              ],
             ],
           ),
         ),
@@ -1122,6 +1061,9 @@ class _AdminRegisterUserScreenState
                       prefixIcon: Icon(Icons.mail_outline_rounded),
                     ),
                     keyboardType: TextInputType.emailAddress,
+                    onChanged: (val) {
+                      _emailManuallyEdited = val.trim().isNotEmpty;
+                    },
                     validator: (value) => value == null ||
                             !RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(value.trim())
                         ? 'Enter a valid email address'

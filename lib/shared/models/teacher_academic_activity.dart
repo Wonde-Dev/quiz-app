@@ -87,3 +87,4 @@ class TeacherAcademicActivity {
     return parts.join(' - ');
   }
 }
+
