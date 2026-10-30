@@ -61,6 +61,27 @@ class AnnouncementService {
     }
   }
 
+  Future<bool> updateAnnouncement({
+    required String id,
+    required String title,
+    required String content,
+    String targetAudience = 'all',
+    bool isPinned = false,
+  }) async {
+    try {
+      await _client.from('school_announcements').update({
+        'title': title.trim(),
+        'content': content.trim(),
+        'target_audience': targetAudience,
+        'is_pinned': isPinned,
+      }).eq('id', id);
+      return true;
+    } catch (e) {
+      debugPrint('updateAnnouncement error: $e');
+      rethrow;
+    }
+  }
+
   Future<bool> deleteAnnouncement(String id) async {
     try {
       await _client.from('school_announcements').delete().eq('id', id);

@@ -68,7 +68,6 @@ class _TeacherManagementScreenState
               'is_attendance_teacher, attendance_grade, attendance_class, assigned_grade, assigned_class, assigned_subject, requested_subject, schools(name)',
             )
             .eq('role', AppRoles.teacher)
-            .neq('is_active', false)
             .order('full_name', ascending: true),
         client
             .from('teacher_courses')
@@ -1226,6 +1225,24 @@ class _TeacherDirectoryCard extends StatelessWidget {
                               ),
                             ),
                           ),
+                          if (teacher['is_active'] == false) ...[
+                            const SizedBox(width: 6),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                              decoration: BoxDecoration(
+                                color: Colors.red.withValues(alpha: 0.12),
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: const Text(
+                                'Suspended',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w700,
+                                  color: Colors.red,
+                                ),
+                              ),
+                            ),
+                          ],
                         ],
                       ),
                       const SizedBox(height: 3),

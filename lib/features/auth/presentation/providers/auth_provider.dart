@@ -547,6 +547,8 @@ class AuthNotifier extends Notifier<AuthState> {
     }
   }
 
+  Future<void> refreshCurrentUser() => checkSession();
+
   Future<void> checkSession() async {
     final supabaseUser = _authService.currentUser;
     if (supabaseUser == null) {

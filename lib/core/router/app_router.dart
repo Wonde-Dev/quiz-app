@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:quiz_app/core/constants/app_roles.dart';
 import 'package:quiz_app/features/admin/presentation/screens/admin_dashboard_screen.dart';
+import 'package:quiz_app/features/director/presentation/screens/director_dashboard_screen.dart';
 import 'package:quiz_app/features/auth/presentation/providers/auth_provider.dart';
 import 'package:quiz_app/features/auth/presentation/screens/force_change_password_screen.dart';
 import 'package:quiz_app/features/auth/presentation/screens/login_screen.dart';
@@ -68,7 +69,8 @@ final routerProvider = Provider<GoRouter>((ref) {
           location.startsWith('/register/') ||
           location == '/change-password') {
         return switch (user.role) {
-          AppRoles.admin || AppRoles.subadmin || AppRoles.director || 'director' => '/admin/dashboard',
+          AppRoles.admin => '/admin/dashboard',
+          AppRoles.subadmin || AppRoles.director || 'director' => '/director/dashboard',
           AppRoles.teacher => '/teacher/dashboard',
           AppRoles.student => '/student/dashboard',
           _ => '/login',
@@ -77,30 +79,35 @@ final routerProvider = Provider<GoRouter>((ref) {
 
       // Quiz creation is strictly reserved for teachers:
       if (location == '/teacher/quizzes/new' && user.role != AppRoles.teacher) {
-        return (user.role == AppRoles.admin || AppRoles.isDirector(user.role))
+        return (user.role == AppRoles.admin)
             ? '/admin/dashboard'
-            : '/student/dashboard';
+            : (AppRoles.isDirector(user.role) ? '/director/dashboard' : '/student/dashboard');
       }
 
       // Route protection for School Director:
       if (AppRoles.isDirector(user.role)) {
-        if (location == '/admin/audit-logs') {
-          return '/admin/dashboard';
+        if (location == '/admin/dashboard' ||
+            location == '/admin/audit-logs' ||
+            location == '/admin/schools' ||
+            location.startsWith('/teacher') ||
+            location.startsWith('/student')) {
+          return '/director/dashboard';
         }
         if (location == '/teacher/students' ||
             location == '/admin/classes' ||
             location == '/teacher/reset-passwords') {
           return '/admin/teachers';
         }
-        if (location == '/admin/schools' ||
-            location.startsWith('/teacher') ||
-            location.startsWith('/student')) {
+        return null;
+      }
+
+      // Route protection for Super Administrator:
+      if (user.role == AppRoles.admin) {
+        if (location == '/director/dashboard') {
           return '/admin/dashboard';
         }
         return null;
       }
-
-      if (user.role == AppRoles.admin) return null;
 
       // Attendance teachers have authority to review approvals and register students for their assigned class
       if (user.role == AppRoles.teacher && user.isAttendanceTeacher) {
@@ -149,6 +156,10 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/admin/dashboard',
         builder: (context, state) => const AdminDashboardScreen(),
+      ),
+      GoRoute(
+        path: '/director/dashboard',
+        builder: (context, state) => const DirectorDashboardScreen(),
       ),
       GoRoute(
         path: '/admin/register-user',
