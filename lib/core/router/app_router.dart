@@ -82,7 +82,25 @@ final routerProvider = Provider<GoRouter>((ref) {
             : '/student/dashboard';
       }
 
-      if (user.role == AppRoles.admin || AppRoles.isDirector(user.role)) return null;
+      // Route protection for School Director:
+      if (AppRoles.isDirector(user.role)) {
+        if (location == '/admin/audit-logs') {
+          return '/admin/dashboard';
+        }
+        if (location == '/teacher/students' ||
+            location == '/admin/classes' ||
+            location == '/teacher/reset-passwords') {
+          return '/admin/teachers';
+        }
+        if (location == '/admin/schools' ||
+            location.startsWith('/teacher') ||
+            location.startsWith('/student')) {
+          return '/admin/dashboard';
+        }
+        return null;
+      }
+
+      if (user.role == AppRoles.admin) return null;
 
       // Attendance teachers have authority to review approvals and register students for their assigned class
       if (user.role == AppRoles.teacher && user.isAttendanceTeacher) {

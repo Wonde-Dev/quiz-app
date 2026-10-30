@@ -104,14 +104,17 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen>
           'p_school_id': _ciroSchoolId,
         }),
         client.from('quizzes').select('id').eq('is_published', true),
-        auditService.fetchLogs(limit: 5),
+        if (!isDirector)
+          auditService.fetchLogs(limit: 5)
+        else
+          Future.value(<AuditLog>[]),
         _announcementService.fetchAnnouncements(schoolId: _ciroSchoolId, limit: 6),
       ]);
 
       if (!mounted) return;
       final rpcRes = results[0];
       final publishedQuizzes = results[1] as List;
-      final recentLogs = results[2] as List<AuditLog>;
+      final recentLogs = isDirector ? <AuditLog>[] : (results[2] as List<AuditLog>);
       final announcements = results[3] as List<SchoolAnnouncement>;
 
       if (rpcRes is Map) {
@@ -142,17 +145,25 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen>
     }
 
     try {
+      var usersQuery = client.from('users').select('id, role, is_active, approval_status');
+      if (isDirector) {
+        usersQuery = usersQuery.neq('role', 'admin');
+      }
+
       final results = await Future.wait<dynamic>([
-        client.from('users').select('id, role, is_active, approval_status'),
+        usersQuery,
         client.from('quizzes').select('id').eq('is_published', true),
-        auditService.fetchLogs(limit: 5),
+        if (!isDirector)
+          auditService.fetchLogs(limit: 5)
+        else
+          Future.value(<AuditLog>[]),
         _announcementService.fetchAnnouncements(schoolId: _ciroSchoolId, limit: 6),
       ]);
 
       if (!mounted) return;
       final allUsers = (results[0] as List).cast<Map<String, dynamic>>();
       final publishedQuizzes = results[1] as List;
-      final recentLogs = results[2] as List<AuditLog>;
+      final recentLogs = isDirector ? <AuditLog>[] : (results[2] as List<AuditLog>);
       final announcements = results[3] as List<SchoolAnnouncement>;
 
       final activeUsers = allUsers.where((u) => u['is_active'] != false).toList();
@@ -1028,7 +1039,7 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen>
                   Expanded(
                     child: _MetricCard(
                       title: 'School Total Users',
-                      subtitle: 'Directors, Teachers & Students (Excludes Super Admin)',
+                      subtitle: 'Teachers & Students (Excludes Super Admin)',
                       count: _schoolUsersCount,
                       loading: _loading,
                       icon: Icons.groups_rounded,
@@ -1046,6 +1057,10 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen>
                       loading: _loading,
                       icon: Icons.co_present_rounded,
                       color: const Color(0xFF10B981),
+                      onTap: () async {
+                        await context.push('/admin/teachers');
+                        if (mounted) _loadStats();
+                      },
                     ),
                   ),
                 ],
@@ -1055,17 +1070,6 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen>
                 children: [
                   Expanded(
                     child: _MetricCard(
-                      title: 'Enrolled Students',
-                      subtitle: 'Official registered students',
-                      count: _studentCount,
-                      loading: _loading,
-                      icon: Icons.school_rounded,
-                      color: const Color(0xFF3B82F6),
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: _MetricCard(
                       title: 'Active Announcements',
                       subtitle: 'Campus notices broadcasted',
                       count: _announcements.length,
@@ -1073,6 +1077,21 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen>
                       icon: Icons.campaign_rounded,
                       color: const Color(0xFF0284C7),
                       onTap: _postAnnouncementDialog,
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: _MetricCard(
+                      title: 'Pending Teacher Approvals',
+                      subtitle: 'Teachers awaiting verification',
+                      count: _pendingCount,
+                      loading: _loading,
+                      icon: Icons.pending_actions_rounded,
+                      color: const Color(0xFFF59E0B),
+                      onTap: () async {
+                        await context.push('/admin/approvals');
+                        if (mounted) _loadStats();
+                      },
                     ),
                   ),
                 ],
@@ -1122,7 +1141,7 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen>
                                     fontWeight: FontWeight.w800, fontSize: 14),
                               ),
                               Text(
-                                'Official teacher and student tallies for Grade 9, 10, 11, and 12 (grade totals only)',
+                                'Student enrollment counts per grade level (individual student profiles are managed by Class Attendance Teachers)',
                                 style: TextStyle(
                                     fontSize: 11, color: Color(0xFF64748B)),
                               ),
@@ -1323,72 +1342,74 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen>
                   ],
                 ],
               ),
-            const SizedBox(height: 24),
+            if (!isDirector) ...[
+              const SizedBox(height: 24),
 
-            // Recent System & Admin Activities section
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text(
-                  'Recent Admin & System Activities',
-                  style: theme.textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.w800,
-                    color: isDark ? Colors.white : const Color(0xFF0F172A),
+              // Recent System & Admin Activities section (Super Admin only)
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    'Recent Admin & System Activities',
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w800,
+                      color: isDark ? Colors.white : const Color(0xFF0F172A),
+                    ),
                   ),
-                ),
-                TextButton(
-                  onPressed: () async {
-                    await context.push('/admin/audit-logs');
-                    if (mounted) _loadStats();
-                  },
-                  child: const Text('View All Logs'),
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
+                  TextButton(
+                    onPressed: () async {
+                      await context.push('/admin/audit-logs');
+                      if (mounted) _loadStats();
+                    },
+                    child: const Text('View All Logs'),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
 
-            if (_loading && _recentLogs.isEmpty)
-              const Card(
-                child: Padding(
-                  padding: EdgeInsets.all(24),
-                  child: Center(child: CircularProgressIndicator()),
-                ),
-              )
-            else if (_recentLogs.isEmpty)
-              Card(
-                child: Padding(
-                  padding: const EdgeInsets.all(20),
-                  child: Row(
-                    children: [
-                      const Icon(Icons.info_outline, color: Color(0xFF64748B)),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Text(
-                          'No recent audit activity recorded yet.',
-                          style: theme.textTheme.bodyMedium?.copyWith(
-                            color: const Color(0xFF64748B),
+              if (_loading && _recentLogs.isEmpty)
+                const Card(
+                  child: Padding(
+                    padding: EdgeInsets.all(24),
+                    child: Center(child: CircularProgressIndicator()),
+                  ),
+                )
+              else if (_recentLogs.isEmpty)
+                Card(
+                  child: Padding(
+                    padding: const EdgeInsets.all(20),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.info_outline, color: Color(0xFF64748B)),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Text(
+                            'No recent audit activity recorded yet.',
+                            style: theme.textTheme.bodyMedium?.copyWith(
+                              color: const Color(0xFF64748B),
+                            ),
                           ),
                         ),
-                      ),
-                    ],
-                  ),
-                ),
-              )
-            else
-              Card(
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                  child: Column(
-                    children: [
-                      for (int i = 0; i < _recentLogs.length; i++) ...[
-                        _ActivityListTile(log: _recentLogs[i]),
-                        if (i < _recentLogs.length - 1)
-                          const Divider(height: 1, color: Color(0xFFF1F5F9)),
                       ],
-                    ],
+                    ),
+                  ),
+                )
+              else
+                Card(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    child: Column(
+                      children: [
+                        for (int i = 0; i < _recentLogs.length; i++) ...[
+                          _ActivityListTile(log: _recentLogs[i]),
+                          if (i < _recentLogs.length - 1)
+                            const Divider(height: 1, color: Color(0xFFF1F5F9)),
+                        ],
+                      ],
+                    ),
                   ),
                 ),
-              ),
+            ],
 
             const SizedBox(height: 24),
             Text(

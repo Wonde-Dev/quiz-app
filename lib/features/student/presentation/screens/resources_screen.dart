@@ -1016,11 +1016,9 @@ class _ResourcesScreenState extends ConsumerState<ResourcesScreen> {
                   separatorBuilder: (_, _) => const SizedBox(height: 14),
                   itemBuilder: (context, index) {
                     final res = filtered[index];
-                    final canDelete = isTeacher ||
+                    final canDelete = (isTeacher && res.teacherId == user?.id) ||
                         user?.isSuperAdmin == true ||
-                        user?.role == AppRoles.admin ||
-                        (AppRoles.isDirector(user?.role) &&
-                            (res.schoolId == null || res.schoolId == user?.schoolId));
+                        user?.role == AppRoles.admin;
 
                     return _ResourceCard(
                       resource: res,

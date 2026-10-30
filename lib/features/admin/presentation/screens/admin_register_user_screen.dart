@@ -83,23 +83,30 @@ class _AdminRegisterUserScreenState
 
   Future<void> _loadInitialData() async {
     final client = Supabase.instance.client;
+    final currentUser = ref.read(authStateProvider).user;
+    final isDirector = AppRoles.isDirector(currentUser?.role);
+
     try {
+      var usersQuery = client.from('users').select('username, email');
+      if (isDirector) {
+        usersQuery = usersQuery.neq('role', 'admin');
+      }
+
       final results = await Future.wait<dynamic>([
         client.from('sections').select('id, name, grade, school_id').eq('school_id', _ciroSchoolId),
-        client.from('users').select('username, email'),
+        usersQuery,
       ]);
 
       if (!mounted) return;
 
       final sectionRows = results[0] as List;
       final userRows = results[1] as List;
-      final currentUser = ref.read(authStateProvider).user;
 
       setState(() {
         _sections = List<Map<String, dynamic>>.from(sectionRows);
         _resolveMatchingSectionId();
 
-        if (AppRoles.isDirector(currentUser?.role)) {
+        if (isDirector) {
           _selectedRole = AppRoles.teacher;
         } else if (currentUser?.isAttendanceTeacher == true) {
           _selectedRole = AppRoles.student;
