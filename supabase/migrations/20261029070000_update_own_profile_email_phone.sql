@@ -70,3 +70,4 @@ end;
 $$;
 
 grant execute on function public.update_own_profile(text, text, text, text) to authenticated;
+

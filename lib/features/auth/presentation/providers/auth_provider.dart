@@ -46,7 +46,8 @@ class AuthState {
 
   bool get isLoggedIn => user != null;
   bool get isAdmin => AppRoles.isAdmin(user?.role);
-  bool get isSubAdmin => user?.role == AppRoles.subadmin;
+  bool get isDirector => AppRoles.isDirector(user?.role);
+  bool get isSubAdmin => isDirector;
   bool get isTeacher => user?.role == AppRoles.teacher;
   bool get isStudent => user?.role == AppRoles.student;
   bool get isPendingApproval => user?.isPendingApproval ?? false;

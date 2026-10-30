@@ -515,7 +515,7 @@ class _ResourcesScreenState extends ConsumerState<ResourcesScreen> {
     final isFacultyOrAdmin = isTeacher ||
         user?.isSuperAdmin == true ||
         user?.role == AppRoles.admin ||
-        user?.role == AppRoles.subadmin;
+        AppRoles.isDirector(user?.role);
 
     return DashboardShell(
       title: 'Course Materials & Video Lessons',
@@ -1019,7 +1019,7 @@ class _ResourcesScreenState extends ConsumerState<ResourcesScreen> {
                     final canDelete = isTeacher ||
                         user?.isSuperAdmin == true ||
                         user?.role == AppRoles.admin ||
-                        (user?.role == AppRoles.subadmin &&
+                        (AppRoles.isDirector(user?.role) &&
                             (res.schoolId == null || res.schoolId == user?.schoolId));
 
                     return _ResourceCard(

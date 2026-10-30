@@ -37,22 +37,23 @@ void main() {
       );
     });
 
-    test('Director (Sub-Admin) manages faculty teachers exclusively', () {
+    test('School Director manages faculty teachers exclusively', () {
       final director = AppUser(
         id: 'director-1',
         email: 'director@Admin.edu',
         username: 'director@Admin.edu',
-        role: AppRoles.subadmin,
+        role: AppRoles.director,
         schoolId: '00000000-0000-4000-8000-000000000001',
         createdAt: DateTime.now(),
       );
 
-      expect(director.role, equals(AppRoles.subadmin));
+      expect(director.isDirector, isTrue);
+      expect(AppRoles.isDirector(director.role), isTrue);
       expect(director.isSuperAdmin, isFalse);
 
-      // Director permissions
+      // Director permissions: registers Faculty Teachers only
       final allowedRegistrationRoles = [
-        if (director.role == AppRoles.subadmin) AppRoles.teacher,
+        if (AppRoles.isDirector(director.role)) AppRoles.teacher,
       ];
 
       expect(allowedRegistrationRoles, contains(AppRoles.teacher));

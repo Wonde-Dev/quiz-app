@@ -12,11 +12,14 @@ class AppConstants {
 /// Role constants used throughout the app.
 class AppRoles {
   static const admin = 'admin'; // Super Administrator
-  static const subadmin = 'subadmin'; // Sub-Admin / Director
+  static const director = 'subadmin'; // School Director
+  static const subadmin = 'subadmin'; // Deprecated alias for backwards compatibility
   static const teacher = 'teacher';
   static const student = 'student';
 
-  static bool isAdmin(String? role) => role == admin || role == subadmin;
+  static bool isSuperAdmin(String? role) => role == admin;
+  static bool isDirector(String? role) => role == director || role == 'director';
+  static bool isAdmin(String? role) => role == admin || isDirector(role);
   static bool isTeacher(String? role) => role == teacher;
   static bool isStudent(String? role) => role == student;
 }

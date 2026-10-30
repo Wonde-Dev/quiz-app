@@ -48,8 +48,8 @@ class _StudentManagementScreenState
     return user?.isSuperAdmin == true || user?.role == AppRoles.admin;
   }
 
-  bool get _isSubadmin =>
-      ref.read(authStateProvider).user?.role == AppRoles.subadmin;
+  bool get _isDirector =>
+      AppRoles.isDirector(ref.read(authStateProvider).user?.role);
 
   bool get _isAttendanceTeacher =>
       ref.read(authStateProvider).user?.role == AppRoles.teacher &&
@@ -61,7 +61,7 @@ class _StudentManagementScreenState
 
   Future<List<Map<String, dynamic>>> _loadAccounts() async {
     final currentUser = ref.read(authStateProvider).user;
-    if (_isSubadmin) {
+    if (_isDirector) {
       return [];
     }
 
@@ -1034,7 +1034,7 @@ class _StudentManagementScreenState
       return;
     }
 
-    if (_isSubadmin) {
+    if (_isDirector) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text(
@@ -1495,7 +1495,7 @@ class _StudentManagementScreenState
     final currentUser = ref.watch(authStateProvider).user;
 
     // 1. Director Boundary Screen: Director manages teachers only
-    if (_isSubadmin) {
+    if (_isDirector) {
       return Scaffold(
         appBar: AppBar(title: const Text('Student Roster Oversight')),
         body: Center(

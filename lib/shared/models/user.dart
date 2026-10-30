@@ -172,14 +172,17 @@ class AppUser {
     );
   }
 
-  /// Whether user has administrative rights (Main Admin or Sub-Admin / Director)
-  bool get isAdmin => role == 'admin' || role == 'subadmin';
+  /// Whether user has administrative rights (Super Admin or School Director)
+  bool get isAdmin => role == 'admin' || isDirector;
 
   /// Main Administrator (Super Admin) who cannot be deleted
   bool get isMainAdmin => isSuperAdmin || role == 'admin';
 
-  /// Sub-Administrator / Director
-  bool get isSubAdmin => role == 'subadmin';
+  /// School Director
+  bool get isDirector => role == 'subadmin' || role == 'director';
+
+  /// Backwards compatibility alias for Director
+  bool get isSubAdmin => isDirector;
 
   /// Teacher role
   bool get isTeacher => role == 'teacher';

@@ -15,6 +15,7 @@ class RoleGuard {
       switch (user.role) {
         case AppRoles.admin:
         case AppRoles.subadmin:
+        case 'director':
           return '/admin/dashboard';
         case AppRoles.teacher:
           return '/teacher/dashboard';

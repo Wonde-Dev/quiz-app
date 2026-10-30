@@ -33,7 +33,7 @@ class DashboardShell extends ConsumerWidget {
     switch (index) {
       case 0:
         final homePath = switch (role) {
-          AppRoles.admin => '/admin/dashboard',
+          AppRoles.admin || AppRoles.subadmin || AppRoles.director || 'director' => '/admin/dashboard',
           AppRoles.teacher => '/teacher/dashboard',
           _ => '/student/dashboard',
         };

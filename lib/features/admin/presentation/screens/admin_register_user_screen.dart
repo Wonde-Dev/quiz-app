@@ -99,7 +99,7 @@ class _AdminRegisterUserScreenState
         _sections = List<Map<String, dynamic>>.from(sectionRows);
         _resolveMatchingSectionId();
 
-        if (currentUser?.role == AppRoles.subadmin) {
+        if (AppRoles.isDirector(currentUser?.role)) {
           _selectedRole = AppRoles.teacher;
         } else if (currentUser?.isAttendanceTeacher == true) {
           _selectedRole = AppRoles.student;
@@ -203,7 +203,7 @@ class _AdminRegisterUserScreenState
 
   Future<void> _registerUser() async {
     final currentUser = ref.read(authStateProvider).user;
-    if (currentUser?.role == AppRoles.subadmin && _selectedRole != AppRoles.teacher) {
+    if (AppRoles.isDirector(currentUser?.role) && _selectedRole != AppRoles.teacher) {
       setState(() {
         _errorMessage = 'School Directors are authorized to register faculty teachers only. Student registration is handled by Attendance Teachers.';
       });
@@ -448,7 +448,7 @@ class _AdminRegisterUserScreenState
     bool isAttendanceTeacher = false,
   }) async {
     final roleName = switch (role) {
-      AppRoles.subadmin => 'School Director / Sub-Admin',
+      AppRoles.subadmin => 'School Director',
       AppRoles.teacher => isAttendanceTeacher
           ? 'Attendance Teacher ($assignedClass)'
           : 'Faculty Teacher',
@@ -847,10 +847,10 @@ class _AdminRegisterUserScreenState
                   Builder(
                     builder: (context) {
                       final currentUser = ref.watch(authStateProvider).user;
-                      final isSubAdmin = currentUser?.role == AppRoles.subadmin;
+                      final isDirector = AppRoles.isDirector(currentUser?.role);
                       final isAttendanceTeacher = currentUser?.isAttendanceTeacher == true;
 
-                      if (isSubAdmin) {
+                      if (isDirector) {
                         return Wrap(
                           spacing: 8,
                           runSpacing: 8,
@@ -858,22 +858,6 @@ class _AdminRegisterUserScreenState
                             ChoiceChip(
                               avatar: const Icon(Icons.co_present_outlined, size: 16),
                               label: const Text('Faculty Teacher',
-                                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-                              selected: true,
-                              onSelected: (_) => _onRoleChanged(AppRoles.teacher),
-                            ),
-                          ],
-                        );
-                      }
-
-                      if (currentUser?.role == AppRoles.subadmin) {
-                        return Wrap(
-                          spacing: 8,
-                          runSpacing: 8,
-                          children: [
-                            ChoiceChip(
-                              avatar: const Icon(Icons.co_present_outlined, size: 16),
-                              label: const Text('Faculty Teacher (Ciro High School)',
                                   style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
                               selected: true,
                               onSelected: (_) => _onRoleChanged(AppRoles.teacher),
@@ -922,8 +906,8 @@ class _AdminRegisterUserScreenState
                           ),
                           if (currentUser?.isSuperAdmin == true || currentUser?.role == AppRoles.admin)
                             ChoiceChip(
-                              avatar: const Icon(Icons.admin_panel_settings_outlined, size: 16),
-                              label: const Text('Sub-Admin / School Director',
+                              avatar: const Icon(Icons.manage_accounts_rounded, size: 16),
+                              label: const Text('School Director',
                                   style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
                               selected: _selectedRole == AppRoles.subadmin,
                               onSelected: (selected) {
@@ -936,7 +920,7 @@ class _AdminRegisterUserScreenState
                   ),
                   const SizedBox(height: 20),
 
-                  // Sub-Admin role informative banner
+                  // School Director role informative banner
                   if (_selectedRole == AppRoles.subadmin) ...[
                     Container(
                       padding: const EdgeInsets.all(14),
@@ -947,19 +931,19 @@ class _AdminRegisterUserScreenState
                       ),
                       child: const Row(
                         children: [
-                          Icon(Icons.security_rounded, color: Color(0xFF6366F1), size: 22),
+                          Icon(Icons.manage_accounts_rounded, color: Color(0xFF6366F1), size: 22),
                           SizedBox(width: 12),
                           Expanded(
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Text(
-                                  'Ciro High School Director / Sub-Admin',
+                                  'Ciro High School Director',
                                   style: TextStyle(fontWeight: FontWeight.w800, fontSize: 13),
                                 ),
                                 SizedBox(height: 3),
                                 Text(
-                                  'School Directors oversee Ciro High School faculty teachers, grade enrollment totals, and curriculum exams. No grade or section is required for this administrative role.',
+                                  'School Directors oversee Ciro High School faculty teachers, grade enrollment totals, and post announcements. No grade or section is required for this administrative role.',
                                   style: TextStyle(fontSize: 12, color: Color(0xFF475569)),
                                 ),
                               ],

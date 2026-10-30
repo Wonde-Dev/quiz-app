@@ -24,7 +24,7 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen>
 
   int _totalUsersCount = 0;
   int _schoolUsersCount = 0; // Excludes Super Admin for Director
-  int _subadminCount = 0;
+  int _directorCount = 0;
   int _studentCount = 0;
   int _teacherCount = 0;
   int _quizCount = 0;
@@ -96,7 +96,7 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen>
     final client = Supabase.instance.client;
     final auditService = AuditLogService();
     final currentUser = ref.read(authStateProvider).user;
-    final isSubAdmin = currentUser?.role == AppRoles.subadmin;
+    final isDirector = AppRoles.isDirector(currentUser?.role);
 
     try {
       final results = await Future.wait<dynamic>([
@@ -115,20 +115,20 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen>
       final announcements = results[3] as List<SchoolAnnouncement>;
 
       if (rpcRes is Map) {
-        final subadmins = (rpcRes['subadmins'] as num?)?.toInt() ?? 0;
+        final directors = (rpcRes['subadmins'] as num?)?.toInt() ?? 0;
         final teachers = (rpcRes['teachers'] as num?)?.toInt() ?? 0;
         final students = (rpcRes['students'] as num?)?.toInt() ?? 0;
-        final schoolUsers = (rpcRes['school_users'] as num?)?.toInt() ?? (subadmins + teachers + students);
+        final schoolUsers = (rpcRes['school_users'] as num?)?.toInt() ?? (directors + teachers + students);
         final pendingTeachers = (rpcRes['pending_teachers'] as num?)?.toInt() ?? 0;
         final pendingAll = (rpcRes['pending'] as num?)?.toInt() ?? 0;
 
         setState(() {
           _totalUsersCount = (rpcRes['total_users'] as num?)?.toInt() ?? 0;
           _schoolUsersCount = schoolUsers;
-          _subadminCount = subadmins;
+          _directorCount = directors;
           _teacherCount = teachers;
           _studentCount = students;
-          _pendingCount = isSubAdmin ? pendingTeachers : pendingAll;
+          _pendingCount = isDirector ? pendingTeachers : pendingAll;
           _gradeStats = List<Map<String, dynamic>>.from(rpcRes['grades'] ?? []);
           _quizCount = publishedQuizzes.length;
           _recentLogs = recentLogs;
@@ -156,10 +156,10 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen>
       final announcements = results[3] as List<SchoolAnnouncement>;
 
       final activeUsers = allUsers.where((u) => u['is_active'] != false).toList();
-      final subadminCount = activeUsers.where((u) => u['role'] == 'subadmin').length;
+      final directorCount = activeUsers.where((u) => u['role'] == 'subadmin' || u['role'] == 'director').length;
       final studentCount = activeUsers.where((u) => u['role'] == 'student').length;
       final teacherCount = activeUsers.where((u) => u['role'] == 'teacher').length;
-      final schoolUsers = subadminCount + studentCount + teacherCount;
+      final schoolUsers = directorCount + studentCount + teacherCount;
       final totalUsers = activeUsers.length;
       final pendingCount = allUsers.where((u) => u['approval_status'] == 'pending').length;
       final pendingTeachers = allUsers
@@ -169,11 +169,11 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen>
       setState(() {
         _totalUsersCount = totalUsers;
         _schoolUsersCount = schoolUsers;
-        _subadminCount = subadminCount;
+        _directorCount = directorCount;
         _studentCount = studentCount;
         _teacherCount = teacherCount;
         _quizCount = publishedQuizzes.length;
-        _pendingCount = isSubAdmin ? pendingTeachers : pendingCount;
+        _pendingCount = isDirector ? pendingTeachers : pendingCount;
         _recentLogs = recentLogs;
         _announcements = announcements;
         _loading = false;
@@ -190,8 +190,8 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen>
     String selectedAudience = 'all';
     bool isPinned = false;
     final currentUser = ref.read(authStateProvider).user;
-    final isSubAdmin = currentUser?.role == AppRoles.subadmin;
-    final authorRole = isSubAdmin ? 'School Director' : 'Administrator';
+    final isDirector = AppRoles.isDirector(currentUser?.role);
+    final authorRole = isDirector ? 'School Director' : 'Administrator';
     final authorName = currentUser?.fullName?.isNotEmpty == true
         ? currentUser!.fullName!
         : (currentUser?.username ?? authorRole);
@@ -662,13 +662,13 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen>
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
     final currentUser = ref.watch(authStateProvider).user;
-    final isSubAdmin = currentUser?.role == AppRoles.subadmin;
+    final isDirector = AppRoles.isDirector(currentUser?.role);
     final adminName = currentUser?.fullName?.isNotEmpty == true
         ? currentUser!.fullName!
-        : currentUser?.username ?? (isSubAdmin ? 'Director' : 'Administrator');
+        : currentUser?.username ?? (isDirector ? 'Director' : 'Administrator');
 
     return DashboardShell(
-      title: isSubAdmin ? 'Ciro High School · Director Center' : 'Ciro High School · Admin Center',
+      title: isDirector ? 'Ciro High School · Director Center' : 'Ciro High School · Admin Center',
       body: RefreshIndicator(
         onRefresh: _loadStats,
         child: ListView(
@@ -824,8 +824,8 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen>
                                 ),
                               ),
                               child: Icon(
-                                isSubAdmin
-                                    ? Icons.admin_panel_settings_rounded
+                                isDirector
+                                    ? Icons.manage_accounts_rounded
                                     : Icons.shield_rounded,
                                 color: const Color(0xFF34D399),
                                 size: 32,
@@ -842,26 +842,26 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen>
                                         padding: const EdgeInsets.symmetric(
                                             horizontal: 8, vertical: 3),
                                         decoration: BoxDecoration(
-                                          color: isSubAdmin
+                                          color: isDirector
                                               ? const Color(0xFF6366F1).withValues(alpha: 0.3)
                                               : const Color(0xFFF59E0B).withValues(alpha: 0.3),
                                           borderRadius: BorderRadius.circular(8),
                                           border: Border.all(
-                                            color: isSubAdmin
+                                            color: isDirector
                                                 ? const Color(0xFF818CF8)
                                                 : const Color(0xFFFBBF24),
                                             width: 1,
                                           ),
                                         ),
                                         child: Text(
-                                          isSubAdmin
+                                          isDirector
                                               ? 'SCHOOL DIRECTOR'
                                               : 'SUPER ADMINISTRATOR',
                                           style: TextStyle(
                                             fontSize: 10,
                                             fontWeight: FontWeight.w900,
                                             letterSpacing: 0.6,
-                                            color: isSubAdmin
+                                            color: isDirector
                                                 ? const Color(0xFFC7D2FE)
                                                 : const Color(0xFFFEF3C7),
                                           ),
@@ -880,7 +880,7 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen>
                                   ),
                                   const SizedBox(height: 4),
                                   Text(
-                                    isSubAdmin
+                                    isDirector
                                         ? 'Director oversight for Ciro High School faculty teachers, grade enrollment totals, and official announcements.'
                                         : 'Institutional administrative control for Ciro High School. Manage directors, faculty, students, and surveillance.',
                                     style: theme.textTheme.bodyMedium?.copyWith(
@@ -910,7 +910,7 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen>
                                 ),
                               ),
                               icon: const Icon(Icons.person_add_rounded, size: 18),
-                              label: Text(isSubAdmin
+                              label: Text(isDirector
                                   ? 'Register Faculty Teacher'
                                   : 'Register User (Director/Staff/Student)'),
                               onPressed: () async {
@@ -946,7 +946,7 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen>
 
             // Live Metrics Section
             Text(
-              isSubAdmin
+              isDirector
                   ? 'Ciro High School Community Metrics (Excludes Super Admin)'
                   : 'Ciro High School System Totals',
               style: theme.textTheme.titleMedium?.copyWith(
@@ -956,7 +956,7 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen>
             ),
             const SizedBox(height: 12),
 
-            if (!isSubAdmin) ...[
+            if (!isDirector) ...[
               // SUPER ADMIN: Role totals only (No grade/section breakdown)
               Row(
                 children: [
@@ -977,9 +977,9 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen>
                     child: _MetricCard(
                       title: 'School Directors',
                       subtitle: 'Campus administrative directors',
-                      count: _subadminCount,
+                      count: _directorCount,
                       loading: _loading,
-                      icon: Icons.admin_panel_settings_rounded,
+                      icon: Icons.manage_accounts_rounded,
                       color: const Color(0xFF6366F1),
                     ),
                   ),
@@ -1022,7 +1022,7 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen>
                 onTap: _openQuizzesModerationSheet,
               ),
             ] else ...[
-              // SUB-ADMIN (DIRECTOR): School total users strictly EXCLUDES Super Admin
+              // SCHOOL DIRECTOR: School total users strictly EXCLUDES Super Admin
               Row(
                 children: [
                   Expanded(
@@ -1031,7 +1031,7 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen>
                       subtitle: 'Directors, Teachers & Students (Excludes Super Admin)',
                       count: _schoolUsersCount,
                       loading: _loading,
-                      icon: Icons.school_rounded,
+                      icon: Icons.groups_rounded,
                       color: isDark
                           ? const Color(0xFF38BDF8)
                           : const Color(0xFF0F172A),
@@ -1059,20 +1059,20 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen>
                       subtitle: 'Official registered students',
                       count: _studentCount,
                       loading: _loading,
-                      icon: Icons.groups_rounded,
+                      icon: Icons.school_rounded,
                       color: const Color(0xFF3B82F6),
                     ),
                   ),
                   const SizedBox(width: 10),
                   Expanded(
                     child: _MetricCard(
-                      title: 'Faculty Quizzes',
-                      subtitle: 'Teacher-prepared exams',
-                      count: _quizCount,
+                      title: 'Active Announcements',
+                      subtitle: 'Campus notices broadcasted',
+                      count: _announcements.length,
                       loading: _loading,
-                      icon: Icons.quiz_rounded,
-                      color: const Color(0xFF8B5CF6),
-                      onTap: _openQuizzesModerationSheet,
+                      icon: Icons.campaign_rounded,
+                      color: const Color(0xFF0284C7),
+                      onTap: _postAnnouncementDialog,
                     ),
                   ),
                 ],
@@ -1229,7 +1229,7 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen>
                     ),
                   ),
                   title: Text(
-                    isSubAdmin
+                    isDirector
                         ? '$_pendingCount Pending Teacher Approval${_pendingCount > 1 ? 's' : ''}'
                         : '$_pendingCount Pending Registration Approval${_pendingCount > 1 ? 's' : ''}',
                     style: const TextStyle(
@@ -1238,7 +1238,7 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen>
                     ),
                   ),
                   subtitle: Text(
-                    isSubAdmin
+                    isDirector
                         ? 'Newly registered teachers awaiting director verification'
                         : 'New user registration requests awaiting approval',
                     style: const TextStyle(color: Color(0xFFB45309)),
@@ -1400,17 +1400,31 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen>
             ),
             const SizedBox(height: 12),
 
-            if (isSubAdmin) ...[
-              // SUB-ADMIN ACTIONS: Strictly Teachers, Announcements, Quizzes Oversight
+            if (isDirector) ...[
+              // SCHOOL DIRECTOR ACTIONS: Exclusively Register & Control Teachers, Review Teacher Approvals, Post Announcements
               _ActionTile(
                 icon: Icons.person_add_alt_1_rounded,
                 color: const Color(0xFF10B981),
                 title: 'Register Faculty Teacher',
                 subtitle:
-                    'Create and activate new Faculty Teacher accounts for Ciro High School with Grade, Section, and Subject assignments.',
+                    'Create and activate new Faculty Teacher accounts for Ciro High School with designated Grade, Section, and Subject assignments.',
                 buttonText: 'Register Teacher',
                 onTap: () async {
                   await context.push('/admin/register-user');
+                  if (mounted) _loadStats();
+                },
+              ),
+              const SizedBox(height: 10),
+
+              _ActionTile(
+                icon: Icons.co_present_rounded,
+                color: const Color(0xFF6366F1),
+                title: 'Faculty Directory & Teacher Control',
+                subtitle:
+                    'Manage all Ciro High School teachers: inspect faculty profiles, allocate multiple classes and subjects, reset credentials, or remove accounts.',
+                buttonText: 'Control Teachers',
+                onTap: () async {
+                  await context.push('/admin/teachers');
                   if (mounted) _loadStats();
                 },
               ),
@@ -1421,7 +1435,7 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen>
                 color: const Color(0xFF059669),
                 title: 'Review Teacher Approvals',
                 subtitle:
-                    'Review, approve, or reject pending teacher registration requests for Ciro High School.',
+                    'Review, approve, or reject pending teacher self-registration applications for Ciro High School.',
                 buttonText: 'Teacher Approvals',
                 onTap: () async {
                   await context.push('/admin/approvals');
@@ -1431,52 +1445,13 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen>
               const SizedBox(height: 10),
 
               _ActionTile(
-                icon: Icons.co_present_rounded,
-                color: const Color(0xFF6366F1),
-                title: 'Faculty Directory & Multi-Class Assignments',
-                subtitle:
-                    'Manage Ciro High School teachers, assign multiple grades and classes, reset passwords, or remove faculty.',
-                buttonText: 'Manage Faculty',
-                onTap: () async {
-                  await context.push('/admin/teachers');
-                  if (mounted) _loadStats();
-                },
-              ),
-              const SizedBox(height: 10),
-
-              _ActionTile(
                 icon: Icons.campaign_rounded,
                 color: const Color(0xFF0284C7),
-                title: 'Broadcast School Announcement',
+                title: 'Post School Announcement',
                 subtitle:
-                    'Post announcements and notices directly to teachers and students of Ciro High School.',
-                buttonText: 'Post Notice',
+                    'Broadcast campus notices, schedules, or announcements directly to teachers and students of Ciro High School.',
+                buttonText: 'Post Announcement',
                 onTap: _postAnnouncementDialog,
-              ),
-              const SizedBox(height: 10),
-
-              _ActionTile(
-                icon: Icons.quiz_rounded,
-                color: const Color(0xFF8B5CF6),
-                title: 'Faculty Quizzes Oversight',
-                subtitle:
-                    'Quizzes are prepared exclusively by faculty teachers. Inspect exam preparations and remove outdated submissions.',
-                buttonText: 'Review Quizzes',
-                onTap: _openQuizzesModerationSheet,
-              ),
-              const SizedBox(height: 10),
-
-              _ActionTile(
-                icon: Icons.history_rounded,
-                color: const Color(0xFF0F172A),
-                title: 'School Audit Activity',
-                subtitle:
-                    'Chronological activity feed tracking Ciro High School accounts, logins, and audit events.',
-                buttonText: 'Audit Surveillance',
-                onTap: () async {
-                  await context.push('/admin/audit-logs');
-                  if (mounted) _loadStats();
-                },
               ),
             ] else ...[
               // SUPER ADMIN ACTIONS: Full system control

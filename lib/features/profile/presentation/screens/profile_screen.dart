@@ -167,7 +167,11 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
         ? 'Student · ${user.requestedRole} request declined'
         : user.isPendingApproval && user.requestedRole != null
             ? 'Student · ${user.requestedRole} access requested'
-            : user.role[0].toUpperCase() + user.role.substring(1);
+            : (user.role == 'subadmin' || user.role == 'director')
+                ? 'School Director'
+                : user.role == 'admin'
+                    ? 'System Administrator'
+                    : user.role[0].toUpperCase() + user.role.substring(1);
 
     final resolvedAvatar = user.avatarUrl == null || user.avatarUrl!.isEmpty
         ? null

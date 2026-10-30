@@ -894,7 +894,7 @@ class _QuizBuilderScreenState extends ConsumerState<QuizBuilderScreen> {
     final currentUser = ref.watch(authStateProvider).user;
 
     // Faculty Exclusive Guard: Quizzes are prepared exclusively by Teachers
-    if (currentUser?.role == AppRoles.admin || currentUser?.role == AppRoles.subadmin) {
+    if (currentUser?.role == AppRoles.admin || AppRoles.isDirector(currentUser?.role)) {
       return DashboardShell(
         title: 'Quiz Oversight',
         body: Center(

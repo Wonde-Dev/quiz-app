@@ -20,8 +20,6 @@ class _AccountApprovalsScreenState extends ConsumerState<AccountApprovalsScreen>
   final Set<String> _working = {};
   String? _error;
   List<Map<String, dynamic>> _schools = [];
-  String? _selectedSchoolId;
-
   String _filter = 'all';
 
   @override
@@ -33,8 +31,8 @@ class _AccountApprovalsScreenState extends ConsumerState<AccountApprovalsScreen>
   Future<List<Map<String, dynamic>>> _load() async {
     final client = Supabase.instance.client;
     final currentUser = ref.read(authStateProvider).user;
-    final isSubadmin = currentUser?.isSuperAdmin != true;
-    final targetSchoolId = isSubadmin ? currentUser?.schoolId : _selectedSchoolId;
+    final isDirector = AppRoles.isDirector(currentUser?.role);
+    const targetSchoolId = '00000000-0000-4000-8000-000000000001';
 
     try {
       final sRows = await client.from('schools').select('id, name').order('name');
@@ -51,13 +49,11 @@ class _AccountApprovalsScreenState extends ConsumerState<AccountApprovalsScreen>
           )
           .eq('approval_status', 'pending');
 
-      if (targetSchoolId != null && targetSchoolId.isNotEmpty) {
-        query = query.eq('school_id', targetSchoolId);
-      }
+      query = query.eq('school_id', targetSchoolId);
 
       // Hierarchy filtering:
-      // Subadmins only review teacher registrations (not students)
-      if (currentUser?.role == AppRoles.subadmin) {
+      // School Directors only review teacher registrations (not students)
+      if (isDirector) {
         query = query.or('requested_role.eq.teacher,role.eq.teacher');
       }
       // Attendance teachers only review students for their designated class
@@ -81,7 +77,7 @@ class _AccountApprovalsScreenState extends ConsumerState<AccountApprovalsScreen>
             )
             .eq('approval_status', 'pending');
 
-        if (currentUser?.role == AppRoles.subadmin) {
+        if (isDirector) {
           fallbackQuery = fallbackQuery.or('requested_role.eq.teacher,role.eq.teacher');
         } else if (currentUser?.role == AppRoles.teacher && currentUser?.isAttendanceTeacher == true) {
           fallbackQuery = fallbackQuery.or('requested_role.eq.student,role.eq.student');
@@ -92,9 +88,7 @@ class _AccountApprovalsScreenState extends ConsumerState<AccountApprovalsScreen>
           }
         }
 
-        if (targetSchoolId != null && targetSchoolId.isNotEmpty) {
-          fallbackQuery = fallbackQuery.eq('school_id', targetSchoolId);
-        }
+        fallbackQuery = fallbackQuery.eq('school_id', targetSchoolId);
 
         final fallbackRows = await fallbackQuery.order('created_at');
         return List<Map<String, dynamic>>.from(fallbackRows);
@@ -239,12 +233,12 @@ class _AccountApprovalsScreenState extends ConsumerState<AccountApprovalsScreen>
   @override
   Widget build(BuildContext context) {
     final currentUser = ref.watch(authStateProvider).user;
-    final isSubadmin = currentUser?.role == AppRoles.subadmin;
+    final isDirector = AppRoles.isDirector(currentUser?.role);
     final isAttendanceTeacher = currentUser?.isAttendanceTeacher == true;
     final attendanceClass = currentUser?.attendanceClass;
 
     return DashboardShell(
-      title: 'Pending Account Approvals',
+      title: isDirector ? 'Faculty Teacher Approvals' : 'Pending Account Approvals',
       body: FutureBuilder<List<Map<String, dynamic>>>(
         future: _requests,
         builder: (context, snapshot) {
@@ -284,13 +278,13 @@ class _AccountApprovalsScreenState extends ConsumerState<AccountApprovalsScreen>
               }
             }
 
-            if (currentUser?.role == AppRoles.subadmin) {
-              // Sub-admins (Directors) review and approve TEACHERS ONLY
+            if (isDirector) {
+              // School Directors review and approve TEACHERS ONLY
               if (targetRole != 'teacher') return false;
             }
 
             if (_filter == 'subadmin') {
-              return targetRole == 'subadmin';
+              return targetRole == 'subadmin' || targetRole == 'director';
             }
             if (_filter == 'student') {
               return targetRole == 'student';
@@ -324,7 +318,7 @@ class _AccountApprovalsScreenState extends ConsumerState<AccountApprovalsScreen>
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            isSubadmin
+                            isDirector
                                 ? 'Faculty Teacher Registrations'
                                 : isAttendanceTeacher
                                     ? 'Class ${attendanceClass ?? "9A"} Student Registrations'
@@ -335,7 +329,7 @@ class _AccountApprovalsScreenState extends ConsumerState<AccountApprovalsScreen>
                           ),
                           const SizedBox(height: 4),
                           Text(
-                            isSubadmin
+                            isDirector
                                 ? 'School Director Oversight: Review, approve, or decline faculty applications for Ciro High School'
                                 : isAttendanceTeacher
                                     ? 'Attendance Teacher Authority: Review, approve, or decline student applications for Class ${attendanceClass ?? "9A"}'
@@ -362,7 +356,7 @@ class _AccountApprovalsScreenState extends ConsumerState<AccountApprovalsScreen>
                       const Icon(Icons.domain_rounded, size: 16, color: Color(0xFF047857)),
                       const SizedBox(width: 8),
                       Text(
-                        isSubadmin
+                        isDirector
                             ? 'Institution: Ciro High School · Faculty Teacher Approvals'
                             : isAttendanceTeacher
                                 ? 'Institution: Ciro High School · Class ${attendanceClass ?? "9A"} Attendance Master'
@@ -419,8 +413,8 @@ class _AccountApprovalsScreenState extends ConsumerState<AccountApprovalsScreen>
                   const SizedBox(height: 16),
                 ],
 
-                // Filter Segmented Buttons (for Admins & Sub-admins)
-                if (AppRoles.isAdmin(currentUser?.role))
+                // Filter Segmented Buttons (for Super Admin only)
+                if (currentUser?.isSuperAdmin == true)
                   SegmentedButton<String>(
                     segments: [
                       ButtonSegment(
@@ -428,12 +422,11 @@ class _AccountApprovalsScreenState extends ConsumerState<AccountApprovalsScreen>
                         label: Text('All (${allRequests.length})'),
                         icon: const Icon(Icons.people_outline, size: 16),
                       ),
-                      if (currentUser?.isSuperAdmin == true)
-                        ButtonSegment(
-                          value: 'subadmin',
-                          label: Text('Subadmins (${allRequests.where((r) => (r['requested_role'] ?? r['role']) == 'subadmin').length})'),
-                          icon: const Icon(Icons.admin_panel_settings_outlined, size: 16),
-                        ),
+                      ButtonSegment(
+                        value: 'subadmin',
+                        label: Text('Directors (${allRequests.where((r) => (r['requested_role'] ?? r['role']) == 'subadmin' || (r['requested_role'] ?? r['role']) == 'director').length})'),
+                        icon: const Icon(Icons.manage_accounts_rounded, size: 16),
+                      ),
                       ButtonSegment(
                         value: 'teacher',
                         label: Text('Teachers (${allRequests.where((r) => (r['requested_role'] ?? r['role']) == 'teacher').length})'),
@@ -524,14 +517,14 @@ class _AccountApprovalsScreenState extends ConsumerState<AccountApprovalsScreen>
                           )['name'] as String?;
 
                     final roleColor = switch (role) {
-                      'subadmin' => const Color(0xFF6366F1),
+                      'subadmin' || 'director' => const Color(0xFF6366F1),
                       'teacher' => const Color(0xFF10B981),
                       _ => const Color(0xFF3B82F6),
                     };
 
                     final roleLabel = switch (role) {
-                      'subadmin' => 'Sub-Admin',
-                      'teacher' => 'Teacher',
+                      'subadmin' || 'director' => 'School Director',
+                      'teacher' => 'Faculty Teacher',
                       _ => 'Student',
                     };
 
@@ -548,7 +541,7 @@ class _AccountApprovalsScreenState extends ConsumerState<AccountApprovalsScreen>
                                   backgroundColor: roleColor.withValues(alpha: 0.15),
                                   child: Icon(
                                     switch (role) {
-                                      'subadmin' => Icons.admin_panel_settings_outlined,
+                                      'subadmin' || 'director' => Icons.manage_accounts_rounded,
                                       'teacher' => Icons.co_present_rounded,
                                       _ => Icons.school_rounded,
                                     },
