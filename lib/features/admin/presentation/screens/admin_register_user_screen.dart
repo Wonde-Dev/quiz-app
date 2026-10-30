@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:quiz_app/core/constants/app_roles.dart';
 import 'package:quiz_app/core/constants/supabase_constants.dart';
@@ -63,6 +64,8 @@ class _AdminRegisterUserScreenState
 
   List<String> _existingUsernames = [];
   List<String> _existingEmails = [];
+  int _activeDirectorCount = 0;
+  String? _activeDirectorName;
 
   @override
   void initState() {
@@ -95,16 +98,25 @@ class _AdminRegisterUserScreenState
       final results = await Future.wait<dynamic>([
         client.from('sections').select('id, name, grade, school_id').eq('school_id', _ciroSchoolId),
         usersQuery,
+        client.from('users').select('id, username, full_name').inFilter('role', ['subadmin', 'director']).neq('is_active', false),
       ]);
 
       if (!mounted) return;
 
       final sectionRows = results[0] as List;
       final userRows = results[1] as List;
+      final directorRows = results[2] as List;
+
+      final activeDirectorCount = directorRows.length;
+      final activeDirectorName = directorRows.isNotEmpty
+          ? (directorRows.first['full_name'] as String? ?? directorRows.first['username'] as String?)
+          : null;
 
       setState(() {
         _sections = List<Map<String, dynamic>>.from(sectionRows);
         _resolveMatchingSectionId();
+        _activeDirectorCount = activeDirectorCount;
+        _activeDirectorName = activeDirectorName;
 
         if (isDirector) {
           _selectedRole = AppRoles.teacher;
@@ -213,6 +225,14 @@ class _AdminRegisterUserScreenState
     if (AppRoles.isDirector(currentUser?.role) && _selectedRole != AppRoles.teacher) {
       setState(() {
         _errorMessage = 'School Directors are authorized to register faculty teachers only. Student registration is handled by Attendance Teachers.';
+      });
+      return;
+    }
+
+    if (_selectedRole == AppRoles.subadmin && _activeDirectorCount >= 1) {
+      setState(() {
+        _errorMessage =
+            'Ciro High School already has an appointed School Director (${_activeDirectorName ?? "1 active"}). Only one director is permitted at a time. To change the director, manage or deactivate the existing director from User Rosters first.';
       });
       return;
     }
@@ -656,6 +676,8 @@ class _AdminRegisterUserScreenState
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
+    final currentUser = ref.watch(authStateProvider).user;
+    final isDirector = AppRoles.isDirector(currentUser?.role);
 
     final roleColor = switch (_selectedRole) {
       AppRoles.teacher => const Color(0xFF10B981),
@@ -665,7 +687,11 @@ class _AdminRegisterUserScreenState
     };
 
     return DashboardShell(
-      title: 'Register New User',
+      title: isDirector
+          ? 'Register Faculty Teacher'
+          : (currentUser?.isAttendanceTeacher == true
+              ? 'Register Class Student'
+              : 'Register New User'),
       body: ListView(
         padding: const EdgeInsets.all(20),
         children: [
@@ -780,7 +806,11 @@ class _AdminRegisterUserScreenState
                             ),
                             const SizedBox(height: 2),
                             Text(
-                              'Register and activate School Directors, Faculty Teachers (with Grade & Section), or Students.',
+                              isDirector
+                                  ? 'Register and assign Faculty Teachers to designated grades, sections, and subjects.'
+                                  : (currentUser?.isAttendanceTeacher == true
+                                      ? 'Register and assign students to Class ${currentUser?.attendanceClass ?? "9A"}.'
+                                      : 'Register and activate School Directors, Faculty Teachers (with Grade & Section), or Students.'),
                               style: TextStyle(
                                 fontSize: 12,
                                 color: isDark
@@ -858,18 +888,67 @@ class _AdminRegisterUserScreenState
                       final isAttendanceTeacher = currentUser?.isAttendanceTeacher == true;
 
                       if (isDirector) {
-                        return Wrap(
-                          spacing: 8,
-                          runSpacing: 8,
-                          children: [
-                            ChoiceChip(
-                              avatar: const Icon(Icons.co_present_outlined, size: 16),
-                              label: const Text('Faculty Teacher',
-                                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-                              selected: true,
-                              onSelected: (_) => _onRoleChanged(AppRoles.teacher),
+                        return Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF10B981).withValues(alpha: 0.1),
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(
+                              color: const Color(0xFF10B981).withValues(alpha: 0.3),
+                              width: 1.2,
                             ),
-                          ],
+                          ),
+                          child: Row(
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.all(8),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFF10B981).withValues(alpha: 0.2),
+                                  borderRadius: BorderRadius.circular(10),
+                                ),
+                                child: const Icon(Icons.co_present_rounded,
+                                    color: Color(0xFF047857), size: 22),
+                              ),
+                              const SizedBox(width: 12),
+                              const Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      'Designated Role: Faculty Teacher',
+                                      style: TextStyle(
+                                        fontWeight: FontWeight.w800,
+                                        fontSize: 13,
+                                        color: Color(0xFF047857),
+                                      ),
+                                    ),
+                                    SizedBox(height: 2),
+                                    Text(
+                                      'School Director is authorized to register Faculty Teachers only.',
+                                      style: TextStyle(
+                                        fontSize: 11,
+                                        color: Color(0xFF065F46),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              FilledButton.tonalIcon(
+                                style: FilledButton.styleFrom(
+                                  backgroundColor: const Color(0xFF10B981).withValues(alpha: 0.2),
+                                  foregroundColor: const Color(0xFF047857),
+                                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                                  minimumSize: const Size(0, 36),
+                                ),
+                                icon: const Icon(Icons.manage_accounts_rounded, size: 16),
+                                label: const Text(
+                                  'Manage',
+                                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                                ),
+                                onPressed: () => context.push('/admin/teachers'),
+                              ),
+                            ],
+                          ),
                         );
                       }
 
@@ -914,8 +993,12 @@ class _AdminRegisterUserScreenState
                           if (currentUser?.isSuperAdmin == true || currentUser?.role == AppRoles.admin)
                             ChoiceChip(
                               avatar: const Icon(Icons.manage_accounts_rounded, size: 16),
-                              label: const Text('School Director',
-                                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                              label: Text(
+                                _activeDirectorCount >= 1
+                                    ? 'School Director (1 Appointed)'
+                                    : 'School Director',
+                                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                              ),
                               selected: _selectedRole == AppRoles.subadmin,
                               onSelected: (selected) {
                                 if (selected) _onRoleChanged(AppRoles.subadmin);
@@ -932,26 +1015,55 @@ class _AdminRegisterUserScreenState
                     Container(
                       padding: const EdgeInsets.all(14),
                       decoration: BoxDecoration(
-                        color: const Color(0xFF6366F1).withValues(alpha: 0.08),
+                        color: _activeDirectorCount >= 1
+                            ? const Color(0xFFFFFBEB)
+                            : const Color(0xFF6366F1).withValues(alpha: 0.08),
                         borderRadius: BorderRadius.circular(16),
-                        border: Border.all(color: const Color(0xFF6366F1).withValues(alpha: 0.3)),
+                        border: Border.all(
+                          color: _activeDirectorCount >= 1
+                              ? const Color(0xFFFDE68A)
+                              : const Color(0xFF6366F1).withValues(alpha: 0.3),
+                        ),
                       ),
-                      child: const Row(
+                      child: Row(
                         children: [
-                          Icon(Icons.manage_accounts_rounded, color: Color(0xFF6366F1), size: 22),
-                          SizedBox(width: 12),
+                          Icon(
+                            _activeDirectorCount >= 1
+                                ? Icons.warning_amber_rounded
+                                : Icons.manage_accounts_rounded,
+                            color: _activeDirectorCount >= 1
+                                ? const Color(0xFFD97706)
+                                : const Color(0xFF6366F1),
+                            size: 22,
+                          ),
+                          const SizedBox(width: 12),
                           Expanded(
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Text(
-                                  'Ciro High School Director',
-                                  style: TextStyle(fontWeight: FontWeight.w800, fontSize: 13),
+                                  _activeDirectorCount >= 1
+                                      ? 'Director Limit Reached (Maximum 1 Director)'
+                                      : 'Ciro High School Director',
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.w800,
+                                    fontSize: 13,
+                                    color: _activeDirectorCount >= 1
+                                        ? const Color(0xFF92400E)
+                                        : null,
+                                  ),
                                 ),
-                                SizedBox(height: 3),
+                                const SizedBox(height: 3),
                                 Text(
-                                  'School Directors oversee Ciro High School faculty teachers, grade enrollment totals, and post announcements. No grade or section is required for this administrative role.',
-                                  style: TextStyle(fontSize: 12, color: Color(0xFF475569)),
+                                  _activeDirectorCount >= 1
+                                      ? 'Ciro High School already has an appointed School Director (${_activeDirectorName ?? "1 active"}). Only one director is permitted at a time. To replace the director, manage or deactivate the existing director from User Rosters first.'
+                                      : 'School Directors oversee Ciro High School faculty teachers, grade enrollment totals, and post announcements. No grade or section is required for this administrative role.',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: _activeDirectorCount >= 1
+                                        ? const Color(0xFFB45309)
+                                        : const Color(0xFF475569),
+                                  ),
                                 ),
                               ],
                             ),

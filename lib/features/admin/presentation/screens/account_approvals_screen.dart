@@ -114,31 +114,47 @@ class _AccountApprovalsScreenState extends ConsumerState<AccountApprovalsScreen>
     try {
       bool reviewed = false;
 
-      // 1. Try dedicated database RPC function (security definer, bypasses restrictive RLS)
+      // 1. Try review_registration_request RPC (Security Definer with role boundaries)
       try {
         await Supabase.instance.client.rpc(
-          'review_user_registration',
+          'review_registration_request',
           params: {
-            'p_user_id': id,
+            'p_request_id': id,
             'p_decision': decision,
-            'p_school_id': schoolId,
           },
         );
         reviewed = true;
-      } catch (rpcErr) {
-        debugPrint('review_user_registration p_ RPC note: $rpcErr');
+      } catch (rpcMainErr) {
+        debugPrint('review_registration_request RPC note: $rpcMainErr');
+      }
+
+      // 1b. Try dedicated database RPC function (security definer, bypasses restrictive RLS)
+      if (!reviewed) {
         try {
           await Supabase.instance.client.rpc(
             'review_user_registration',
             params: {
-              'user_id': id,
-              'decision': decision,
-              'school_id': schoolId,
+              'p_user_id': id,
+              'p_decision': decision,
+              'p_school_id': schoolId,
             },
           );
           reviewed = true;
-        } catch (rpcErr2) {
-          debugPrint('review_user_registration fallback RPC note: $rpcErr2');
+        } catch (rpcErr) {
+          debugPrint('review_user_registration p_ RPC note: $rpcErr');
+          try {
+            await Supabase.instance.client.rpc(
+              'review_user_registration',
+              params: {
+                'user_id': id,
+                'decision': decision,
+                'school_id': schoolId,
+              },
+            );
+            reviewed = true;
+          } catch (rpcErr2) {
+            debugPrint('review_user_registration fallback RPC note: $rpcErr2');
+          }
         }
       }
 

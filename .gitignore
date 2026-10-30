@@ -49,4 +49,5 @@ app.*.map.json
 
 # Node
 node_modules/
+supabase/.temp/
 

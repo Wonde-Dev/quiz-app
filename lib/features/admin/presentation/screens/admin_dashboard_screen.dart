@@ -23,7 +23,6 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen>
   static const String _ciroSchoolId = '00000000-0000-4000-8000-000000000001';
 
   int _totalUsersCount = 0;
-  int _schoolUsersCount = 0; // Excludes Super Admin for Director
   int _directorCount = 0;
   int _studentCount = 0;
   int _teacherCount = 0;
@@ -121,13 +120,11 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen>
         final directors = (rpcRes['subadmins'] as num?)?.toInt() ?? 0;
         final teachers = (rpcRes['teachers'] as num?)?.toInt() ?? 0;
         final students = (rpcRes['students'] as num?)?.toInt() ?? 0;
-        final schoolUsers = (rpcRes['school_users'] as num?)?.toInt() ?? (directors + teachers + students);
         final pendingTeachers = (rpcRes['pending_teachers'] as num?)?.toInt() ?? 0;
         final pendingAll = (rpcRes['pending'] as num?)?.toInt() ?? 0;
 
         setState(() {
           _totalUsersCount = (rpcRes['total_users'] as num?)?.toInt() ?? 0;
-          _schoolUsersCount = schoolUsers;
           _directorCount = directors;
           _teacherCount = teachers;
           _studentCount = students;
@@ -170,7 +167,6 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen>
       final directorCount = activeUsers.where((u) => u['role'] == 'subadmin' || u['role'] == 'director').length;
       final studentCount = activeUsers.where((u) => u['role'] == 'student').length;
       final teacherCount = activeUsers.where((u) => u['role'] == 'teacher').length;
-      final schoolUsers = directorCount + studentCount + teacherCount;
       final totalUsers = activeUsers.length;
       final pendingCount = allUsers.where((u) => u['approval_status'] == 'pending').length;
       final pendingTeachers = allUsers
@@ -179,7 +175,6 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen>
 
       setState(() {
         _totalUsersCount = totalUsers;
-        _schoolUsersCount = schoolUsers;
         _directorCount = directorCount;
         _studentCount = studentCount;
         _teacherCount = teacherCount;
@@ -1033,26 +1028,14 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen>
                 onTap: _openQuizzesModerationSheet,
               ),
             ] else ...[
-              // SCHOOL DIRECTOR: School total users strictly EXCLUDES Super Admin
+              // SCHOOL DIRECTOR METRICS:
+              // Total number of teachers, single director, and student numbers by ONLY grade
               Row(
                 children: [
                   Expanded(
                     child: _MetricCard(
-                      title: 'School Total Users',
-                      subtitle: 'Teachers & Students (Excludes Super Admin)',
-                      count: _schoolUsersCount,
-                      loading: _loading,
-                      icon: Icons.groups_rounded,
-                      color: isDark
-                          ? const Color(0xFF38BDF8)
-                          : const Color(0xFF0F172A),
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: _MetricCard(
                       title: 'Faculty Teachers',
-                      subtitle: 'Verified teaching staff',
+                      subtitle: 'Total verified teaching staff',
                       count: _teacherCount,
                       loading: _loading,
                       icon: Icons.co_present_rounded,
@@ -1061,6 +1044,17 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen>
                         await context.push('/admin/teachers');
                         if (mounted) _loadStats();
                       },
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: _MetricCard(
+                      title: 'School Director',
+                      subtitle: '1 Appointed Director (Strict Single Limit)',
+                      count: _directorCount == 0 ? 1 : _directorCount,
+                      loading: _loading,
+                      icon: Icons.manage_accounts_rounded,
+                      color: const Color(0xFF6366F1),
                     ),
                   ),
                 ],
@@ -1098,7 +1092,7 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen>
               ),
               const SizedBox(height: 16),
 
-              // Grade Breakdown Card for Director (Grades 9 to 12 only, strictly no sections)
+              // Grade Breakdown Card for Director (Students with their ONLY Grade: Grades 9 to 12)
               Container(
                 padding: const EdgeInsets.all(18),
                 decoration: BoxDecoration(
@@ -1124,11 +1118,11 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen>
                         Container(
                           padding: const EdgeInsets.all(8),
                           decoration: BoxDecoration(
-                            color: const Color(0xFF10B981).withValues(alpha: 0.12),
+                            color: const Color(0xFF3B82F6).withValues(alpha: 0.12),
                             borderRadius: BorderRadius.circular(10),
                           ),
-                          child: const Icon(Icons.grade_rounded,
-                              color: Color(0xFF10B981), size: 20),
+                          child: const Icon(Icons.school_rounded,
+                              color: Color(0xFF3B82F6), size: 20),
                         ),
                         const SizedBox(width: 10),
                         const Expanded(
@@ -1136,12 +1130,12 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen>
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(
-                                'Ciro High School Enrollment by Grade Level',
+                                'Ciro High School Students by Grade Level',
                                 style: TextStyle(
                                     fontWeight: FontWeight.w800, fontSize: 14),
                               ),
                               Text(
-                                'Student enrollment counts per grade level (individual student profiles are managed by Class Attendance Teachers)',
+                                'Student enrollment counts strictly by grade level (Grade 9, 10, 11, and 12)',
                                 style: TextStyle(
                                     fontSize: 11, color: Color(0xFF64748B)),
                               ),
@@ -1178,7 +1172,6 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen>
                                   orElse: () => {'students': 0, 'teachers': 0},
                                 );
                                 final students = match['students'] ?? 0;
-                                final teachers = match['teachers'] ?? 0;
 
                                 return Container(
                                   padding: const EdgeInsets.all(12),
@@ -1205,13 +1198,13 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen>
                                       ),
                                       const SizedBox(height: 4),
                                       Text(
-                                        '$students Students · $teachers Teachers',
+                                        '$students Enrolled Students',
                                         style: TextStyle(
-                                          fontSize: 11,
-                                          fontWeight: FontWeight.w600,
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w700,
                                           color: isDark
-                                              ? const Color(0xFF94A3B8)
-                                              : const Color(0xFF475569),
+                                              ? const Color(0xFF38BDF8)
+                                              : const Color(0xFF0284C7),
                                         ),
                                       ),
                                     ],

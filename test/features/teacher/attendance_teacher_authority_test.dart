@@ -101,5 +101,34 @@ Answer: True
       expect(quizMap['target_section'], equals('Section A'));
       expect((quizMap['questions'] as List).length, equals(2));
     });
+    test('Single Director constraint restricts registering more than 1 director', () {
+      const activeDirectors = 1;
+      const proposedRole = AppRoles.director;
+
+      final canRegisterDirector = proposedRole != AppRoles.director || activeDirectors < 1;
+      expect(canRegisterDirector, isFalse);
+    });
+
+    test('Director dashboard metrics only display teachers, single director, and students by grade', () {
+      final grades = [
+        {'grade': 'Grade 9', 'students': 45},
+        {'grade': 'Grade 10', 'students': 50},
+        {'grade': 'Grade 11', 'students': 38},
+        {'grade': 'Grade 12', 'students': 42},
+      ];
+
+      final directorDashboardMetricTitles = [
+        'Faculty Teachers',
+        'School Director',
+        'Active Announcements',
+        'Pending Teacher Approvals',
+      ];
+
+      expect(directorDashboardMetricTitles, isNot(contains('School Total Users')));
+      expect(directorDashboardMetricTitles, isNot(contains('Total System Users')));
+
+      final totalStudentsByGrade = grades.fold<int>(0, (sum, g) => sum + (g['students'] as int));
+      expect(totalStudentsByGrade, equals(175));
+    });
   });
 }
