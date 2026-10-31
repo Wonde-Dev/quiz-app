@@ -67,6 +67,50 @@ class _TeacherDashboardScreenState
     }
   }
 
+  Future<void> _toggleQuizPermission(Map<String, dynamic> quiz) async {
+    final quizId = quiz['id'] as String;
+    final currentStatus = quiz['is_published'] == true;
+    final newStatus = !currentStatus;
+
+    try {
+      await Supabase.instance.client
+          .from('quizzes')
+          .update({'is_published': newStatus})
+          .eq('id', quizId);
+
+      if (mounted) {
+        setState(() {
+          final index = _myQuizzes.indexWhere((q) => q['id'] == quizId);
+          if (index != -1) {
+            _myQuizzes[index]['is_published'] = newStatus;
+          }
+        });
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              newStatus
+                  ? 'Permission Granted: Students can now access and take "${quiz['title']}"!'
+                  : 'Exam Access Revoked: Students can no longer access "${quiz['title']}".',
+            ),
+            backgroundColor: newStatus ? const Color(0xFF10B981) : Colors.amber.shade900,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to update exam permission: $e'),
+            backgroundColor: Colors.red.shade700,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    }
+  }
+
   void _setupRealtime() {
     try {
       _realtimeChannel = Supabase.instance.client
@@ -1048,26 +1092,80 @@ class _TeacherDashboardScreenState
             ),
             const SizedBox(height: 10),
 
-            _TeacherActionTile(
-              icon: Icons.person_add_alt_1_rounded,
-              color: const Color(0xFF0D9488),
-              title: 'Register Students',
-              subtitle:
-                  'Register new students in your classes and school with their temporary credentials and auto-password formula.',
-              buttonText: 'Register Students',
-              onTap: () => context.push('/teacher/students'),
-            ),
-            const SizedBox(height: 10),
+            if (currentUser?.isAttendanceTeacher == true) ...[
+              _TeacherActionTile(
+                icon: Icons.person_add_alt_1_rounded,
+                color: const Color(0xFF0D9488),
+                title: 'Register Students (${currentUser?.attendanceClass ?? "Homeroom"})',
+                subtitle:
+                    'Register new students in your designated attendance class with their temporary credentials and auto-password formula.',
+                buttonText: 'Register Students',
+                onTap: () => context.push('/teacher/students'),
+              ),
+              const SizedBox(height: 10),
 
-            _TeacherActionTile(
-              icon: Icons.lock_reset_rounded,
-              color: const Color(0xFFF59E0B),
-              title: 'Reset Student Passwords',
-              subtitle:
-                  'Reset student passwords with one tap. Generates new temporary credentials securely (Student1@S.edu).',
-              buttonText: 'Reset Password',
-              onTap: () => context.push('/teacher/reset-passwords'),
-            ),
+              _TeacherActionTile(
+                icon: Icons.lock_reset_rounded,
+                color: const Color(0xFFF59E0B),
+                title: 'Reset Class Student Passwords',
+                subtitle:
+                    'Reset student passwords for your class with one tap. Generates new temporary credentials securely (Student1@S.edu).',
+                buttonText: 'Reset Password',
+                onTap: () => context.push('/teacher/reset-passwords'),
+              ),
+              const SizedBox(height: 10),
+            ] else ...[
+              Container(
+                margin: const EdgeInsets.only(bottom: 10),
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: isDark ? const Color(0xFF1E293B) : const Color(0xFFF0FDF4),
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(
+                    color: isDark ? const Color(0xFF334155) : const Color(0xFFBBF7D0),
+                    width: 1.2,
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF10B981).withValues(alpha: 0.15),
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(Icons.school_rounded, color: Color(0xFF10B981), size: 22),
+                    ),
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Academic Subject Faculty',
+                            style: TextStyle(
+                              fontWeight: FontWeight.w800,
+                              fontSize: 14,
+                              color: isDark ? Colors.white : const Color(0xFF065F46),
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            'You have academic authority to prepare quizzes, upload worksheets, evaluate submissions, and grant students permission/time limits to take exams. Student registrations and rosters are managed exclusively by designated Attendance Teachers.',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF047857),
+                              height: 1.35,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 10),
+            ],
             const SizedBox(height: 28),
 
             // Quizzes List Section
@@ -1152,6 +1250,7 @@ class _TeacherDashboardScreenState
                   isDark: isDark,
                   onEvaluate: () => context.push('/teacher/results'),
                   onPreview: () => context.push('/student/quiz/${quiz['id']}'),
+                  onTogglePermission: () => _toggleQuizPermission(quiz),
                 ),
 
             const SizedBox(height: 32),
@@ -1168,12 +1267,14 @@ class _TeacherQuizCard extends StatelessWidget {
     required this.isDark,
     required this.onEvaluate,
     required this.onPreview,
+    required this.onTogglePermission,
   });
 
   final Map<String, dynamic> quiz;
   final bool isDark;
   final VoidCallback onEvaluate;
   final VoidCallback onPreview;
+  final VoidCallback onTogglePermission;
 
   @override
   Widget build(BuildContext context) {
@@ -1232,7 +1333,7 @@ class _TeacherQuizCard extends StatelessWidget {
                     ),
                     const SizedBox(width: 6),
                     Text(
-                      isPublished ? 'Published' : 'Draft',
+                      isPublished ? 'Published (Active)' : 'Draft (Locked)',
                       style: TextStyle(
                         fontSize: 11,
                         fontWeight: FontWeight.w700,
@@ -1282,7 +1383,37 @@ class _TeacherQuizCard extends StatelessWidget {
                   color: isDark ? Colors.white70 : Colors.grey.shade700,
                 ),
               ),
-              const Spacer(),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            alignment: WrapAlignment.end,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              FilledButton.tonalIcon(
+                style: FilledButton.styleFrom(
+                  backgroundColor: isPublished
+                      ? const Color(0xFFEF4444).withValues(alpha: 0.12)
+                      : const Color(0xFF10B981).withValues(alpha: 0.15),
+                  foregroundColor: isPublished
+                      ? const Color(0xFFEF4444)
+                      : const Color(0xFF10B981),
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  minimumSize: Size.zero,
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
+                onPressed: onTogglePermission,
+                icon: Icon(
+                  isPublished ? Icons.lock_clock_rounded : Icons.lock_open_rounded,
+                  size: 14,
+                ),
+                label: Text(
+                  isPublished ? 'Revoke Student Access' : 'Grant Exam Permission',
+                  style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                ),
+              ),
               OutlinedButton.icon(
                 style: OutlinedButton.styleFrom(
                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
@@ -1293,7 +1424,6 @@ class _TeacherQuizCard extends StatelessWidget {
                 icon: const Icon(Icons.visibility_outlined, size: 14),
                 label: const Text('Preview', style: TextStyle(fontSize: 12)),
               ),
-              const SizedBox(width: 8),
               FilledButton.icon(
                 style: FilledButton.styleFrom(
                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),

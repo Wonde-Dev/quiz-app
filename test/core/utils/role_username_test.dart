@@ -6,6 +6,14 @@ void main() {
     test('joins first and last name and uses the full role suffix', () {
       expect(roleUsername('Wonde Assegid', 'admin'), 'WondeAssegid@Admin.edu');
       expect(
+        roleUsername('Sultan Adinan', 'subadmin'),
+        'SultanAdinan@Director.edu',
+      );
+      expect(
+        roleUsername('Sultan Adinan', 'director'),
+        'SultanAdinan@Director.edu',
+      );
+      expect(
         roleUsername('Wonde Assegid', 'teacher'),
         'WondeAssegid@Teacher.edu',
       );
@@ -84,6 +92,8 @@ void main() {
   group('isRoleUsername', () {
     test('only accepts the matching role suffix and required casing', () {
       expect(isRoleUsername('WondeAssegid@Admin.edu', 'admin'), isTrue);
+      expect(isRoleUsername('SultanAdinan1@Director.edu', 'subadmin'), isTrue);
+      expect(isRoleUsername('SultanAdinan1@Director.edu', 'director'), isTrue);
       expect(isRoleUsername('WondeAssegid@Teacher.edu', 'teacher'), isTrue);
       expect(isRoleUsername('WondeAssegid@Student.edu', 'student'), isTrue);
       expect(isRoleUsername('WondeAssegid@Students.edu', 'student'), isTrue);
@@ -97,6 +107,7 @@ void main() {
   group('roleFromUsername', () {
     test('detects the role suffix without a role picker', () {
       expect(roleFromUsername('WondeAssegid@Admin.edu'), 'admin');
+      expect(roleFromUsername('SultanAdinan1@Director.edu'), 'subadmin');
       expect(roleFromUsername('WondeAssegid@Teacher.edu'), 'teacher');
       expect(roleFromUsername('WondeAssegid@Student.edu'), 'student');
       expect(roleFromUsername('WondeAssegid@Students.edu'), 'student');
@@ -121,6 +132,24 @@ void main() {
       expect(
         defaultRolePassword(usernameOrFullName: 'WondeAdmin2@Admin.edu'),
         'WondeAdmin2@A.edu',
+      );
+      expect(
+        defaultRolePassword(usernameOrFullName: 'SultanAdinan1@Director.edu'),
+        'SultanAdinan1@D.edu',
+      );
+      expect(
+        defaultRolePassword(
+          usernameOrFullName: 'Sultan Adinan',
+          role: 'subadmin',
+        ),
+        'SultanAdinan1@D.edu',
+      );
+      expect(
+        defaultRolePassword(
+          usernameOrFullName: 'Sultan Adinan',
+          role: 'director',
+        ),
+        'SultanAdinan1@D.edu',
       );
       expect(
         defaultRolePassword(usernameOrFullName: 'JohnDoe@Student.edu'),

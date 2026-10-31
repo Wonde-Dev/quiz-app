@@ -43,7 +43,7 @@ void main() {
 
       final activeDirector = AppUser(
         id: 'user-director-1',
-        username: 'SultanAdinan1@Admin.edu',
+        username: 'SultanAdinan1@Director.edu',
         email: 'wondetech404@gmail.com',
         role: AppRoles.director,
         isSuperAdmin: false,
@@ -56,7 +56,7 @@ void main() {
       expect(activeSuperAdmin.role, equals(AppRoles.admin));
 
       expect(activeDirector.isSuperAdmin, isFalse);
-      expect(activeDirector.username, equals('SultanAdinan1@Admin.edu'));
+      expect(activeDirector.username, equals('SultanAdinan1@Director.edu'));
       expect(AppRoles.isDirector(activeDirector.role), isTrue);
 
       // Verify second director would exceed limit
@@ -73,7 +73,7 @@ void main() {
     test('Director is restricted from student management and restricted to teacher administration', () {
       final director = AppUser(
         id: 'dir-1',
-        username: 'SultanAdinan1@Admin.edu',
+        username: 'SultanAdinan1@Director.edu',
         email: 'wondetech404@gmail.com',
         role: AppRoles.director,
         createdAt: DateTime.now(),

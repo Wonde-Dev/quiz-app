@@ -129,6 +129,9 @@ class AuthService {
     }
     if (lower.startsWith('sultanadinan') ||
         lower.startsWith('sultan') ||
+        lower.contains('director') ||
+        lower == 'sultanadinan1@director.edu' ||
+        lower == 'sultanadinan@director.edu' ||
         lower == 'sultanadinan1@admin.edu' ||
         lower == 'sultanadinan@admin.edu') {
       if (!candidates.contains('wondetech404@gmail.com')) {

@@ -109,9 +109,19 @@ final routerProvider = Provider<GoRouter>((ref) {
         return null;
       }
 
-      // Attendance teachers have authority to review approvals and register students for their assigned class
-      if (user.role == AppRoles.teacher && user.isAttendanceTeacher) {
-        if (location == '/admin/approvals' || location == '/admin/register-user') {
+      // Teacher role scoping:
+      // Designated attendance teachers manage class students (register, approvals, reset passwords).
+      // Other regular faculty teachers focus strictly on academic activities (quizzes, resources, evaluation).
+      if (user.role == AppRoles.teacher) {
+        if (!user.isAttendanceTeacher &&
+            (location == '/teacher/students' ||
+             location == '/teacher/reset-passwords' ||
+             location == '/admin/register-user' ||
+             location == '/admin/approvals')) {
+          return '/teacher/dashboard';
+        }
+        if (user.isAttendanceTeacher &&
+            (location == '/admin/approvals' || location == '/admin/register-user')) {
           return null;
         }
       }

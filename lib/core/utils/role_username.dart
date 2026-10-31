@@ -12,7 +12,8 @@ String roleUsername(String fullName, String role, {int? order}) {
       )
       .join();
   final roleName = switch (role.toLowerCase()) {
-    'admin' || 'subadmin' || 'director' => 'Admin',
+    'admin' => 'Admin',
+    'subadmin' || 'director' => 'Director',
     'teacher' => 'Teacher',
     _ => 'Student',
   };
@@ -65,15 +66,17 @@ bool isRoleUsername(String username, String role) {
   final clean = username.trim();
   final roleLower = role.toLowerCase();
 
-  // Matches: CapitalizedNamePart(CapitalizedFatherName)+[Digits]@(Admin|Teacher|Student|Students).edu
+  // Matches: CapitalizedNamePart(CapitalizedFatherName)+[Digits]@(Admin|Director|Teacher|Student|Students).edu
   final regex = RegExp(
-    r'^[A-Z][a-z]*([A-Z][a-z]*)+(\d+)?@(Admin|Teacher|Students?)\.edu$',
+    r'^[A-Z][a-z]*([A-Z][a-z]*)+(\d+)?@(Admin|Director|Teacher|Students?)\.edu$',
   );
   if (!regex.hasMatch(clean)) return false;
 
   final domain = clean.split('@').last;
-  if (roleLower == 'admin' || roleLower == 'subadmin' || roleLower == 'director') {
+  if (roleLower == 'admin') {
     return domain == 'Admin.edu';
+  } else if (roleLower == 'subadmin' || roleLower == 'director') {
+    return domain == 'Director.edu' || domain == 'Admin.edu';
   } else if (roleLower == 'teacher') {
     return domain == 'Teacher.edu';
   } else {
@@ -84,7 +87,7 @@ bool isRoleUsername(String username, String role) {
 String? roleFromUsername(String username) {
   final clean = username.trim();
   final regex = RegExp(
-    r'^[A-Z][a-z]*([A-Z][a-z]*)+(\d+)?@(Admin|Teacher|Students?)\.edu$',
+    r'^[A-Z][a-z]*([A-Z][a-z]*)+(\d+)?@(Admin|Director|Teacher|Students?)\.edu$',
   );
   if (!regex.hasMatch(clean)) {
     return null;
@@ -92,17 +95,24 @@ String? roleFromUsername(String username) {
   final domain = clean.split('@').last;
   return switch (domain) {
     'Admin.edu' => 'admin',
+    'Director.edu' => 'subadmin',
     'Teacher.edu' => 'teacher',
     'Student.edu' || 'Students.edu' => 'student',
     _ => null,
   };
 }
 
-/// Returns the single-letter role initial ('A', 'T', or 'S') for passwords.
+/// Returns the single-letter role initial ('A', 'D', 'T', or 'S') for passwords.
 String roleLetter(String roleOrUsername) {
   final lower = roleOrUsername.toLowerCase();
   if (lower == 'admin' || lower.contains('@admin') || lower.endsWith('@a.edu')) {
     return 'A';
+  }
+  if (lower == 'subadmin' ||
+      lower == 'director' ||
+      lower.contains('@director') ||
+      lower.endsWith('@d.edu')) {
+    return 'D';
   }
   if (lower == 'teacher' || lower.contains('@teacher') || lower.endsWith('@t.edu')) {
     return 'T';
