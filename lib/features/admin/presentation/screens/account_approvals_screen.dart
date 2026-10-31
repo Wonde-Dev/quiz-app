@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:quiz_app/core/constants/app_roles.dart';
 import 'package:quiz_app/core/services/audit_log_service.dart';
+import 'package:quiz_app/core/services/auth_service.dart';
 import 'package:quiz_app/features/auth/presentation/providers/auth_provider.dart';
 import 'package:quiz_app/shared/widgets/animated_press_button.dart';
 import 'package:quiz_app/shared/widgets/dashboard_shell.dart';
@@ -214,13 +215,30 @@ class _AccountApprovalsScreenState extends ConsumerState<AccountApprovalsScreen>
         );
       } catch (_) {}
 
+      // Automatically dispatch notification email & OTP to user's registered email
+      bool emailDispatched = false;
+      if (decision == 'approve') {
+        final targetEmail = request['email'] as String?;
+        if (targetEmail != null && targetEmail.contains('@') && !targetEmail.endsWith('.edu')) {
+          try {
+            await AuthService().sendLoginOtp(targetEmail);
+            emailDispatched = true;
+          } catch (e) {
+            debugPrint('Approval notification email note: $e');
+          }
+        }
+      }
+
       if (mounted) {
+        final targetName = request['full_name'] ?? request['username'];
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
               decision == 'approve'
-                  ? 'Account for ${request['full_name'] ?? request['username']} approved successfully!'
-                  : 'Account for ${request['full_name'] ?? request['username']} was declined.',
+                  ? (emailDispatched
+                      ? 'Account for $targetName approved! Verification OTP notification sent to ${request['email']}.'
+                      : 'Account for $targetName approved successfully!')
+                  : 'Account for $targetName was declined.',
             ),
             backgroundColor: decision == 'approve' ? const Color(0xFF10B981) : Colors.red,
             behavior: SnackBarBehavior.floating,
@@ -650,8 +668,11 @@ class _AccountApprovalsScreenState extends ConsumerState<AccountApprovalsScreen>
                               ],
                             ),
                             const SizedBox(height: 14),
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.end,
+                            Wrap(
+                              spacing: 8,
+                              runSpacing: 8,
+                              alignment: WrapAlignment.end,
+                              crossAxisAlignment: WrapCrossAlignment.center,
                               children: [
                                 AnimatedPressButton(
                                   onTap: isBusy ? null : () => _review(request, 'reject'),
@@ -664,7 +685,6 @@ class _AccountApprovalsScreenState extends ConsumerState<AccountApprovalsScreen>
                                     child: const Text('Decline'),
                                   ),
                                 ),
-                                const SizedBox(width: 8),
                                 AnimatedPressButton(
                                   onTap: isBusy ? null : () => _review(request, 'approve'),
                                   child: FilledButton.icon(

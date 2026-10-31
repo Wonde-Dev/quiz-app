@@ -56,6 +56,18 @@ final routerProvider = Provider<GoRouter>((ref) {
       if (authState.needsPasswordChange) {
         return location == '/change-password' ? null : '/change-password';
       }
+
+      // If user is pending approval, declined, or disabled, route them to /account-status:
+      if (user.isPendingApproval || user.isRejected || !user.isActive) {
+        if (location == '/account-status' ||
+            location == '/about' ||
+            location == '/functions' ||
+            location == '/onboarding') {
+          return null;
+        }
+        return '/account-status';
+      }
+
       if (location == '/account-status' ||
           location == '/about' ||
           location == '/functions' ||

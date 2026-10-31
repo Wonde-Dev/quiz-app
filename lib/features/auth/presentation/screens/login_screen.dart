@@ -1213,11 +1213,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 
                         // Primary Submit Button
                         AnimatedPressButton(
-                          onTap: authState.isLoading ||
-                                  (_isRegistering && authState.successMessage != null) ||
-                                  (_isRegistering && (!_schoolsReady || _selectedSectionId == null))
-                              ? null
-                              : _submit,
+                          onTap: authState.isLoading ? null : _submit,
                           child: Container(
                             height: 50,
                             width: double.infinity,

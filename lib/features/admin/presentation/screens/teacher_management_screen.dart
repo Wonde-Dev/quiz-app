@@ -60,23 +60,27 @@ class _TeacherManagementScreenState
     final client = Supabase.instance.client;
 
     try {
-      final results = await Future.wait<dynamic>([
-        client
-            .from('users')
-            .select(
-              'id, full_name, username, email, school_id, approval_status, is_active, created_at, '
-              'is_attendance_teacher, attendance_grade, attendance_class, assigned_grade, assigned_class, assigned_subject, requested_subject, schools(name)',
-            )
-            .eq('role', AppRoles.teacher)
-            .order('full_name', ascending: true),
-        client
+      final userRows = await client
+          .from('users')
+          .select(
+            'id, full_name, username, email, school_id, approval_status, is_active, created_at, '
+            'is_attendance_teacher, attendance_grade, attendance_class, assigned_grade, assigned_class, assigned_subject, requested_subject, schools(name)',
+          )
+          .eq('role', AppRoles.teacher)
+          .order('full_name', ascending: true);
+
+      final teachers = List<Map<String, dynamic>>.from(userRows);
+
+      List<Map<String, dynamic>> teacherCourses = [];
+      try {
+        final courseRows = await client
             .from('teacher_courses')
             .select('id, teacher_id, section_id, subject, sections(id, name, grade)')
-            .order('assigned_at', ascending: false),
-      ]);
-
-      final teachers = List<Map<String, dynamic>>.from(results[0] as List);
-      final teacherCourses = List<Map<String, dynamic>>.from(results[1] as List);
+            .order('assigned_at', ascending: false);
+        teacherCourses = List<Map<String, dynamic>>.from(courseRows);
+      } catch (tcErr) {
+        debugPrint('Safe notice loading teacher_courses: $tcErr');
+      }
 
       for (final t in teachers) {
         final assigned = teacherCourses
@@ -1459,77 +1463,90 @@ class _TeacherDirectoryCard extends StatelessWidget {
             const SizedBox(height: 12),
 
             // Action Buttons
-            Row(
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              alignment: WrapAlignment.spaceBetween,
               children: [
-                AnimatedPressButton(
-                  child: FilledButton.tonalIcon(
-                    style: FilledButton.styleFrom(
-                      minimumSize: const Size(0, 36),
-                      padding: const EdgeInsets.symmetric(horizontal: 12),
-                    ),
-                    onPressed: isResetting ? null : onResetPassword,
-                    icon: const Icon(Icons.lock_reset_rounded, size: 16),
-                    label: const Text('Reset Password', style: TextStyle(fontSize: 12)),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                AnimatedPressButton(
-                  child: OutlinedButton.icon(
-                    style: OutlinedButton.styleFrom(
-                      minimumSize: const Size(0, 36),
-                      padding: const EdgeInsets.symmetric(horizontal: 12),
-                    ),
-                    onPressed: onManageClasses,
-                    icon: const Icon(Icons.class_outlined, size: 16),
-                    label: const Text('Classes', style: TextStyle(fontSize: 12)),
-                  ),
-                ),
-                const Spacer(),
-                AnimatedPressButton(
-                  child: IconButton.outlined(
-                    tooltip: teacher['is_active'] != false ? 'Suspend faculty account' : 'Activate faculty account',
-                    style: IconButton.styleFrom(
-                      foregroundColor: teacher['is_active'] != false ? const Color(0xFFD97706) : const Color(0xFF10B981),
-                      side: BorderSide(
-                        color: teacher['is_active'] != false ? const Color(0xFFFDE68A) : const Color(0xFF6EE7B7),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    AnimatedPressButton(
+                      child: FilledButton.tonalIcon(
+                        style: FilledButton.styleFrom(
+                          minimumSize: const Size(0, 36),
+                          padding: const EdgeInsets.symmetric(horizontal: 12),
+                        ),
+                        onPressed: isResetting ? null : onResetPassword,
+                        icon: const Icon(Icons.lock_reset_rounded, size: 16),
+                        label: const Text('Reset Password', style: TextStyle(fontSize: 12)),
                       ),
-                      minimumSize: const Size(36, 36),
-                      padding: const EdgeInsets.all(6),
                     ),
-                    onPressed: isResetting ? null : onToggleStatus,
-                    icon: Icon(
-                      teacher['is_active'] != false ? Icons.block_rounded : Icons.check_circle_outline_rounded,
-                      size: 17,
+                    AnimatedPressButton(
+                      child: OutlinedButton.icon(
+                        style: OutlinedButton.styleFrom(
+                          minimumSize: const Size(0, 36),
+                          padding: const EdgeInsets.symmetric(horizontal: 12),
+                        ),
+                        onPressed: onManageClasses,
+                        icon: const Icon(Icons.class_outlined, size: 16),
+                        label: const Text('Classes', style: TextStyle(fontSize: 12)),
+                      ),
                     ),
-                  ),
+                  ],
                 ),
-                const SizedBox(width: 6),
-                AnimatedPressButton(
-                  child: IconButton.outlined(
-                    tooltip: 'Edit faculty profile',
-                    style: IconButton.styleFrom(
-                      foregroundColor: const Color(0xFF10B981),
-                      side: const BorderSide(color: Color(0xFF6EE7B7)),
-                      minimumSize: const Size(36, 36),
-                      padding: const EdgeInsets.all(6),
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    AnimatedPressButton(
+                      child: IconButton.outlined(
+                        tooltip: teacher['is_active'] != false ? 'Suspend faculty account' : 'Activate faculty account',
+                        style: IconButton.styleFrom(
+                          foregroundColor: teacher['is_active'] != false ? const Color(0xFFD97706) : const Color(0xFF10B981),
+                          side: BorderSide(
+                            color: teacher['is_active'] != false ? const Color(0xFFFDE68A) : const Color(0xFF6EE7B7),
+                          ),
+                          minimumSize: const Size(36, 36),
+                          padding: const EdgeInsets.all(6),
+                        ),
+                        onPressed: isResetting ? null : onToggleStatus,
+                        icon: Icon(
+                          teacher['is_active'] != false ? Icons.block_rounded : Icons.check_circle_outline_rounded,
+                          size: 17,
+                        ),
+                      ),
                     ),
-                    onPressed: isResetting ? null : onEdit,
-                    icon: const Icon(Icons.edit_outlined, size: 17),
-                  ),
-                ),
-                const SizedBox(width: 6),
-                AnimatedPressButton(
-                  child: IconButton.outlined(
-                    tooltip: 'Delete faculty account',
-                    style: IconButton.styleFrom(
-                      foregroundColor: const Color(0xFFEF4444),
-                      side: const BorderSide(color: Color(0xFFFECACA)),
-                      minimumSize: const Size(36, 36),
-                      padding: const EdgeInsets.all(6),
+                    const SizedBox(width: 6),
+                    AnimatedPressButton(
+                      child: IconButton.outlined(
+                        tooltip: 'Edit faculty profile',
+                        style: IconButton.styleFrom(
+                          foregroundColor: const Color(0xFF10B981),
+                          side: const BorderSide(color: Color(0xFF6EE7B7)),
+                          minimumSize: const Size(36, 36),
+                          padding: const EdgeInsets.all(6),
+                        ),
+                        onPressed: isResetting ? null : onEdit,
+                        icon: const Icon(Icons.edit_outlined, size: 17),
+                      ),
                     ),
-                    onPressed: isResetting ? null : onDelete,
-                    icon: const Icon(Icons.delete_outline_rounded, size: 17),
-                  ),
+                    const SizedBox(width: 6),
+                    AnimatedPressButton(
+                      child: IconButton.outlined(
+                        tooltip: 'Delete faculty account',
+                        style: IconButton.styleFrom(
+                          foregroundColor: const Color(0xFFEF4444),
+                          side: const BorderSide(color: Color(0xFFFECACA)),
+                          minimumSize: const Size(36, 36),
+                          padding: const EdgeInsets.all(6),
+                        ),
+                        onPressed: isResetting ? null : onDelete,
+                        icon: const Icon(Icons.delete_outline_rounded, size: 17),
+                      ),
+                    ),
+                  ],
                 ),
               ],
             ),

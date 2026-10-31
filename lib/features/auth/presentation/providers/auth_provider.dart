@@ -207,6 +207,13 @@ class AuthNotifier extends Notifier<AuthState> {
     return '${name[0]}***${name[name.length - 1]}@$domain';
   }
 
+  void setUser(AppUser user) {
+    state = AuthState(
+      user: user,
+      needsPasswordChange: user.mustChangePassword,
+    );
+  }
+
   Future<void> signIn({
     required String emailOrUsername,
     required String password,
@@ -229,27 +236,10 @@ class AuthNotifier extends Notifier<AuthState> {
         state = const AuthState(error: 'User record not found. Contact admin.');
         return;
       }
-      if (!appUser.isActive) {
-        await _authService.signOut();
-        state = const AuthState(
-          error: 'This account is disabled. Contact an administrator.',
-        );
-        return;
-      }
-      if (appUser.isPendingApproval) {
-        await _authService.signOut();
+      if (!appUser.isActive || appUser.isPendingApproval || appUser.isRejected) {
         state = AuthState(
-          error: appUser.role == 'teacher' || appUser.requestedRole == 'teacher'
-              ? 'Your teacher registration is pending approval by the School Administrator or Director. Please wait for activation before signing in.'
-              : 'Your student registration is pending approval by your class Attendance Teacher (${appUser.attendanceClass ?? appUser.assignedClass ?? "assigned class"}) or Administrator. Please wait for activation before signing in.',
-        );
-        return;
-      }
-      if (appUser.isRejected) {
-        await _authService.signOut();
-        state = const AuthState(
-          error:
-              'Your registration request was declined. Please contact your school administrator.',
+          user: appUser,
+          needsPasswordChange: appUser.mustChangePassword,
         );
         return;
       }
@@ -324,6 +314,18 @@ class AuthNotifier extends Notifier<AuthState> {
       );
       if (response.user == null) {
         throw StateError('The registration did not return a user account.');
+      }
+      if (response.user != null) {
+        final appUser = await _authService.getAppUser(response.user!.id);
+        if (appUser != null) {
+          state = AuthState(
+            user: appUser,
+            successMessage: requestedRole == 'teacher'
+                ? 'Registration submitted! Your teacher account is awaiting School Director approval.'
+                : 'Registration submitted! Your student account is awaiting Attendance Teacher approval.',
+          );
+          return;
+        }
       }
       if (response.session != null) {
         await _authService.signOut();
@@ -562,27 +564,10 @@ class AuthNotifier extends Notifier<AuthState> {
         state = const AuthState(error: 'User record not found. Contact admin.');
         return;
       }
-      if (!appUser.isActive) {
-        await _authService.signOut();
-        state = const AuthState(
-          error: 'This account is disabled. Contact an administrator.',
-        );
-        return;
-      }
-      if (appUser.isPendingApproval) {
-        await _authService.signOut();
+      if (!appUser.isActive || appUser.isPendingApproval || appUser.isRejected) {
         state = AuthState(
-          error: appUser.role == 'teacher' || appUser.requestedRole == 'teacher'
-              ? 'Your teacher registration is pending approval by the School Administrator or Director. Please wait for activation before signing in.'
-              : 'Your student registration is pending approval by your class Attendance Teacher (${appUser.attendanceClass ?? appUser.assignedClass ?? "assigned class"}) or Administrator. Please wait for activation before signing in.',
-        );
-        return;
-      }
-      if (appUser.isRejected) {
-        await _authService.signOut();
-        state = const AuthState(
-          error:
-              'Your registration request was declined. Please contact your school administrator.',
+          user: appUser,
+          needsPasswordChange: appUser.mustChangePassword,
         );
         return;
       }
