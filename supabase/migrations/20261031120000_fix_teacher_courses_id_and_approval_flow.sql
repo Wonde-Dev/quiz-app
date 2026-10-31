@@ -273,3 +273,4 @@ end;
 $$;
 
 grant execute on function public.review_user_registration(jsonb) to authenticated;
+

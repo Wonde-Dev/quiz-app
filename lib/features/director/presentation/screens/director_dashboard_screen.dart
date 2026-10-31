@@ -754,13 +754,19 @@ class _DirectorDashboardScreenState extends ConsumerState<DirectorDashboardScree
                 ? 2
                 : 1;
 
+        final aspectRatio = constraints.maxWidth > 900
+            ? 1.5
+            : constraints.maxWidth > 550
+                ? 1.8
+                : 2.1;
+
         return GridView.count(
           crossAxisCount: crossAxisCount,
           shrinkWrap: true,
           physics: const NeverScrollableScrollPhysics(),
-          mainAxisSpacing: 16,
-          crossAxisSpacing: 16,
-          childAspectRatio: constraints.maxWidth > 550 ? 1.6 : 2.4,
+          mainAxisSpacing: 14,
+          crossAxisSpacing: 14,
+          childAspectRatio: aspectRatio,
           children: [
             _buildStatCard(
               title: 'Faculty Teachers',

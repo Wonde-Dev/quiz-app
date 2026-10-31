@@ -65,6 +65,16 @@ class DashboardShell extends ConsumerWidget {
         ? user!.fullName!.trim()
         : user?.username ?? 'Account';
 
+    final (String roleBadgeText, Color roleBadgeColor) = switch (user?.role) {
+      AppRoles.admin => ('SUPER ADMIN', const Color(0xFFDC2626)),
+      AppRoles.subadmin || AppRoles.director || 'director' => ('DIRECTOR', const Color(0xFF6366F1)),
+      AppRoles.teacher => (
+          user?.isAttendanceTeacher == true ? 'ATTENDANCE' : 'FACULTY',
+          const Color(0xFF10B981)
+        ),
+      _ => ('STUDENT', const Color(0xFF3B82F6)),
+    };
+
     return Scaffold(
       appBar: AppBar(
         titleSpacing: 16,
@@ -98,14 +108,43 @@ class DashboardShell extends ConsumerWidget {
             ),
             const SizedBox(width: 10),
             Expanded(
-              child: Text(
-                title,
-                style: const TextStyle(
-                  fontWeight: FontWeight.w800,
-                  fontSize: 17,
-                  letterSpacing: -0.3,
-                ),
-                overflow: TextOverflow.ellipsis,
+              child: Row(
+                children: [
+                  Flexible(
+                    child: Text(
+                      title,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w800,
+                        fontSize: 16,
+                        letterSpacing: -0.3,
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  if (roleBadgeText.isNotEmpty) ...[
+                    const SizedBox(width: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: roleBadgeColor.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(
+                          color: roleBadgeColor.withValues(alpha: 0.3),
+                          width: 1,
+                        ),
+                      ),
+                      child: Text(
+                        roleBadgeText,
+                        style: TextStyle(
+                          fontSize: 9,
+                          fontWeight: FontWeight.w900,
+                          color: roleBadgeColor,
+                          letterSpacing: 0.5,
+                        ),
+                      ),
+                    ),
+                  ],
+                ],
               ),
             ),
           ],
@@ -211,32 +250,37 @@ class DashboardShell extends ConsumerWidget {
       ),
       // NO menubar / drawer here! Replaced by modern bottom dock:
       drawer: null,
-      body: user?.isPendingApproval == true || user?.isRejected == true
-          ? Column(
-              children: [
-                MaterialBanner(
-                  leading: Icon(
-                    user?.isRejected == true
-                        ? Icons.info_outline
-                        : Icons.hourglass_top_outlined,
-                    color: const Color(0xFF10B981),
-                  ),
-                  content: Text(
-                    user?.isRejected == true
-                        ? 'Your access request was declined. Please contact your school administration.'
-                        : 'Your registration is pending review by your school administrator.',
-                  ),
-                  actions: [
-                    TextButton(
-                      onPressed: () => context.go('/profile'),
-                      child: const Text('Profile'),
+      body: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 1200),
+          child: user?.isPendingApproval == true || user?.isRejected == true
+              ? Column(
+                  children: [
+                    MaterialBanner(
+                      leading: Icon(
+                        user?.isRejected == true
+                            ? Icons.info_outline
+                            : Icons.hourglass_top_outlined,
+                        color: const Color(0xFF10B981),
+                      ),
+                      content: Text(
+                        user?.isRejected == true
+                            ? 'Your access request was declined. Please contact your school administration.'
+                            : 'Your registration is pending review by your school administrator.',
+                      ),
+                      actions: [
+                        TextButton(
+                          onPressed: () => context.go('/profile'),
+                          child: const Text('Profile'),
+                        ),
+                      ],
                     ),
+                    Expanded(child: body),
                   ],
-                ),
-                Expanded(child: body),
-              ],
-            )
-          : body,
+                )
+              : body,
+        ),
+      ),
       bottomNavigationBar: Container(
         decoration: BoxDecoration(
           color: isDark ? const Color(0xFF0F172A) : Colors.white,

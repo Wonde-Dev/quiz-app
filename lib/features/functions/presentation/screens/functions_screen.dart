@@ -16,18 +16,28 @@ class FunctionsScreen extends ConsumerWidget {
     final user = ref.watch(authStateProvider).user;
     final role = user?.role ?? AppRoles.student;
 
+    final isDirector = AppRoles.isDirector(role);
+
     final (roleTitle, roleSubtitle) = switch (role) {
       AppRoles.admin => (
-          'Admin System Functions',
-          'Manage users, review registrations, allocate classes, and inspect audit logs.'
+          'Super Admin System Suite',
+          'Root control: manage users, review registrations, allocate classes, inspect audit logs, and system settings.'
+        ),
+      AppRoles.subadmin || AppRoles.director || 'director' => (
+          'School Director Administrative Hub',
+          'Faculty administration: register and review teachers, assign courses, post announcements, and view grade enrollments.'
         ),
       AppRoles.teacher => (
-          'Teacher Academic Functions',
-          'Prepare quizzes, evaluate student results, manage rosters, and reset passwords.'
+          user?.isAttendanceTeacher == true
+              ? 'Attendance Master & Faculty Tools'
+              : 'Academic Faculty Tools',
+          user?.isAttendanceTeacher == true
+              ? 'Class attendance & roster administration, exam creation, study worksheets, and grading evaluation.'
+              : 'Prepare curriculum quizzes, upload worksheets & exam papers, evaluate student work, and track results.'
         ),
       _ => (
-          'Student Academic Functions',
-          'Take exams, review completed results, check grades, and manage your account.'
+          'Student Academic Portal',
+          'Take available exams, download study worksheets, review graded submissions, and track academic progress.'
         ),
     };
 
@@ -227,12 +237,55 @@ class FunctionsScreen extends ConsumerWidget {
               subtitle: 'Inspect chronological system activity, exam events, and logins.',
               onTap: () => context.push('/admin/audit-logs'),
             ),
+          ] else if (isDirector) ...[
+            _FunctionTile(
+              icon: Icons.person_add_alt_1_rounded,
+              color: const Color(0xFF3B82F6),
+              title: 'Register Faculty Teacher',
+              subtitle: 'Create and activate official faculty teacher accounts for Ciro High School.',
+              onTap: () => context.push('/admin/register-user'),
+            ),
+            _FunctionTile(
+              icon: Icons.how_to_reg_rounded,
+              color: const Color(0xFFF59E0B),
+              title: 'Review Teacher Approvals',
+              subtitle: 'Approve or decline pending teacher registration applications.',
+              onTap: () => context.push('/admin/approvals'),
+            ),
+            _FunctionTile(
+              icon: Icons.badge_outlined,
+              color: const Color(0xFF0EA5E9),
+              title: 'Faculty Teachers Directory & Courses',
+              subtitle: 'Inspect teacher rosters, course allocations, reset faculty passwords, or manage status.',
+              onTap: () => context.push('/admin/teachers'),
+            ),
+            _FunctionTile(
+              icon: Icons.campaign_rounded,
+              color: const Color(0xFF10B981),
+              title: 'Post School Announcements',
+              subtitle: 'Broadcast official announcements to students, faculty, or the entire school.',
+              onTap: () => context.go('/director/dashboard'),
+            ),
+            _FunctionTile(
+              icon: Icons.history_edu_rounded,
+              color: const Color(0xFF8B5CF6),
+              title: 'Teacher Academic Activity Feed',
+              subtitle: 'Review quizzes prepared, exams published, and study materials distributed by faculty.',
+              onTap: () => context.go('/director/dashboard'),
+            ),
+            _FunctionTile(
+              icon: Icons.school_rounded,
+              color: const Color(0xFF059669),
+              title: 'Grade Enrollment Statistics',
+              subtitle: 'Monitor student capacity and totals by grade level across Ciro High School.',
+              onTap: () => context.go('/director/dashboard'),
+            ),
           ] else if (role == AppRoles.teacher) ...[
             _FunctionTile(
               icon: Icons.add_circle_outline_rounded,
               color: const Color(0xFF10B981),
               title: 'Prepare & Publish a Quiz',
-              subtitle: 'Build exams targeted by grade and section with time limits & diagrams.',
+              subtitle: 'Build curriculum exams targeted by grade and section with time limits & scoring.',
               onTap: () => context.push('/teacher/quizzes/new'),
             ),
             _FunctionTile(
@@ -246,23 +299,39 @@ class FunctionsScreen extends ConsumerWidget {
               icon: Icons.fact_check_rounded,
               color: const Color(0xFF059669),
               title: 'Evaluate Quizzes & Results',
-              subtitle: 'Review student attempts question-by-question, evaluate work, and adjust scores.',
+              subtitle: 'Review student attempts question-by-question, evaluate diagrams, and adjust scores.',
               onTap: () => context.push('/teacher/results'),
             ),
             _FunctionTile(
-              icon: Icons.people_outline_rounded,
-              color: const Color(0xFF0D9488),
-              title: 'Register Class Students',
-              subtitle: 'Enroll students in your sections and provide initial credentials.',
-              onTap: () => context.push('/teacher/students'),
+              icon: Icons.auto_stories_rounded,
+              color: const Color(0xFF6366F1),
+              title: 'My Assigned Courses & Sections',
+              subtitle: 'View your subject courses, grade levels, and assigned classroom sections.',
+              onTap: () => context.push('/teacher/courses'),
             ),
             _FunctionTile(
-              icon: Icons.lock_reset_rounded,
-              color: const Color(0xFFF59E0B),
-              title: 'Reset Student Passwords',
-              subtitle: 'One-tap password resets for students enrolled in your courses.',
-              onTap: () => context.push('/teacher/reset-passwords'),
+              icon: Icons.insights_rounded,
+              color: const Color(0xFF8B5CF6),
+              title: 'Student Academic Analytics',
+              subtitle: 'Track quiz completion rates, student engagement, and performance trends.',
+              onTap: () => context.push('/teacher/engagement'),
             ),
+            if (user?.isAttendanceTeacher == true) ...[
+              _FunctionTile(
+                icon: Icons.people_outline_rounded,
+                color: const Color(0xFF0D9488),
+                title: 'Register Class Students (${user?.attendanceClass ?? "Class"})',
+                subtitle: 'Enroll students in your designated attendance section and generate initial credentials.',
+                onTap: () => context.push('/teacher/students'),
+              ),
+              _FunctionTile(
+                icon: Icons.lock_reset_rounded,
+                color: const Color(0xFFF59E0B),
+                title: 'Reset Class Student Passwords',
+                subtitle: 'Issue one-tap password resets for students in your attendance roster.',
+                onTap: () => context.push('/teacher/reset-passwords'),
+              ),
+            ],
           ] else ...[
             // Student
             _FunctionTile(

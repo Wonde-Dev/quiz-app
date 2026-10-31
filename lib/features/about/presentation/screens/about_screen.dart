@@ -433,9 +433,9 @@ class _AboutScreenState extends State<AboutScreen>
                   const Divider(height: 20),
                   _buildContactRow(
                     icon: Icons.school_rounded,
-                    label: 'Campus Domain',
-                    value: '@Admin.edu · @Teacher.edu · @Student.edu',
-                    onCopy: () => _copyText(context, '@Student.edu'),
+                    label: 'Campus Domains',
+                    value: '@Admin.edu · @Director.edu · @Teacher.edu · @Student.edu',
+                    onCopy: () => _copyText(context, '@Director.edu'),
                   ),
                 ],
               ),
@@ -452,7 +452,7 @@ class _AboutScreenState extends State<AboutScreen>
               onPressed: () {
                 _copyText(
                   context,
-                  'Ciro High Schools Assessment Portal\nCredentials format:\n- Student: NameFatherName@Student.edu\n- Teacher: NameFatherName@Teacher.edu\n- Admin: NameFatherName@Admin.edu',
+                  'Ciro High Schools Assessment Portal\nCredentials format:\n- Student: NameFatherName@Student.edu\n- Faculty Teacher: NameFatherName@Teacher.edu\n- School Director: NameFatherName@Director.edu\n- Super Admin: NameFatherName@Admin.edu',
                 );
                 Navigator.pop(ctx);
               },
