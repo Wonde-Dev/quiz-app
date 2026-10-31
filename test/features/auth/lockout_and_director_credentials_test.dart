@@ -167,8 +167,8 @@ void main() {
       ];
 
       final accessible = quizzes.where((q) {
-        final qG = (q['target_grade'] as String?)?.toLowerCase();
-        final qS = (q['target_section'] as String?)?.toLowerCase();
+        final qG = q['target_grade']?.toLowerCase();
+        final qS = q['target_section']?.toLowerCase();
 
         if (qG != null && qG != studentGrade) return false;
         if (qS != null && qS != studentSection) return false;
@@ -180,3 +180,4 @@ void main() {
     });
   });
 }
+

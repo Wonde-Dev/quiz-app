@@ -154,55 +154,184 @@ Deno.serve(async (request) => {
   let totalPoints = 0;
   let incorrectAnswers = 0;
   const feedback: Array<{
+    questionId: string;
     question: string;
+    type: string;
+    options: unknown;
+    selectedAnswer: unknown;
+    correctAnswer: unknown;
+    correctAnswerText: unknown;
     explanation: string | null;
     isCorrect: boolean;
+    points: number;
   }> = [];
+
   for (const question of questions) {
     const points = Number(question.points ?? 1);
     totalPoints += points;
     const answer = answers[question.id];
     let correct = false;
-    if (question.type === "multiple_choice" || question.type === "true_false") {
-      const options = Array.isArray(question.options) ? question.options : [];
-      const correctOption = options.find(
-        (option: Record<string, unknown>) => option.is_correct === true,
-      );
-      correct = correctOption != null && answer === correctOption.id;
-    } else if (question.type === "short_answer" && question.correct_answer != null) {
+    const qType = String(question.type ?? "multiple_choice").toLowerCase();
+    const options = Array.isArray(question.options) ? question.options : [];
+    const correctOpt = options.find(
+      (option: Record<string, unknown>) => option.is_correct === true,
+    );
+
+    if (qType === "multiple_choice" || qType === "true_false") {
+      let selectedChoice = "";
+      if (typeof answer === "string") {
+        if (answer.trim().startsWith("{") && answer.trim().endsWith("}")) {
+          try {
+            const parsed = JSON.parse(answer);
+            selectedChoice = String(parsed.option_id ?? parsed.selected ?? parsed.text ?? "");
+          } catch {
+            selectedChoice = answer;
+          }
+        } else {
+          selectedChoice = answer;
+        }
+      } else if (answer && typeof answer === "object") {
+        const obj = answer as Record<string, unknown>;
+        selectedChoice = String(obj.option_id ?? obj.selected ?? obj.text ?? "");
+      } else {
+        selectedChoice = String(answer ?? "");
+      }
+
+      const normChoice = selectedChoice.trim().toLowerCase();
+      if (normChoice) {
+        if (correctOpt) {
+          const optId = String(correctOpt.id ?? "").trim().toLowerCase();
+          const optText = String(correctOpt.text ?? "").trim().toLowerCase();
+          if (normChoice === optId || normChoice === optText) {
+            correct = true;
+          }
+          if (qType === "true_false") {
+            const isOptTrue = optText === "true" || optId === "true" || optId === "t" || optId === "1";
+            const isOptFalse = optText === "false" || optId === "false" || optId === "f" || optId === "0";
+            const isChoiceTrue = normChoice === "true" || normChoice === "t" || normChoice === "yes" || normChoice === "1";
+            const isChoiceFalse = normChoice === "false" || normChoice === "f" || normChoice === "no" || normChoice === "0";
+            if (isOptTrue && isChoiceTrue) correct = true;
+            if (isOptFalse && isChoiceFalse) correct = true;
+          }
+        }
+
+        if (!correct) {
+          for (const opt of options) {
+            if (opt && opt.is_correct === true) {
+              const optId = String(opt.id ?? "").trim().toLowerCase();
+              const optText = String(opt.text ?? "").trim().toLowerCase();
+              if (normChoice === optId || normChoice === optText) {
+                correct = true;
+                break;
+              }
+            }
+          }
+        }
+
+        const qAns = String(question.correct_answer ?? "").trim().toLowerCase();
+        if (!correct && qAns) {
+          if (normChoice === qAns) {
+            correct = true;
+          } else {
+            for (const opt of options) {
+              const optId = String(opt.id ?? "").trim().toLowerCase();
+              const optText = String(opt.text ?? "").trim().toLowerCase();
+              if ((normChoice === optId || normChoice === optText) && (qAns === optId || qAns === optText)) {
+                correct = true;
+                break;
+              }
+            }
+          }
+        }
+      }
+    } else {
+      // Short answer, fill in blank, blank space, description
       let textVal = "";
       if (typeof answer === "string") {
-        try {
-          const parsed = JSON.parse(answer);
-          if (parsed && typeof parsed === "object" && "text" in parsed) {
+        if (answer.trim().startsWith("{") && answer.trim().endsWith("}")) {
+          try {
+            const parsed = JSON.parse(answer);
             textVal = String(parsed.text ?? "");
-          } else {
+          } catch {
             textVal = answer;
           }
-        } catch {
+        } else {
           textVal = answer;
         }
-      } else if (answer && typeof answer === "object" && "text" in answer) {
+      } else if (answer && typeof answer === "object") {
         textVal = String((answer as Record<string, unknown>).text ?? "");
       } else {
         textVal = String(answer ?? "");
       }
-      correct = textVal.trim().toLowerCase() ===
-        String(question.correct_answer).trim().toLowerCase();
+
+      const normStudent = textVal
+        .trim()
+        .toLowerCase()
+        .replace(/[.,!?:;]+$/, "")
+        .replace(/\s+/g, " ");
+
+      const cAns = String(question.correct_answer ?? "").trim();
+      if (normStudent && cAns && cAns !== "Teacher manual evaluation") {
+        const fullNormTeacher = cAns
+          .toLowerCase()
+          .replace(/[.,!?:;]+$/, "")
+          .replace(/\s+/g, " ");
+
+        const alternatives = cAns
+          .split(/[,;/|]/)
+          .map((a) => a.trim().toLowerCase().replace(/[.,!?:;]+$/, "").replace(/\s+/g, " "))
+          .filter(Boolean);
+
+        if (normStudent === fullNormTeacher || alternatives.includes(normStudent)) {
+          correct = true;
+        } else {
+          const numStudent = Number(normStudent);
+          const numTeacher = Number(fullNormTeacher);
+          if (!isNaN(numStudent) && !isNaN(numTeacher) && numStudent === numTeacher) {
+            correct = true;
+          } else {
+            for (const alt of alternatives) {
+              const numAlt = Number(alt);
+              if (!isNaN(numStudent) && !isNaN(numAlt) && numStudent === numAlt) {
+                correct = true;
+                break;
+              }
+            }
+          }
+        }
+      }
     }
+
     if (correct) {
       score += points;
     } else {
       incorrectAnswers += 1;
     }
+
+    const isTextQ = qType === "short_answer" || qType === "fill_in_blank" || qType === "blank_space" || qType === "description";
     feedback.push({
+      questionId: question.id,
       question: question.text,
+      type: question.type,
+      options: question.options,
+      selectedAnswer: answer,
+      correctAnswer: isTextQ ? question.correct_answer : (correctOpt?.id ?? question.correct_answer),
+      correctAnswerText: isTextQ ? question.correct_answer : (correctOpt?.text ?? question.correct_answer),
       explanation: question.explanation,
       isCorrect: correct,
+      points,
     });
   }
 
   const percentage = totalPoints > 0 ? Math.round((score / totalPoints) * 100) : 0;
+
+  // Clear prior grade for this student and quiz
+  await serviceClient
+    .from("grades")
+    .delete()
+    .eq("student_id", authData.user.id)
+    .eq("quiz_id", body.quizId);
+
   const { data: grade, error: gradeError } = await serviceClient
     .from("grades")
     .insert({
@@ -213,8 +342,9 @@ Deno.serve(async (request) => {
       total_points: totalPoints,
       incorrect_answers: incorrectAnswers,
       percentage,
-      passed: percentage >= Number(quiz.passing_score_percent ?? 60),
+      passed: percentage >= Number(quiz.passing_score_percent ?? 50),
       submitted_at: new Date().toISOString(),
+      graded_at: new Date().toISOString(),
     })
     .select()
     .single();

@@ -520,3 +520,4 @@ end;
 $$;
 
 grant execute on function public.transfer_director_position(uuid, text) to authenticated, anon;
+

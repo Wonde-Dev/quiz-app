@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:quiz_app/core/services/quiz_attempt_service.dart';
 import 'package:quiz_app/shared/models/grade.dart';
 import 'package:quiz_app/shared/models/question.dart';
 
@@ -20,6 +21,15 @@ class QuizResultScreen extends StatelessWidget {
   final Map<String, dynamic> studentAnswers;
   final List<Map<String, dynamic>> feedback;
 
+  void _navToDashboard(BuildContext context) {
+    if (!context.mounted) return;
+    try {
+      context.go('/student/dashboard');
+    } catch (_) {
+      Navigator.of(context).pushNamedAndRemoveUntil('/student/dashboard', (r) => false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -34,19 +44,30 @@ class QuizResultScreen extends StatelessWidget {
     final correctCount = reviewItems.where((r) => r.isCorrect).length;
     final incorrectCount = reviewItems.length - correctCount;
 
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Exam Result & Answer Review'),
-        automaticallyImplyLeading: false,
-      ),
-      body: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 720),
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) {
+          _navToDashboard(context);
+        }
+      },
+      child: Scaffold(
+        appBar: AppBar(
+          title: const Text('Exam Result & Answer Review'),
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back_rounded),
+            tooltip: 'Return to Dashboard',
+            onPressed: () => _navToDashboard(context),
+          ),
+        ),
+        body: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 720),
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
                 // Top Score Summary Card
                 Card(
                   elevation: 0,
@@ -239,7 +260,7 @@ class QuizResultScreen extends StatelessWidget {
                       borderRadius: BorderRadius.circular(16),
                     ),
                   ),
-                  onPressed: () => context.go('/student/dashboard'),
+                  onPressed: () => _navToDashboard(context),
                   icon: const Icon(Icons.dashboard_rounded, size: 20),
                   label: const Text(
                     'Return to Student Dashboard',
@@ -252,8 +273,9 @@ class QuizResultScreen extends StatelessWidget {
           ),
         ),
       ),
-    );
-  }
+    ),
+  );
+}
 
   List<_ReviewItem> _buildReviewItems() {
     final items = <_ReviewItem>[];
@@ -267,17 +289,18 @@ class QuizResultScreen extends StatelessWidget {
           orElse: () => <String, dynamic>{},
         );
 
-        bool isCorrect = fb['isCorrect'] == true;
-        if (!fb.containsKey('isCorrect')) {
-          if (q.type == 'multiple_choice' || q.type == 'true_false') {
-            final correctOpt = q.options.where((o) => o.isCorrect).firstOrNull;
-            isCorrect = correctOpt != null && _extractSelectedId(rawAns) == correctOpt.id;
-          } else if (q.type == 'short_answer') {
-            final text = _extractTextAnswer(rawAns);
-            isCorrect = q.correctAnswer != null &&
-                text.trim().toLowerCase() == q.correctAnswer!.trim().toLowerCase();
-          }
-        }
+        final bool isCorrect = fb.containsKey('isCorrect')
+            ? (fb['isCorrect'] == true)
+            : QuizAttemptService.evaluateQuestionAnswer(q.toMap(), rawAns);
+
+        final isChoice = q.type == 'multiple_choice' || q.type == 'true_false';
+        final correctOpt = isChoice
+            ? q.options.where((o) => o.isCorrect).firstOrNull
+            : null;
+
+        final expected = isChoice
+            ? (correctOpt?.text ?? q.correctAnswer ?? fb['correctAnswerText']?.toString() ?? fb['correctAnswer']?.toString())
+            : (q.correctAnswer ?? fb['correctAnswerText']?.toString() ?? fb['correctAnswer']?.toString());
 
         items.add(_ReviewItem(
           id: q.id,
@@ -292,7 +315,7 @@ class QuizResultScreen extends StatelessWidget {
             isCorrect: o.isCorrect,
           )).toList(),
           studentRawAnswer: rawAns,
-          expectedAnswer: q.correctAnswer ?? fb['correctAnswerText']?.toString(),
+          expectedAnswer: expected,
           isCorrect: isCorrect,
         ));
       }
@@ -317,6 +340,10 @@ class QuizResultScreen extends StatelessWidget {
       }
       final rawAns = fb['selectedAnswer'] ?? studentAnswers[fb['questionId'] ?? ''];
 
+      final bool isCorrect = fb.containsKey('isCorrect')
+          ? (fb['isCorrect'] == true)
+          : QuizAttemptService.evaluateQuestionAnswer(fb, rawAns);
+
       items.add(_ReviewItem(
         id: fb['questionId']?.toString() ?? '$i',
         questionText: fb['question']?.toString() ?? 'Question ${i + 1}',
@@ -327,7 +354,7 @@ class QuizResultScreen extends StatelessWidget {
         options: opts,
         studentRawAnswer: rawAns,
         expectedAnswer: fb['correctAnswerText']?.toString() ?? fb['correctAnswer']?.toString(),
-        isCorrect: fb['isCorrect'] == true,
+        isCorrect: isCorrect,
       ));
     }
 

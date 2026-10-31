@@ -489,8 +489,14 @@ class _StudentQuizListState extends ConsumerState<_StudentQuizList> {
                     quiz: quiz,
                     isForStudentSection: quiz['section_id'] == null ||
                         studentSectionIds.contains(quiz['section_id']),
-                    onStart: () =>
-                        context.push('/student/quiz/${quiz['id']}'),
+                    onStart: () async {
+                      await context.push('/student/quiz/${quiz['id']}');
+                      if (mounted) {
+                        setState(() {
+                          _dashboard = _loadDashboard();
+                        });
+                      }
+                    },
                   ),
                   const SizedBox(height: 10),
                 ],

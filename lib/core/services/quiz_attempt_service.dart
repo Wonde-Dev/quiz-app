@@ -132,6 +132,171 @@ class QuizAttemptService {
     }
   }
 
+  /// Robust evaluation of student answers against teacher answer keys for all question types.
+  static bool evaluateQuestionAnswer(Map<String, dynamic> q, dynamic rawAns) {
+    if (rawAns == null) return false;
+    final type = (q['type'] as String? ?? 'multiple_choice').toLowerCase();
+
+    // 1. Multiple Choice / True-False
+    if (type == 'multiple_choice' || type == 'true_false') {
+      final options = (q['options'] as List?)?.cast<dynamic>() ?? [];
+      final correctOpt = options.firstWhere(
+        (o) => o is Map && o['is_correct'] == true,
+        orElse: () => null,
+      );
+
+      String studentChoice = '';
+      if (rawAns is String) {
+        if (rawAns.trim().startsWith('{') && rawAns.trim().endsWith('}')) {
+          try {
+            final parsed = jsonDecode(rawAns) as Map<String, dynamic>;
+            studentChoice = (parsed['option_id'] ?? parsed['selected'] ?? parsed['text'] ?? '').toString();
+          } catch (_) {
+            studentChoice = rawAns;
+          }
+        } else {
+          studentChoice = rawAns;
+        }
+      } else if (rawAns is Map) {
+        studentChoice = (rawAns['option_id'] ?? rawAns['selected'] ?? rawAns['text'] ?? '').toString();
+      } else {
+        studentChoice = rawAns.toString();
+      }
+
+      final normStudent = studentChoice.trim().toLowerCase();
+      if (normStudent.isEmpty) return false;
+
+      // Check matching option in options list
+      if (correctOpt != null && correctOpt is Map) {
+        final optId = (correctOpt['id'] ?? '').toString().trim().toLowerCase();
+        final optText = (correctOpt['text'] ?? '').toString().trim().toLowerCase();
+
+        if (normStudent == optId || normStudent == optText) {
+          return true;
+        }
+
+        // True/False synonyms
+        if (type == 'true_false') {
+          final isOptTrue = optText == 'true' || optId == 'true' || optId == 't' || optId == '1';
+          final isOptFalse = optText == 'false' || optId == 'false' || optId == 'f' || optId == '0';
+          final isStudentTrue = normStudent == 'true' || normStudent == 't' || normStudent == 'yes' || normStudent == '1';
+          final isStudentFalse = normStudent == 'false' || normStudent == 'f' || normStudent == 'no' || normStudent == '0';
+
+          if (isOptTrue && isStudentTrue) return true;
+          if (isOptFalse && isStudentFalse) return true;
+        }
+      }
+
+      // Check if student matched any option whose is_correct is true
+      for (final opt in options) {
+        if (opt is Map && opt['is_correct'] == true) {
+          final optId = (opt['id'] ?? '').toString().trim().toLowerCase();
+          final optText = (opt['text'] ?? '').toString().trim().toLowerCase();
+          if (normStudent == optId || normStudent == optText) {
+            return true;
+          }
+        }
+      }
+
+      // If correct_answer string was given directly on question
+      final cAns = (q['correct_answer'] as String?)?.trim().toLowerCase();
+      if (cAns != null && cAns.isNotEmpty) {
+        if (normStudent == cAns) return true;
+        for (final opt in options) {
+          if (opt is Map) {
+            final optId = (opt['id'] ?? '').toString().trim().toLowerCase();
+            final optText = (opt['text'] ?? '').toString().trim().toLowerCase();
+            if ((normStudent == optId || normStudent == optText) && (cAns == optId || cAns == optText)) {
+              return true;
+            }
+          }
+        }
+        if (type == 'true_false') {
+          final isAnsTrue = cAns == 'true' || cAns == 't' || cAns == '1';
+          final isAnsFalse = cAns == 'false' || cAns == 'f' || cAns == '0';
+          final isStudentTrue = normStudent == 'true' || normStudent == 't' || normStudent == 'yes' || normStudent == '1';
+          final isStudentFalse = normStudent == 'false' || normStudent == 'f' || normStudent == 'no' || normStudent == '0';
+          if (isAnsTrue && isStudentTrue) return true;
+          if (isAnsFalse && isStudentFalse) return true;
+        }
+      }
+
+      return false;
+    }
+
+    // 2. Short answer / Fill in the blank / Blank space / Description
+    String textVal = '';
+    if (rawAns is String) {
+      if (rawAns.trim().startsWith('{') && rawAns.trim().endsWith('}')) {
+        try {
+          final parsed = jsonDecode(rawAns) as Map<String, dynamic>;
+          textVal = (parsed['text'] ?? '').toString();
+        } catch (_) {
+          textVal = rawAns;
+        }
+      } else {
+        textVal = rawAns;
+      }
+    } else if (rawAns is Map) {
+      textVal = (rawAns['text'] ?? '').toString();
+    } else {
+      textVal = rawAns.toString();
+    }
+
+    final normStudent = textVal
+        .trim()
+        .toLowerCase()
+        .replaceAll(RegExp(r'[.,!?:;]+$'), '')
+        .replaceAll(RegExp(r'\s+'), ' ');
+
+    if (normStudent.isEmpty) return false;
+
+    final cAns = (q['correct_answer'] as String?)?.trim();
+    if (cAns != null && cAns.isNotEmpty && cAns != 'Teacher manual evaluation') {
+      final alternatives = cAns
+          .split(RegExp(r'[,;/|]'))
+          .map((a) => a.trim().toLowerCase().replaceAll(RegExp(r'[.,!?:;]+$'), '').replaceAll(RegExp(r'\s+'), ' '))
+          .where((a) => a.isNotEmpty)
+          .toList();
+
+      final fullNormTeacher = cAns
+          .toLowerCase()
+          .replaceAll(RegExp(r'[.,!?:;]+$'), '')
+          .replaceAll(RegExp(r'\s+'), ' ');
+
+      if (normStudent == fullNormTeacher || alternatives.contains(normStudent)) {
+        return true;
+      }
+
+      // Check numeric equivalence (e.g. "0" == "0.0")
+      final numStudent = num.tryParse(normStudent);
+      final numTeacher = num.tryParse(fullNormTeacher);
+      if (numStudent != null && numTeacher != null && numStudent == numTeacher) {
+        return true;
+      }
+      for (final alt in alternatives) {
+        final numAlt = num.tryParse(alt);
+        if (numStudent != null && numAlt != null && numStudent == numAlt) {
+          return true;
+        }
+      }
+    }
+
+    // Check accepted_answers JSONB array if present
+    final accepted = q['accepted_answers'];
+    if (accepted is List) {
+      for (final a in accepted) {
+        final normA = a.toString().trim().toLowerCase().replaceAll(RegExp(r'[.,!?:;]+$'), '').replaceAll(RegExp(r'\s+'), ' ');
+        if (normStudent == normA) return true;
+        final numA = num.tryParse(normA);
+        final numStudent = num.tryParse(normStudent);
+        if (numStudent != null && numA != null && numStudent == numA) return true;
+      }
+    }
+
+    return false;
+  }
+
   Future<QuizSubmissionResult> _fallbackSubmit(
     String quizId,
     Map<String, dynamic> answers,
@@ -156,78 +321,14 @@ class QuizAttemptService {
       final points = (q['points'] as num?)?.toInt() ?? 1;
       totalPoints += points;
       final rawAns = answers[q['id']];
-      bool isCorrect = false;
-
-      if (q['type'] == 'multiple_choice' || q['type'] == 'true_false') {
-        final options = q['options'] as List?;
-        String? selectedOptionId;
-        if (rawAns is String) {
-          if (rawAns.trim().startsWith('{') && rawAns.trim().endsWith('}')) {
-            try {
-              final parsed = jsonDecode(rawAns) as Map<String, dynamic>;
-              selectedOptionId = parsed['option_id'] as String? ??
-                  parsed['selected'] as String? ??
-                  parsed['text'] as String?;
-            } catch (_) {
-              selectedOptionId = rawAns;
-            }
-          } else {
-            selectedOptionId = rawAns;
-          }
-        } else if (rawAns is Map) {
-          selectedOptionId = rawAns['option_id'] as String? ??
-              rawAns['selected'] as String? ??
-              rawAns['text'] as String?;
-        }
-        if (options != null) {
-          final correctOpt = options.firstWhere(
-            (o) => o is Map && o['is_correct'] == true,
-            orElse: () => null,
-          );
-          isCorrect = correctOpt != null && selectedOptionId == correctOpt['id'];
-        }
-      } else if (q['type'] == 'short_answer' ||
-          q['type'] == 'fill_in_blank' ||
-          q['type'] == 'blank_space' ||
-          q['type'] == 'description') {
-        final cAns = q['correct_answer'] as String?;
-        String textVal = '';
-        if (rawAns is String) {
-          try {
-            final parsed = jsonDecode(rawAns);
-            if (parsed is Map && parsed.containsKey('text')) {
-              textVal = parsed['text']?.toString() ?? '';
-            } else {
-              textVal = rawAns;
-            }
-          } catch (_) {
-            textVal = rawAns;
-          }
-        } else if (rawAns is Map && rawAns.containsKey('text')) {
-          textVal = rawAns['text']?.toString() ?? '';
-        } else {
-          textVal = rawAns?.toString() ?? '';
-        }
-        if (cAns != null && cAns.trim().isNotEmpty) {
-          final normStudent = textVal
-              .trim()
-              .toLowerCase()
-              .replaceAll(RegExp(r'[.,!?:;]+$'), '')
-              .replaceAll(RegExp(r'\s+'), ' ');
-          final normTeacher = cAns
-              .trim()
-              .toLowerCase()
-              .replaceAll(RegExp(r'[.,!?:;]+$'), '')
-              .replaceAll(RegExp(r'\s+'), ' ');
-          isCorrect = normStudent == normTeacher;
-        }
-      }
+      final isCorrect = evaluateQuestionAnswer(q, rawAns);
 
       if (isCorrect) {
         score += points;
       } else {
         incorrectAnswers++;
       }
+
       final options = q['options'] as List?;
       final correctOpt = (options != null)
           ? options.firstWhere(
@@ -235,18 +336,24 @@ class QuizAttemptService {
               orElse: () => null,
             )
           : null;
+
+      final isTextQ = q['type'] == 'short_answer' ||
+          q['type'] == 'fill_in_blank' ||
+          q['type'] == 'blank_space' ||
+          q['type'] == 'description';
+
       feedback.add({
         'questionId': q['id'],
         'question': q['text'] ?? 'Question',
         'type': q['type'],
         'options': q['options'],
         'selectedAnswer': rawAns,
-        'correctAnswer': q['type'] == 'short_answer'
+        'correctAnswer': isTextQ
             ? q['correct_answer']
-            : correctOpt?['id'],
-        'correctAnswerText': q['type'] == 'short_answer'
+            : (correctOpt?['id'] ?? q['correct_answer']),
+        'correctAnswerText': isTextQ
             ? q['correct_answer']
-            : correctOpt?['text'],
+            : (correctOpt?['text'] ?? q['correct_answer']),
         'explanation': q['explanation'],
         'isCorrect': isCorrect,
         'points': points,
@@ -264,7 +371,7 @@ class QuizAttemptService {
           ? jsonEncode(rawAns)
           : (rawAns?.toString() ?? '');
       final fb = feedback.firstWhere(
-        (f) => f['question'] == q['text'],
+        (f) => f['questionId'] == q['id'] || f['question'] == q['text'],
         orElse: () => {'isCorrect': false},
       );
       return {
@@ -308,9 +415,15 @@ class QuizAttemptService {
       // Fallback to table inserts below
     }
 
-    // 2. Direct table insert fallback: Insert Grade
+    // 2. Direct table insert fallback: First clean up prior grade if any
     Map<String, dynamic> gradeRow = {};
     try {
+      await _client
+          .from('grades')
+          .delete()
+          .eq('student_id', user.id)
+          .eq('quiz_id', quizId);
+
       gradeRow = await _client
           .from('grades')
           .insert({
@@ -322,6 +435,7 @@ class QuizAttemptService {
             'percentage': percentage,
             'passed': passed,
             'submitted_at': DateTime.now().toIso8601String(),
+            'graded_at': DateTime.now().toIso8601String(),
           })
           .select()
           .single();
@@ -332,9 +446,11 @@ class QuizAttemptService {
         'quiz_id': quizId,
         'score': score,
         'total_points': totalPoints,
+        'incorrect_answers': incorrectAnswers,
         'percentage': percentage,
         'passed': passed,
         'submitted_at': DateTime.now().toIso8601String(),
+        'graded_at': DateTime.now().toIso8601String(),
       };
     }
 
@@ -346,13 +462,16 @@ class QuizAttemptService {
             'quiz_id': quizId,
             'student_id': user.id,
             'submitted_at': DateTime.now().toIso8601String(),
+            'completed_at': DateTime.now().toIso8601String(),
             'score': score,
+            'status': 'submitted',
           }, onConflict: 'quiz_id,student_id')
           .select('id')
           .maybeSingle();
 
       final attemptId = attemptRow?['id'] as String?;
       if (attemptId != null) {
+        await _client.from('answers').delete().eq('attempt_id', attemptId);
         final answersToInsert = answersList.map((a) {
           return {
             'attempt_id': attemptId,
@@ -361,7 +480,9 @@ class QuizAttemptService {
             'is_correct': a['is_correct'],
           };
         }).toList();
-        await _client.from('answers').insert(answersToInsert);
+        if (answersToInsert.isNotEmpty) {
+          await _client.from('answers').insert(answersToInsert);
+        }
       }
     } catch (_) {}
 
@@ -379,7 +500,7 @@ class QuizAttemptService {
     try {
       final qRows = await _client
           .from('questions')
-          .select('id, text, type, options, correct_answer, points, explanation')
+          .select('id, text, type, options, correct_answer, points, explanation, accepted_answers')
           .eq('quiz_id', quizId)
           .order('order', ascending: true);
       final questions = List<Map<String, dynamic>>.from(qRows);
@@ -388,7 +509,7 @@ class QuizAttemptService {
       return questions.map((q) {
         final rawAns = answers[q['id']];
         final fb = rawFeedback.firstWhere(
-          (f) => f['question'] == q['text'] || f['questionId'] == q['id'],
+          (f) => f['questionId'] == q['id'] || f['question'] == q['text'],
           orElse: () => <String, dynamic>{},
         );
         final options = q['options'] as List?;
@@ -398,20 +519,30 @@ class QuizAttemptService {
                 orElse: () => null,
               )
             : null;
+
+        final isTextQ = q['type'] == 'short_answer' ||
+            q['type'] == 'fill_in_blank' ||
+            q['type'] == 'blank_space' ||
+            q['type'] == 'description';
+
+        final bool isCorrect = fb.containsKey('isCorrect')
+            ? (fb['isCorrect'] == true)
+            : evaluateQuestionAnswer(q, rawAns);
+
         return {
           'questionId': q['id'],
           'question': q['text'] ?? 'Question',
           'type': q['type'],
           'options': q['options'],
           'selectedAnswer': rawAns,
-          'correctAnswer': q['type'] == 'short_answer'
+          'correctAnswer': isTextQ
               ? q['correct_answer']
-              : correctOpt?['id'],
-          'correctAnswerText': q['type'] == 'short_answer'
+              : (correctOpt?['id'] ?? q['correct_answer']),
+          'correctAnswerText': isTextQ
               ? q['correct_answer']
-              : correctOpt?['text'],
+              : (correctOpt?['text'] ?? q['correct_answer']),
           'explanation': q['explanation'] ?? fb['explanation'],
-          'isCorrect': fb['isCorrect'] ?? false,
+          'isCorrect': isCorrect,
           'points': (q['points'] as num?)?.toInt() ?? 1,
         };
       }).toList();
