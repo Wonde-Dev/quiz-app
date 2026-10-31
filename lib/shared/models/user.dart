@@ -25,6 +25,8 @@ class AppUser {
   final String? assignedSubject; // e.g. 'Mathematics'
   final String? phoneNumber;
   final String? gender;
+  final bool allowAdminNotifications;
+  final bool allowDirectorNotifications;
 
   const AppUser({
     required this.id,
@@ -50,6 +52,8 @@ class AppUser {
     this.assignedSubject,
     this.phoneNumber,
     this.gender,
+    this.allowAdminNotifications = true,
+    this.allowDirectorNotifications = true,
   });
 
   factory AppUser.fromMap(Map<String, dynamic> map) {
@@ -89,6 +93,8 @@ class AppUser {
           map['requested_subject'] as String?,
       phoneNumber: map['phone_number'] as String? ?? map['phone'] as String?,
       gender: map['gender'] as String?,
+      allowAdminNotifications: map['allow_admin_notifications'] as bool? ?? true,
+      allowDirectorNotifications: map['allow_director_notifications'] as bool? ?? true,
     );
   }
 
@@ -117,6 +123,8 @@ class AppUser {
       'assigned_subject': assignedSubject,
       'phone_number': phoneNumber,
       'gender': gender,
+      'allow_admin_notifications': allowAdminNotifications,
+      'allow_director_notifications': allowDirectorNotifications,
     };
   }
 
@@ -144,6 +152,8 @@ class AppUser {
     String? assignedSubject,
     String? phoneNumber,
     String? gender,
+    bool? allowAdminNotifications,
+    bool? allowDirectorNotifications,
   }) {
     return AppUser(
       id: id ?? this.id,
@@ -169,6 +179,8 @@ class AppUser {
       assignedSubject: assignedSubject ?? this.assignedSubject,
       phoneNumber: phoneNumber ?? this.phoneNumber,
       gender: gender ?? this.gender,
+      allowAdminNotifications: allowAdminNotifications ?? this.allowAdminNotifications,
+      allowDirectorNotifications: allowDirectorNotifications ?? this.allowDirectorNotifications,
     );
   }
 

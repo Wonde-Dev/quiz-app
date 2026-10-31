@@ -213,8 +213,8 @@ class _DirectorDashboardScreenState extends ConsumerState<DirectorDashboardScree
                 ),
               ],
             ),
-            content: SizedBox(
-              width: 480,
+            content: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 480),
               child: SingleChildScrollView(
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
@@ -431,8 +431,8 @@ class _DirectorDashboardScreenState extends ConsumerState<DirectorDashboardScree
                 ),
               ],
             ),
-            content: SizedBox(
-              width: 480,
+            content: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 480),
               child: SingleChildScrollView(
                 child: Column(
                   mainAxisSize: MainAxisSize.min,

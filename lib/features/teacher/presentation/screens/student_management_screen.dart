@@ -334,9 +334,10 @@ class _StudentManagementScreenState
               side: const BorderSide(color: Color(0xFFE2E8F0)),
             ),
             contentPadding: const EdgeInsets.all(24),
-            content: SizedBox(
-              width: 400,
-              child: Column(
+            content: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 400),
+              child: SingleChildScrollView(
+                child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Container(
@@ -460,7 +461,8 @@ class _StudentManagementScreenState
               ),
             ),
           ),
-        );
+        ),
+      );
       }
     } catch (error) {
       if (mounted) {
@@ -588,8 +590,8 @@ class _StudentManagementScreenState
                 ),
               ],
             ),
-            content: SizedBox(
-              width: 480,
+            content: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 480),
               child: Form(
                 key: formKey,
                 child: SingleChildScrollView(

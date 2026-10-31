@@ -254,8 +254,8 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen>
                 ),
               ],
             ),
-            content: SizedBox(
-              width: 480,
+            content: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 480),
               child: SingleChildScrollView(
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
@@ -475,8 +475,8 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen>
             ],
           ),
           content: SingleChildScrollView(
-            child: SizedBox(
-              width: 460,
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 460),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,

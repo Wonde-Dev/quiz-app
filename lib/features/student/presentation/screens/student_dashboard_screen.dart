@@ -565,10 +565,10 @@ class _StudentStatCard extends StatelessWidget {
     final isDark = theme.brightness == Brightness.dark;
 
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 18),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 14),
       decoration: BoxDecoration(
         color: isDark ? const Color(0xFF1E293B) : Colors.white,
-        borderRadius: BorderRadius.circular(20),
+        borderRadius: BorderRadius.circular(18),
         border: Border.all(
           color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0),
           width: 1.2,
@@ -586,29 +586,35 @@ class _StudentStatCard extends StatelessWidget {
       child: Column(
         children: [
           Container(
-            padding: const EdgeInsets.all(8),
+            padding: const EdgeInsets.all(7),
             decoration: BoxDecoration(
               color: color.withValues(alpha: 0.12),
               borderRadius: BorderRadius.circular(12),
             ),
-            child: Icon(icon, color: color, size: 22),
+            child: Icon(icon, color: color, size: 20),
           ),
-          const SizedBox(height: 10),
-          Text(
-            value,
-            style: theme.textTheme.headlineSmall?.copyWith(
-              fontWeight: FontWeight.w900,
-              color: isDark ? Colors.white : const Color(0xFF0F172A),
-              letterSpacing: -0.5,
+          const SizedBox(height: 8),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Text(
+              value,
+              style: theme.textTheme.headlineSmall?.copyWith(
+                fontWeight: FontWeight.w900,
+                color: isDark ? Colors.white : const Color(0xFF0F172A),
+                letterSpacing: -0.5,
+              ),
             ),
           ),
           const SizedBox(height: 2),
-          Text(
-            label,
-            style: TextStyle(
-              color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
-              fontWeight: FontWeight.w600,
-              fontSize: 12,
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Text(
+              label,
+              style: TextStyle(
+                color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                fontWeight: FontWeight.w600,
+                fontSize: 12,
+              ),
             ),
           ),
         ],

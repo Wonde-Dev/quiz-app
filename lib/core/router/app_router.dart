@@ -115,7 +115,9 @@ final routerProvider = Provider<GoRouter>((ref) {
 
       // Route protection for Super Administrator:
       if (user.role == AppRoles.admin) {
-        if (location == '/director/dashboard') {
+        if (location == '/director/dashboard' ||
+            location.startsWith('/teacher/quizzes') ||
+            location == '/teacher/quizzes/new') {
           return '/admin/dashboard';
         }
         return null;

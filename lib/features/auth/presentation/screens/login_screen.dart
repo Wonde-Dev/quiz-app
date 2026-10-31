@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:quiz_app/core/services/auth_service.dart';
 import 'package:quiz_app/core/theme/theme_mode_provider.dart';
 import 'package:quiz_app/core/utils/role_username.dart';
 import 'package:quiz_app/core/utils/validators.dart';
@@ -107,6 +108,15 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 
       // Proactively check for duplicate email or username in database
       try {
+        final emailAvailable = await AuthService().checkEmailAvailability(emailToUse);
+        if (!emailAvailable) {
+          notifier.setMessage(
+            error:
+                'The email address "$emailToUse" is already registered to another account. Please sign in or use a different email.',
+          );
+          return;
+        }
+
         final checkRes = await Supabase.instance.client.rpc(
           'check_user_exists',
           params: {'p_email': emailToUse, 'p_username': username},
@@ -345,8 +355,10 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
               const Text('Reset Password'),
             ],
           ),
-          content: SingleChildScrollView(
-            child: Column(
+          content: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 440),
+            child: SingleChildScrollView(
+              child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -427,7 +439,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
               ],
             ),
           ),
-          actions: [
+        ),
+        actions: [
             TextButton(
               onPressed: isWorking ? null : () => Navigator.pop(ctx),
               child: const Text('Cancel'),
@@ -1031,27 +1044,69 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                           ),
                           if (_otpSent) ...[
                             const SizedBox(height: 14),
-                            TextFormField(
-                              controller: _otpController,
-                              keyboardType: TextInputType.number,
-                              maxLength: 6,
-                              decoration: const InputDecoration(
-                                labelText: '6-Digit OTP Code',
-                                hintText: '123456',
-                                prefixIcon: Icon(Icons.pin_outlined),
-                                counterText: '',
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                              decoration: BoxDecoration(
+                                color: isDark ? const Color(0xFF0F172A) : const Color(0xFFF1F5F9),
+                                borderRadius: BorderRadius.circular(16),
+                                border: Border.all(
+                                  color: const Color(0xFF10B981).withValues(alpha: 0.5),
+                                  width: 1.5,
+                                ),
                               ),
-                              validator: (v) {
-                                if (_useOtpLogin && _otpSent && (v == null || v.trim().length < 6)) {
-                                  return 'Enter the complete 6-digit OTP code';
-                                }
-                                return null;
-                              },
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.center,
+                                children: [
+                                  Text(
+                                    'ENTER 6-DIGIT CODE',
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w800,
+                                      letterSpacing: 1.5,
+                                      color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                                    ),
+                                  ),
+                                  const SizedBox(height: 8),
+                                  TextFormField(
+                                    controller: _otpController,
+                                    keyboardType: TextInputType.number,
+                                    maxLength: 6,
+                                    textAlign: TextAlign.center,
+                                    style: const TextStyle(
+                                      fontFamily: 'monospace',
+                                      fontSize: 22,
+                                      fontWeight: FontWeight.bold,
+                                      letterSpacing: 10,
+                                    ),
+                                    decoration: const InputDecoration(
+                                      hintText: '••••••',
+                                      counterText: '',
+                                      border: InputBorder.none,
+                                      enabledBorder: InputBorder.none,
+                                      focusedBorder: InputBorder.none,
+                                      prefixIcon: Icon(Icons.pin_outlined, color: Color(0xFF10B981)),
+                                    ),
+                                    onChanged: (val) {
+                                      if (val.trim().length == 6) {
+                                        _verifyLoginOtp();
+                                      }
+                                    },
+                                    validator: (v) {
+                                      if (_useOtpLogin && _otpSent && (v == null || v.trim().length < 6)) {
+                                        return 'Enter the complete 6-digit OTP code';
+                                      }
+                                      return null;
+                                    },
+                                  ),
+                                ],
+                              ),
                             ),
                           ],
                           const SizedBox(height: 8),
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          Wrap(
+                            alignment: WrapAlignment.spaceBetween,
+                            crossAxisAlignment: WrapCrossAlignment.center,
+                            runSpacing: 4,
                             children: [
                               TextButton.icon(
                                 onPressed: () {
@@ -1107,8 +1162,10 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                           ),
                           if (!_isRegistering) ...[
                             const SizedBox(height: 4),
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            Wrap(
+                              alignment: WrapAlignment.spaceBetween,
+                              crossAxisAlignment: WrapCrossAlignment.center,
+                              runSpacing: 4,
                               children: [
                                 TextButton.icon(
                                   onPressed: () {

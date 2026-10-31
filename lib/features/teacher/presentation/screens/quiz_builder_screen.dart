@@ -102,6 +102,9 @@ class _QuizBuilderScreenState extends ConsumerState<QuizBuilderScreen> {
     try {
       final user = ref.read(authStateProvider).user;
       if (user == null) throw StateError('Sign in again to create a quiz.');
+      if (user.role != AppRoles.teacher) {
+        throw StateError('Quiz authoring is strictly restricted to teachers.');
+      }
 
       _selectedSchoolId = _ciroSchoolId;
       await _loadSchoolMetadata(_ciroSchoolId);

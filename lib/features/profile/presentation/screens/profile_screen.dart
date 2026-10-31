@@ -798,6 +798,103 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                       ),
                       const Divider(height: 48),
 
+                      // Notification & Announcement Permissions Section
+                      Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(10),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF10B981).withValues(alpha: 0.12),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: const Icon(
+                              Icons.notifications_active_rounded,
+                              color: Color(0xFF10B981),
+                              size: 24,
+                            ),
+                          ),
+                          const SizedBox(width: 14),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Notification Preferences',
+                                  style: Theme.of(context)
+                                      .textTheme
+                                      .titleLarge
+                                      ?.copyWith(
+                                        fontWeight: FontWeight.w900,
+                                      ),
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  'Choose which administrative broadcasts and notices you want to receive.',
+                                  style: TextStyle(
+                                    fontSize: 13,
+                                    color: isDark
+                                        ? const Color(0xFF94A3B8)
+                                        : const Color(0xFF64748B),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 16),
+                      Container(
+                        decoration: BoxDecoration(
+                          color: isDark ? const Color(0xFF1E293B) : const Color(0xFFF8FAFC),
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(
+                            color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0),
+                          ),
+                        ),
+                        child: Column(
+                          children: [
+                            SwitchListTile(
+                              title: const Text(
+                                'Super Admin Announcements',
+                                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                              ),
+                              subtitle: const Text(
+                                'Allow system notices, emergency alerts, and directives from the Super Administrator',
+                                style: TextStyle(fontSize: 12),
+                              ),
+                              secondary: const Icon(Icons.shield_rounded, color: Color(0xFFDC2626)),
+                              value: user.allowAdminNotifications,
+                              onChanged: (val) {
+                                ref.read(authStateProvider.notifier).updateNotificationPreferences(
+                                  allowAdmin: val,
+                                  allowDirector: user.allowDirectorNotifications,
+                                );
+                              },
+                            ),
+                            const Divider(height: 1),
+                            SwitchListTile(
+                              title: const Text(
+                                'School Director Announcements',
+                                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                              ),
+                              subtitle: const Text(
+                                'Allow academic notices, faculty meetings, and campus bulletins from the School Director',
+                                style: TextStyle(fontSize: 12),
+                              ),
+                              secondary: const Icon(Icons.campaign_rounded, color: Color(0xFF6366F1)),
+                              value: user.allowDirectorNotifications,
+                              onChanged: (val) {
+                                ref.read(authStateProvider.notifier).updateNotificationPreferences(
+                                  allowAdmin: user.allowAdminNotifications,
+                                  allowDirector: val,
+                                );
+                              },
+                            ),
+                          ],
+                        ),
+                      ),
+                      const Divider(height: 48),
+
                       // Sign Out Section
                       Row(
                         children: [

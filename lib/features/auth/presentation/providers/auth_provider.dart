@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -546,6 +547,31 @@ class AuthNotifier extends Notifier<AuthState> {
         error: 'Could not change password: $error',
       );
       rethrow;
+    }
+  }
+
+  Future<void> updateNotificationPreferences({
+    required bool allowAdmin,
+    required bool allowDirector,
+  }) async {
+    final existing = state.user;
+    if (existing == null) return;
+    try {
+      await _authService.updateNotificationPreferences(
+        uid: existing.id,
+        allowAdmin: allowAdmin,
+        allowDirector: allowDirector,
+      );
+      final updatedUser = existing.copyWith(
+        allowAdminNotifications: allowAdmin,
+        allowDirectorNotifications: allowDirector,
+      );
+      state = AuthState(
+        user: updatedUser,
+        needsPasswordChange: state.needsPasswordChange,
+      );
+    } catch (e) {
+      debugPrint('updateNotificationPreferences error: $e');
     }
   }
 

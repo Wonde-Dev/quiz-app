@@ -791,8 +791,8 @@ class _TeacherManagementScreenState
             ],
           ),
           content: SingleChildScrollView(
-            child: SizedBox(
-              width: 440,
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 440),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,

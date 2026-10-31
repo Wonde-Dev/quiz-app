@@ -460,11 +460,7 @@ class AuthService {
     try {
       final response = await _supabase
           .from('users')
-          .select(
-            'id, email, username, role, school_id, full_name, avatar_url, '
-            'must_change_password, requested_role, approval_status, is_active, '
-            'created_at, last_login',
-          )
+          .select()
           .eq('id', uid)
           .maybeSingle();
       if (response != null) {
@@ -541,6 +537,53 @@ class AuthService {
       password: currentPassword,
     );
     await updatePassword(newPassword);
+  }
+
+  /// Check if an email address is available for registration
+  Future<bool> checkEmailAvailability(String email) async {
+    final clean = email.trim().toLowerCase();
+    if (clean.isEmpty || !clean.contains('@')) return false;
+    try {
+      final res = await _supabase.rpc(
+        'check_email_availability',
+        params: {'p_email': clean},
+      );
+      if (res is bool) return res;
+    } catch (_) {}
+
+    // Fallback direct check on public.users
+    try {
+      final row = await _supabase
+          .from('users')
+          .select('id')
+          .eq('email', clean)
+          .maybeSingle();
+      return row == null;
+    } catch (_) {
+      return true;
+    }
+  }
+
+  /// Update user notification preferences
+  Future<void> updateNotificationPreferences({
+    required String uid,
+    required bool allowAdmin,
+    required bool allowDirector,
+  }) async {
+    try {
+      await _supabase.rpc(
+        'update_notification_preferences',
+        params: {
+          'p_allow_admin': allowAdmin,
+          'p_allow_director': allowDirector,
+        },
+      );
+    } catch (_) {
+      await _supabase.from('users').update({
+        'allow_admin_notifications': allowAdmin,
+        'allow_director_notifications': allowDirector,
+      }).eq('id', uid);
+    }
   }
 
   /// Stream of auth state changes.

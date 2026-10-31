@@ -415,9 +415,10 @@ class _AdminRegisterUserScreenState
             ),
           ),
           contentPadding: const EdgeInsets.all(24),
-          content: SizedBox(
-            width: 440,
-            child: Column(
+          content: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 440),
+            child: SingleChildScrollView(
+              child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
                 Container(
@@ -625,9 +626,10 @@ class _AdminRegisterUserScreenState
               ],
             ),
           ),
-        );
-      },
-    );
+        ),
+      );
+    },
+  );
   }
 
   @override
