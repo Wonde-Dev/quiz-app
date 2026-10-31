@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:quiz_app/core/constants/app_roles.dart';
 import 'package:quiz_app/core/services/announcement_service.dart';
 import 'package:quiz_app/core/services/audit_log_service.dart';
 import 'package:quiz_app/core/services/teacher_activity_service.dart';
@@ -428,6 +429,320 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen>
                         child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
                       )
                     : const Text('Confirm Ownership Transfer'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  void _showDirectorOptionsDialog() async {
+    final client = Supabase.instance.client;
+    Map<String, dynamic>? director;
+    try {
+      final rows = await client
+          .from('users')
+          .select('id, full_name, username, email, is_active, created_at')
+          .inFilter('role', ['subadmin', 'director'])
+          .limit(1);
+      if (rows.isNotEmpty) director = rows.first;
+    } catch (_) {}
+
+    if (!mounted) return;
+
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: const Color(0xFF6366F1).withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: const Icon(Icons.manage_accounts_rounded, color: Color(0xFF6366F1)),
+            ),
+            const SizedBox(width: 12),
+            const Text('School Directorate'),
+          ],
+        ),
+        content: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 420),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF6366F1).withValues(alpha: 0.08),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: const Color(0xFF6366F1).withValues(alpha: 0.2)),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Currently Appointed Director:',
+                      style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF4338CA)),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      director?['full_name'] as String? ?? 'Sultan Adinan',
+                      style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15),
+                    ),
+                    Text(
+                      director?['username'] as String? ?? 'SultanAdinan1@Director.edu',
+                      style: const TextStyle(fontSize: 12, color: Color(0xFF64748B)),
+                    ),
+                    Text(
+                      director?['email'] as String? ?? 'wondetech404@gmail.com',
+                      style: const TextStyle(fontSize: 12, color: Color(0xFF64748B)),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 14),
+              const Text(
+                'Ciro High School enforces strictly ONE active Director. You can transfer directorate authority to any available active faculty teacher.',
+                style: TextStyle(fontSize: 12, color: Color(0xFF64748B), height: 1.4),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
+          OutlinedButton.icon(
+            onPressed: () {
+              Navigator.pop(ctx);
+              context.push('/admin/teachers');
+            },
+            icon: const Icon(Icons.people_outline, size: 16),
+            label: const Text('Faculty List'),
+          ),
+          FilledButton.icon(
+            style: FilledButton.styleFrom(
+              backgroundColor: const Color(0xFF6366F1),
+              foregroundColor: Colors.white,
+            ),
+            onPressed: () {
+              Navigator.pop(ctx);
+              _showTransferDirectorDialog();
+            },
+            icon: const Icon(Icons.swap_horiz_rounded, size: 16),
+            label: const Text('Transfer Directorate'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showTransferDirectorDialog() async {
+    final client = Supabase.instance.client;
+    final passwordController = TextEditingController();
+    bool isSubmitting = false;
+    bool obscurePassword = true;
+    String? selectedTeacherId;
+    String? selectedTeacherName;
+    String? errorText;
+
+    List<Map<String, dynamic>> eligibleTeachers = [];
+    try {
+      final rows = await client
+          .from('users')
+          .select('id, full_name, username, email, assigned_subject')
+          .eq('role', AppRoles.teacher)
+          .eq('is_active', true)
+          .eq('approval_status', 'approved')
+          .order('full_name');
+      eligibleTeachers = List<Map<String, dynamic>>.from(rows);
+    } catch (e) {
+      debugPrint('Error loading teachers for director transfer: $e');
+    }
+
+    if (!mounted) return;
+
+    if (eligibleTeachers.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('No eligible active faculty teachers available for directorate transfer.'),
+          backgroundColor: Color(0xFFD97706),
+        ),
+      );
+      return;
+    }
+
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogCtx) => StatefulBuilder(
+        builder: (ctx, setDialogState) {
+          final isDark = Theme.of(ctx).brightness == Brightness.dark;
+
+          return AlertDialog(
+            backgroundColor: isDark ? const Color(0xFF1E293B) : Colors.white,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+            title: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF6366F1).withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: const Icon(Icons.swap_horiz_rounded, color: Color(0xFF6366F1), size: 24),
+                ),
+                const SizedBox(width: 12),
+                const Expanded(
+                  child: Text(
+                    'Transfer School Directorate',
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                  ),
+                ),
+              ],
+            ),
+            content: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 480),
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFFFFBEB),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: const Color(0xFFFDE68A)),
+                      ),
+                      child: const Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Icon(Icons.info_outline_rounded, color: Color(0xFFD97706), size: 20),
+                          SizedBox(width: 10),
+                          Expanded(
+                            child: Text(
+                              'Select an available active teacher to assume the position of School Director. The previous Director will transition to Faculty Teacher, preserving the strict 1-Director rule.',
+                              style: TextStyle(fontSize: 12, color: Color(0xFF92400E), height: 1.4),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 18),
+                    const Text('Select New Director:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                    const SizedBox(height: 8),
+                    DropdownButtonFormField<String>(
+                      decoration: const InputDecoration(
+                        border: OutlineInputBorder(),
+                        contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                        prefixIcon: Icon(Icons.person_outline),
+                      ),
+                      hint: const Text('Choose an active teacher'),
+                      initialValue: selectedTeacherId,
+                      items: eligibleTeachers.map((t) {
+                        final displayName = (t['full_name'] as String? ?? '').isNotEmpty
+                            ? t['full_name'] as String
+                            : (t['username'] as String? ?? t['email'] as String);
+                        final subj = t['assigned_subject'] as String?;
+                        return DropdownMenuItem<String>(
+                          value: t['id'] as String,
+                          child: Text(
+                            '$displayName ${subj != null && subj.isNotEmpty ? "($subj)" : ""}',
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        );
+                      }).toList(),
+                      onChanged: (val) {
+                        setDialogState(() {
+                          selectedTeacherId = val;
+                          final match = eligibleTeachers.firstWhere((t) => t['id'] == val);
+                          selectedTeacherName = (match['full_name'] as String? ?? '').isNotEmpty
+                              ? match['full_name'] as String
+                              : (match['username'] as String? ?? '');
+                        });
+                      },
+                    ),
+                    const SizedBox(height: 16),
+                    const Text('Your Admin Password to Confirm:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                    const SizedBox(height: 8),
+                    TextField(
+                      controller: passwordController,
+                      obscureText: obscurePassword,
+                      decoration: InputDecoration(
+                        hintText: 'Enter your password to authorize transfer',
+                        prefixIcon: const Icon(Icons.lock_outline),
+                        suffixIcon: IconButton(
+                          icon: Icon(obscurePassword ? Icons.visibility_outlined : Icons.visibility_off_outlined),
+                          onPressed: () => setDialogState(() => obscurePassword = !obscurePassword),
+                        ),
+                      ),
+                    ),
+                    if (errorText != null) ...[
+                      const SizedBox(height: 12),
+                      Text(errorText!, style: const TextStyle(color: Colors.red, fontSize: 12)),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: isSubmitting ? null : () => Navigator.pop(dialogCtx),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                style: FilledButton.styleFrom(backgroundColor: const Color(0xFF6366F1), foregroundColor: Colors.white),
+                onPressed: isSubmitting
+                    ? null
+                    : () async {
+                        if (selectedTeacherId == null) {
+                          setDialogState(() => errorText = 'Please select a teacher.');
+                          return;
+                        }
+                        if (passwordController.text.isEmpty) {
+                          setDialogState(() => errorText = 'Please enter your password to confirm.');
+                          return;
+                        }
+
+                        setDialogState(() {
+                          isSubmitting = true;
+                          errorText = null;
+                        });
+
+                        try {
+                          final res = await _activityService.transferDirectorPosition(
+                            targetTeacherId: selectedTeacherId!,
+                            currentPassword: passwordController.text,
+                          );
+
+                          if (dialogCtx.mounted) Navigator.pop(dialogCtx);
+
+                          if (mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text(res['message']?.toString() ?? 'Director position transferred to $selectedTeacherName!'),
+                                backgroundColor: const Color(0xFF10B981),
+                              ),
+                            );
+                            _loadStats();
+                          }
+                        } catch (e) {
+                          setDialogState(() {
+                            isSubmitting = false;
+                            errorText = e.toString().replaceAll('Exception: ', '');
+                          });
+                        }
+                      },
+                child: isSubmitting
+                    ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                    : const Text('Transfer Directorate'),
               ),
             ],
           );
@@ -1128,7 +1443,7 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen>
                 loading: _loading,
                 icon: Icons.manage_accounts_rounded,
                 color: const Color(0xFF6366F1),
-                onTap: () => context.push('/admin/teachers'),
+                onTap: _showDirectorOptionsDialog,
               ),
             ),
           ],
@@ -1144,7 +1459,7 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen>
                 loading: _loading,
                 icon: Icons.co_present_rounded,
                 color: const Color(0xFF10B981),
-                onTap: () => context.push('/admin/teachers'),
+                onTap: _showDirectorOptionsDialog,
               ),
             ),
             const SizedBox(width: 10),

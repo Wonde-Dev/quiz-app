@@ -27,6 +27,9 @@ class AppUser {
   final String? gender;
   final bool allowAdminNotifications;
   final bool allowDirectorNotifications;
+  final int failedLoginAttempts;
+  final bool isLocked;
+  final DateTime? lockedAt;
 
   const AppUser({
     required this.id,
@@ -54,6 +57,9 @@ class AppUser {
     this.gender,
     this.allowAdminNotifications = true,
     this.allowDirectorNotifications = true,
+    this.failedLoginAttempts = 0,
+    this.isLocked = false,
+    this.lockedAt,
   });
 
   factory AppUser.fromMap(Map<String, dynamic> map) {
@@ -95,6 +101,11 @@ class AppUser {
       gender: map['gender'] as String?,
       allowAdminNotifications: map['allow_admin_notifications'] as bool? ?? true,
       allowDirectorNotifications: map['allow_director_notifications'] as bool? ?? true,
+      failedLoginAttempts: map['failed_login_attempts'] as int? ?? 0,
+      isLocked: map['is_locked'] as bool? ?? false,
+      lockedAt: map['locked_at'] != null
+          ? DateTime.tryParse(map['locked_at'] as String)
+          : null,
     );
   }
 
@@ -125,6 +136,9 @@ class AppUser {
       'gender': gender,
       'allow_admin_notifications': allowAdminNotifications,
       'allow_director_notifications': allowDirectorNotifications,
+      'failed_login_attempts': failedLoginAttempts,
+      'is_locked': isLocked,
+      'locked_at': lockedAt?.toIso8601String(),
     };
   }
 
@@ -154,6 +168,9 @@ class AppUser {
     String? gender,
     bool? allowAdminNotifications,
     bool? allowDirectorNotifications,
+    int? failedLoginAttempts,
+    bool? isLocked,
+    DateTime? lockedAt,
   }) {
     return AppUser(
       id: id ?? this.id,
@@ -181,6 +198,9 @@ class AppUser {
       gender: gender ?? this.gender,
       allowAdminNotifications: allowAdminNotifications ?? this.allowAdminNotifications,
       allowDirectorNotifications: allowDirectorNotifications ?? this.allowDirectorNotifications,
+      failedLoginAttempts: failedLoginAttempts ?? this.failedLoginAttempts,
+      isLocked: isLocked ?? this.isLocked,
+      lockedAt: lockedAt ?? this.lockedAt,
     );
   }
 

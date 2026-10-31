@@ -163,7 +163,7 @@ class _TeacherDashboardScreenState
     try {
       var studentsQuery = client
           .from('users')
-          .select('id, is_active')
+          .select('id, is_active, assigned_grade, assigned_class, requested_grade, requested_class')
           .eq('role', AppRoles.student);
       if (user.schoolId != null) {
         studentsQuery = studentsQuery.eq('school_id', user.schoolId!);
@@ -192,10 +192,75 @@ class _TeacherDashboardScreenState
       ]);
 
       final allStudents = (results[0] as List).cast<Map<String, dynamic>>();
-      final activeStudents = allStudents.where((s) => s['is_active'] != false).toList();
       final quizzesList = results[1] as List;
       final rpcRes = results[2];
       final myCoursesList = (results[3] as List).cast<Map<String, dynamic>>();
+
+      // Collect this teacher's assigned grades and sections
+      final assignedGradesSet = <String>{};
+      final assignedSectionsSet = <String>{};
+
+      if (user.assignedGrade != null && user.assignedGrade!.trim().isNotEmpty) {
+        assignedGradesSet.add(user.assignedGrade!.trim().toLowerCase());
+      }
+      if (user.attendanceGrade != null && user.attendanceGrade!.trim().isNotEmpty) {
+        assignedGradesSet.add(user.attendanceGrade!.trim().toLowerCase());
+      }
+      if (user.assignedClass != null && user.assignedClass!.trim().isNotEmpty) {
+        assignedSectionsSet.add(user.assignedClass!.trim().toLowerCase());
+      }
+      if (user.attendanceClass != null && user.attendanceClass!.trim().isNotEmpty) {
+        assignedSectionsSet.add(user.attendanceClass!.trim().toLowerCase());
+      }
+
+      for (final course in myCoursesList) {
+        final secMap = course['sections'] as Map<String, dynamic>?;
+        if (secMap != null) {
+          final g = secMap['grade']?.toString().trim().toLowerCase();
+          final n = secMap['name']?.toString().trim().toLowerCase();
+          if (g != null && g.isNotEmpty) assignedGradesSet.add(g);
+          if (n != null && n.isNotEmpty) assignedSectionsSet.add(n);
+        }
+      }
+
+      final activeStudents = allStudents.where((s) {
+        if (s['is_active'] == false) return false;
+        if (assignedGradesSet.isEmpty && assignedSectionsSet.isEmpty) return true;
+        final sGrade = (s['assigned_grade'] ?? s['requested_grade'] ?? '').toString().trim().toLowerCase();
+        final sClass = (s['assigned_class'] ?? s['requested_class'] ?? '').toString().trim().toLowerCase();
+
+        final gradeMatch = assignedGradesSet.isEmpty || assignedGradesSet.any((ag) =>
+            sGrade == ag || sGrade.contains(ag) || ag.contains(sGrade));
+        final sectionMatch = assignedSectionsSet.isEmpty || assignedSectionsSet.any((asect) =>
+            sClass == asect || sClass.contains(asect) || asect.contains(sClass));
+
+        return gradeMatch && sectionMatch;
+      }).toList();
+
+      List<Map<String, dynamic>> filteredGrades = [];
+      List<Map<String, dynamic>> filteredSections = [];
+      if (rpcRes is Map) {
+        final allG = List<Map<String, dynamic>>.from(rpcRes['grades'] ?? []);
+        final allS = List<Map<String, dynamic>>.from(rpcRes['sections'] ?? []);
+
+        if (assignedGradesSet.isNotEmpty) {
+          filteredGrades = allG.where((g) {
+            final name = (g['grade'] ?? g['name'] ?? '').toString().trim().toLowerCase();
+            return assignedGradesSet.any((ag) => name == ag || name.contains(ag) || ag.contains(name));
+          }).toList();
+        } else {
+          filteredGrades = allG;
+        }
+
+        if (assignedSectionsSet.isNotEmpty) {
+          filteredSections = allS.where((s) {
+            final name = (s['section'] ?? s['name'] ?? '').toString().trim().toLowerCase();
+            return assignedSectionsSet.any((asect) => name == asect || name.contains(asect) || asect.contains(name));
+          }).toList();
+        } else {
+          filteredSections = allS;
+        }
+      }
 
       final quizIds =
           quizzesList.map((q) => q['id'] as String).toList();
@@ -215,10 +280,8 @@ class _TeacherDashboardScreenState
         _studentCount = activeStudents.length;
         _quizCount = quizzesList.length;
         _submissionCount = submissionCount;
-        if (rpcRes is Map) {
-          _gradeStats = List<Map<String, dynamic>>.from(rpcRes['grades'] ?? []);
-          _sectionStats = List<Map<String, dynamic>>.from(rpcRes['sections'] ?? []);
-        }
+        _gradeStats = filteredGrades;
+        _sectionStats = filteredSections;
         _myAssignedCourses = myCoursesList;
         _loading = false;
       });

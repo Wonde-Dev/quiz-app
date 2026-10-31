@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:quiz_app/core/constants/app_roles.dart';
+import 'package:quiz_app/core/services/auth_service.dart';
 import 'package:quiz_app/features/auth/presentation/providers/auth_provider.dart';
 import 'package:quiz_app/core/services/student_password_reset_service.dart';
 import 'package:quiz_app/core/utils/role_username.dart';
@@ -68,32 +69,81 @@ class _StudentManagementScreenState
     final client = Supabase.instance.client;
     final currentUserId = client.auth.currentUser?.id;
 
-    if (_isAttendanceTeacher) {
-      final targetClass = currentUser?.attendanceClass?.trim() ?? '';
+    if (!_isSuperAdmin) {
+      // Teachers only see students enrolled in their assigned grades and sections
+      final assignedGrades = <String>{};
+      final assignedClasses = <String>{};
+
+      if (currentUser?.assignedGrade != null && currentUser!.assignedGrade!.trim().isNotEmpty) {
+        assignedGrades.add(currentUser.assignedGrade!.trim().toLowerCase());
+      }
+      if (currentUser?.attendanceGrade != null && currentUser!.attendanceGrade!.trim().isNotEmpty) {
+        assignedGrades.add(currentUser.attendanceGrade!.trim().toLowerCase());
+      }
+      if (currentUser?.assignedClass != null && currentUser!.assignedClass!.trim().isNotEmpty) {
+        assignedClasses.add(currentUser.assignedClass!.trim().toLowerCase());
+      }
+      if (currentUser?.attendanceClass != null && currentUser!.attendanceClass!.trim().isNotEmpty) {
+        assignedClasses.add(currentUser.attendanceClass!.trim().toLowerCase());
+      }
+
+      // Also retrieve courses assigned to this teacher
+      try {
+        final courses = await client
+            .from('teacher_courses')
+            .select('sections(name, grade)')
+            .eq('teacher_id', currentUser?.id ?? '');
+        for (final c in (courses as List)) {
+          final sec = c['sections'] as Map<String, dynamic>?;
+          if (sec != null) {
+            final g = sec['grade']?.toString().trim().toLowerCase();
+            final n = sec['name']?.toString().trim().toLowerCase();
+            if (g != null && g.isNotEmpty) assignedGrades.add(g);
+            if (n != null && n.isNotEmpty) assignedClasses.add(n);
+          }
+        }
+      } catch (_) {}
+
       var query = client
           .from('users')
           .select(
             'id, username, email, full_name, role, requested_role, school_id, '
-            'assigned_class, assigned_grade, requested_class, requested_grade, is_active, approval_status',
+            'assigned_class, assigned_grade, requested_class, requested_grade, is_active, approval_status, '
+            'is_locked, failed_login_attempts',
           )
           .eq('role', AppRoles.student)
           .neq('is_active', false);
 
-      if (targetClass.isNotEmpty) {
-        query = query.or('assigned_class.ilike.%$targetClass%,requested_class.ilike.%$targetClass%');
-      }
       if (currentUserId != null) {
         query = query.neq('id', currentUserId);
       }
+
       final rows = await query.order('full_name');
-      return List<Map<String, dynamic>>.from(rows);
+      final allStudents = List<Map<String, dynamic>>.from(rows);
+
+      if (assignedGrades.isEmpty && assignedClasses.isEmpty) {
+        return allStudents;
+      }
+
+      return allStudents.where((student) {
+        final sGrade = (student['assigned_grade'] ?? student['requested_grade'] ?? '').toString().trim().toLowerCase();
+        final sClass = (student['assigned_class'] ?? student['requested_class'] ?? '').toString().trim().toLowerCase();
+
+        final gradeMatch = assignedGrades.isEmpty || assignedGrades.any((g) =>
+            sGrade == g || sGrade.contains(g) || g.contains(sGrade));
+        final classMatch = assignedClasses.isEmpty || assignedClasses.any((c) =>
+            sClass == c || sClass.contains(c) || c.contains(sClass));
+
+        return gradeMatch && classMatch;
+      }).toList();
     }
 
     var query = client
         .from('users')
         .select(
           'id, username, email, full_name, role, requested_role, school_id, '
-          'assigned_class, assigned_grade, requested_class, requested_grade, is_active, approval_status',
+          'assigned_class, assigned_grade, requested_class, requested_grade, is_active, approval_status, '
+          'is_locked, failed_login_attempts',
         )
         .neq('is_active', false);
 
@@ -1999,6 +2049,34 @@ class _StudentManagementScreenState
                                                 ),
                                               ),
                                             ),
+                                            if (student['is_locked'] == true) ...[
+                                              const SizedBox(width: 6),
+                                              Container(
+                                                padding: const EdgeInsets.symmetric(
+                                                  horizontal: 6,
+                                                  vertical: 2,
+                                                ),
+                                                decoration: BoxDecoration(
+                                                  color: Colors.red.withValues(alpha: 0.12),
+                                                  borderRadius: BorderRadius.circular(6),
+                                                ),
+                                                child: const Row(
+                                                  mainAxisSize: MainAxisSize.min,
+                                                  children: [
+                                                    Icon(Icons.lock_rounded, size: 10, color: Colors.red),
+                                                    SizedBox(width: 3),
+                                                    Text(
+                                                      'LOCKED',
+                                                      style: TextStyle(
+                                                        color: Colors.red,
+                                                        fontSize: 10,
+                                                        fontWeight: FontWeight.bold,
+                                                      ),
+                                                    ),
+                                                  ],
+                                                ),
+                                              ),
+                                            ],
                                           ],
                                         ),
                                         const SizedBox(height: 2),
@@ -2032,6 +2110,23 @@ class _StudentManagementScreenState
                                   Row(
                                     mainAxisSize: MainAxisSize.min,
                                     children: [
+                                      if (student['is_locked'] == true)
+                                        IconButton(
+                                          tooltip: 'Unlock account for $displayName',
+                                          icon: const Icon(Icons.lock_open_rounded, color: Colors.orange, size: 22),
+                                          onPressed: () async {
+                                            final res = await AuthService().unlockUserAccount(id);
+                                            if (context.mounted) {
+                                              ScaffoldMessenger.of(context).showSnackBar(
+                                                SnackBar(
+                                                  content: Text(res['message']?.toString() ?? 'Account unlocked successfully!'),
+                                                  backgroundColor: const Color(0xFF10B981),
+                                                ),
+                                              );
+                                              setState(() {});
+                                            }
+                                          },
+                                        ),
                                       if (canReset)
                                         IconButton(
                                           tooltip: 'Reset password for $displayName',

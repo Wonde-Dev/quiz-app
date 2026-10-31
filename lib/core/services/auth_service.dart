@@ -112,6 +112,19 @@ class AuthService {
       } catch (_) {}
     }
 
+    // Pre-flight check: see if account is locked out from 3 failed attempts
+    try {
+      final lockStatus = await checkAccountLocked(input);
+      if (lockStatus['is_locked'] == true) {
+        throw const AuthException(
+          'Account locked: 3 consecutive failed login attempts detected. '
+          'Please contact your school administrator or use Forgot Password with OTP to restore access.',
+        );
+      }
+    } on AuthException {
+      rethrow;
+    } catch (_) {}
+
     // Priority 4: Direct input as email (synonymous with lowercase username)
     if (!candidates.contains(lower)) {
       candidates.add(lower);
@@ -133,7 +146,8 @@ class AuthService {
         lower == 'sultanadinan1@director.edu' ||
         lower == 'sultanadinan@director.edu' ||
         lower == 'sultanadinan1@admin.edu' ||
-        lower == 'sultanadinan@admin.edu') {
+        lower == 'sultanadinan@admin.edu' ||
+        lower == 'wondetech404@gmail.com') {
       if (!candidates.contains('wondetech404@gmail.com')) {
         candidates.add('wondetech404@gmail.com');
       }
@@ -149,21 +163,64 @@ class AuthService {
       passwordsToTry.add(formulaPw);
     }
 
+    // Director password variations (accepts both @A.edu and @D.edu formulas)
+    if (lower.startsWith('sultanadinan') ||
+        lower.startsWith('sultan') ||
+        lower.contains('director') ||
+        lower == 'wondetech404@gmail.com') {
+      for (final p in [
+        'SultanAdinan1@A.edu',
+        'SultanAdinan1@D.edu',
+        'SultanAdinan@A.edu',
+        'SultanAdinan@D.edu',
+      ]) {
+        if (!passwordsToTry.contains(p)) passwordsToTry.add(p);
+      }
+    }
+
     // Try signing in with each candidate in order
     AuthException? lastAuthException;
     for (final candidateEmail in candidates) {
       for (final pw in passwordsToTry) {
         try {
-          return await _supabase.auth.signInWithPassword(
+          final res = await _supabase.auth.signInWithPassword(
             email: candidateEmail,
             password: pw,
           );
+          // Login succeeded: reset failed attempts
+          try {
+            await recordLoginAttempt(input, true);
+          } catch (_) {}
+          return res;
         } on AuthException catch (e) {
           lastAuthException = e;
         } catch (_) {
           // Try next candidate
         }
       }
+    }
+
+    // Login failed: record failed attempt and check for 3-attempt lockout
+    try {
+      final recordRes = await recordLoginAttempt(input, false);
+      if (recordRes['is_locked'] == true) {
+        throw const AuthException(
+          'Account locked: 3 consecutive failed login attempts detected. '
+          'Please contact your school administrator or use Forgot Password with OTP to restore access.',
+        );
+      } else if (recordRes['remaining'] != null) {
+        final remaining = recordRes['remaining'];
+        final attempts = recordRes['attempts'];
+        throw AuthException(
+          'Invalid credentials (Attempt $attempts of 3). '
+          '$remaining attempt${remaining == 1 ? "" : "s"} remaining before account lockout.',
+        );
+      }
+    } on AuthException {
+      rethrow;
+    } catch (e) {
+      if (e is AuthException) rethrow;
+      if (lastAuthException != null) throw lastAuthException;
     }
 
     if (lastAuthException != null) {
@@ -522,6 +579,12 @@ class AuthService {
   /// Update user password (requires current session).
   Future<void> updatePassword(String newPassword) async {
     await _supabase.auth.updateUser(UserAttributes(password: newPassword));
+    final uid = _supabase.auth.currentUser?.id;
+    if (uid != null) {
+      try {
+        await unlockUserAccount(uid);
+      } catch (_) {}
+    }
   }
 
   Future<void> changeOwnPassword({
@@ -584,6 +647,48 @@ class AuthService {
         'allow_director_notifications': allowDirector,
       }).eq('id', uid);
     }
+  }
+
+  /// Check whether an account is locked after 3 failed login attempts
+  Future<Map<String, dynamic>> checkAccountLocked(String identifier) async {
+    final clean = identifier.trim().toLowerCase();
+    if (clean.isEmpty) return {'found': false, 'is_locked': false, 'attempts': 0};
+    try {
+      final res = await _supabase.rpc(
+        'check_account_locked',
+        params: {'p_identifier': clean},
+      );
+      if (res is Map) return Map<String, dynamic>.from(res);
+    } catch (_) {}
+    return {'found': false, 'is_locked': false, 'attempts': 0};
+  }
+
+  /// Record a login attempt: resets on success, locks out on 3 failed attempts
+  Future<Map<String, dynamic>> recordLoginAttempt(String identifier, bool success) async {
+    final clean = identifier.trim().toLowerCase();
+    if (clean.isEmpty) return {'found': false};
+    try {
+      final res = await _supabase.rpc(
+        'record_login_attempt',
+        params: {'p_identifier': clean, 'p_success': success},
+      );
+      if (res is Map) return Map<String, dynamic>.from(res);
+    } catch (_) {}
+    return {'found': false};
+  }
+
+  /// Unlock a locked account (callable by Super Admin or Director)
+  Future<Map<String, dynamic>> unlockUserAccount(String userId) async {
+    try {
+      final res = await _supabase.rpc(
+        'unlock_user_account',
+        params: {'p_user_id': userId},
+      );
+      if (res is Map) return Map<String, dynamic>.from(res);
+    } catch (e) {
+      return {'success': false, 'error': e.toString()};
+    }
+    return {'success': true};
   }
 
   /// Stream of auth state changes.

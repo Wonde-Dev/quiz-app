@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:quiz_app/core/constants/app_roles.dart';
+import 'package:quiz_app/core/services/auth_service.dart';
 import 'package:quiz_app/core/services/student_password_reset_service.dart';
 import 'package:quiz_app/shared/widgets/animated_press_button.dart';
 import 'package:quiz_app/shared/widgets/dashboard_shell.dart';
@@ -64,7 +65,8 @@ class _TeacherManagementScreenState
           .from('users')
           .select(
             'id, full_name, username, email, school_id, approval_status, is_active, created_at, '
-            'is_attendance_teacher, attendance_grade, attendance_class, assigned_grade, assigned_class, assigned_subject, requested_subject, schools(name)',
+            'is_attendance_teacher, attendance_grade, attendance_class, assigned_grade, assigned_class, assigned_subject, requested_subject, schools(name), '
+            'is_locked, failed_login_attempts',
           )
           .eq('role', AppRoles.teacher)
           .order('full_name', ascending: true);
@@ -970,6 +972,21 @@ class _TeacherManagementScreenState
     }
   }
 
+  Future<void> _unlockTeacher(Map<String, dynamic> teacher) async {
+    final id = teacher['id'] as String;
+    final name = teacher['full_name'] as String? ?? teacher['username'] as String? ?? 'Teacher';
+    final res = await AuthService().unlockUserAccount(id);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(res['message']?.toString() ?? 'Account for $name successfully unlocked!'),
+        backgroundColor: const Color(0xFF10B981),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+    _loadTeachers();
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -1206,6 +1223,7 @@ class _TeacherManagementScreenState
                         onEdit: () => _editTeacher(teacher),
                         onManageClasses: () => _manageTeacherClasses(teacher),
                         onToggleStatus: () => _toggleTeacherStatus(teacher),
+                        onUnlock: () => _unlockTeacher(teacher),
                       ),
                       const SizedBox(height: 12),
                     ],
@@ -1229,6 +1247,7 @@ class _TeacherDirectoryCard extends StatelessWidget {
     required this.onEdit,
     required this.onManageClasses,
     required this.onToggleStatus,
+    required this.onUnlock,
   });
 
   final Map<String, dynamic> teacher;
@@ -1238,6 +1257,7 @@ class _TeacherDirectoryCard extends StatelessWidget {
   final VoidCallback onEdit;
   final VoidCallback onManageClasses;
   final VoidCallback onToggleStatus;
+  final VoidCallback onUnlock;
 
   @override
   Widget build(BuildContext context) {
@@ -1315,6 +1335,32 @@ class _TeacherDirectoryCard extends StatelessWidget {
                                   fontWeight: FontWeight.w700,
                                   color: Colors.red,
                                 ),
+                              ),
+                            ),
+                          ],
+                          if (teacher['is_locked'] == true) ...[
+                            const SizedBox(width: 6),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                              decoration: BoxDecoration(
+                                color: Colors.orange.shade800.withValues(alpha: 0.12),
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(color: Colors.orange.shade800.withValues(alpha: 0.3)),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(Icons.lock_rounded, size: 10, color: Colors.orange.shade800),
+                                  const SizedBox(width: 3),
+                                  Text(
+                                    'LOCKED',
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w700,
+                                      color: Colors.orange.shade800,
+                                    ),
+                                  ),
+                                ],
                               ),
                             ),
                           ],
@@ -1484,6 +1530,22 @@ class _TeacherDirectoryCard extends StatelessWidget {
                         label: const Text('Reset Password', style: TextStyle(fontSize: 12)),
                       ),
                     ),
+                    if (teacher['is_locked'] == true) ...[
+                      const SizedBox(width: 6),
+                      AnimatedPressButton(
+                        child: FilledButton.icon(
+                          style: FilledButton.styleFrom(
+                            backgroundColor: Colors.orange.shade700,
+                            foregroundColor: Colors.white,
+                            minimumSize: const Size(0, 36),
+                            padding: const EdgeInsets.symmetric(horizontal: 12),
+                          ),
+                          onPressed: isResetting ? null : onUnlock,
+                          icon: const Icon(Icons.lock_open_rounded, size: 16),
+                          label: const Text('Unlock', style: TextStyle(fontSize: 12)),
+                        ),
+                      ),
+                    ],
                     AnimatedPressButton(
                       child: OutlinedButton.icon(
                         style: OutlinedButton.styleFrom(

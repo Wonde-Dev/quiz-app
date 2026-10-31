@@ -5,6 +5,7 @@ import 'package:quiz_app/core/constants/app_roles.dart';
 import 'package:quiz_app/features/admin/presentation/screens/admin_dashboard_screen.dart';
 import 'package:quiz_app/features/director/presentation/screens/director_dashboard_screen.dart';
 import 'package:quiz_app/features/auth/presentation/providers/auth_provider.dart';
+import 'package:quiz_app/features/auth/presentation/screens/public_reset_password_screen.dart';
 import 'package:quiz_app/features/auth/presentation/screens/force_change_password_screen.dart';
 import 'package:quiz_app/features/auth/presentation/screens/login_screen.dart';
 import 'package:quiz_app/features/auth/presentation/screens/onboarding_screen.dart';
@@ -49,6 +50,8 @@ final routerProvider = Provider<GoRouter>((ref) {
                 location.startsWith('/login/') ||
                 location == '/register' ||
                 location.startsWith('/register/') ||
+                location == '/reset-password' ||
+                location.startsWith('/reset-password') ||
                 location == '/onboarding'
             ? null
             : '/login';
@@ -172,6 +175,10 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/change-password',
         builder: (context, state) => const ForceChangePasswordScreen(),
+      ),
+      GoRoute(
+        path: '/reset-password',
+        builder: (context, state) => const PublicResetPasswordScreen(),
       ),
       GoRoute(
         path: '/account-status',

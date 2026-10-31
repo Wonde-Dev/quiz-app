@@ -575,6 +575,11 @@ class AuthNotifier extends Notifier<AuthState> {
     }
   }
 
+  Future<Map<String, dynamic>> unlockUserAccount(String userId) async {
+    final res = await _authService.unlockUserAccount(userId);
+    return res;
+  }
+
   Future<void> refreshCurrentUser() => checkSession();
 
   Future<void> checkSession() async {
