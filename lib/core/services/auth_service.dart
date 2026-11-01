@@ -458,12 +458,22 @@ class AuthService {
   }
 
   /// Sends a one-time login code (OTP) to the user's email.
+  /// Falls back to resetPasswordForEmail if signInWithOtp is restricted (e.g. status code 422).
   Future<String> sendLoginOtp(String emailOrUsername) async {
     final targetEmail = await resolveEmail(emailOrUsername);
-    await _supabase.auth.signInWithOtp(
-      email: targetEmail,
-      shouldCreateUser: false,
-    );
+    try {
+      await _supabase.auth.signInWithOtp(
+        email: targetEmail,
+        shouldCreateUser: false,
+        emailRedirectTo: resetPasswordRedirectUrl,
+      );
+    } catch (e) {
+      debugPrint('signInWithOtp error ($e), falling back to resetPasswordForEmail');
+      await _supabase.auth.resetPasswordForEmail(
+        targetEmail,
+        redirectTo: resetPasswordRedirectUrl,
+      );
+    }
     return targetEmail;
   }
 
@@ -485,13 +495,13 @@ class AuthService {
         return await _supabase.auth.verifyOTP(
           email: targetEmail,
           token: cleanToken,
-          type: OtpType.magiclink,
+          type: OtpType.recovery,
         );
       } catch (_) {
         return await _supabase.auth.verifyOTP(
           email: targetEmail,
           token: cleanToken,
-          type: OtpType.recovery,
+          type: OtpType.magiclink,
         );
       }
     }

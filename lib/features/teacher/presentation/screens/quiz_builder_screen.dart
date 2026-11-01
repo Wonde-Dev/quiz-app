@@ -23,6 +23,7 @@ class _QuizBuilderScreenState extends ConsumerState<QuizBuilderScreen> {
   final _descriptionController = TextEditingController();
   final _subjectController = TextEditingController(text: 'General');
   final _timeLimitController = TextEditingController(text: '30');
+  final _totalPointsController = TextEditingController(text: '100');
   final _scriptController = TextEditingController();
   final _keyController = TextEditingController();
   bool _showKeyField = false;
@@ -80,6 +81,7 @@ class _QuizBuilderScreenState extends ConsumerState<QuizBuilderScreen> {
     _descriptionController.dispose();
     _subjectController.dispose();
     _timeLimitController.dispose();
+    _totalPointsController.dispose();
     _scriptController.dispose();
     _keyController.dispose();
     _questionController.dispose();
@@ -665,6 +667,115 @@ class _QuizBuilderScreenState extends ConsumerState<QuizBuilderScreen> {
     });
   }
 
+  void _confirmAndPublishDialog() {
+    if (!_formKey.currentState!.validate()) return;
+    if (_questions.isEmpty) {
+      setState(() => _error = 'Add at least one question before publishing.');
+      return;
+    }
+
+    final effectiveSection = _selectedSectionName == 'Other / Custom Section'
+        ? (_customSectionController.text.trim().isNotEmpty
+            ? _customSectionController.text.trim()
+            : 'General')
+        : _selectedSectionName;
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Row(
+          children: [
+            Icon(Icons.assignment_turned_in_rounded, color: Color(0xFF10B981)),
+            SizedBox(width: 10),
+            Flexible(child: Text('Confirm Exam Settings')),
+          ],
+        ),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                'Please verify and assign the exam timer and total score points before publishing to students.',
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      color: const Color(0xFF64748B),
+                    ),
+              ),
+              const SizedBox(height: 14),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF10B981).withValues(alpha: 0.08),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: const Color(0xFF10B981).withValues(alpha: 0.25),
+                  ),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Target: $_selectedGradeName · $effectiveSection',
+                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      'Title: ${_titleController.text.trim()}',
+                      style: const TextStyle(fontSize: 12),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      'Total Questions: ${_questions.length}',
+                      style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 14),
+              TextFormField(
+                controller: _timeLimitController,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(
+                  labelText: 'Exam Time Limit (Minutes)',
+                  prefixIcon: Icon(Icons.timer_outlined),
+                  helperText: 'Duration students have to complete exam',
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextFormField(
+                controller: _totalPointsController,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(
+                  labelText: 'Total Exam Points / Score',
+                  prefixIcon: Icon(Icons.grade_outlined),
+                  helperText: 'Maximum score achievable by students',
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
+          FilledButton.icon(
+            style: FilledButton.styleFrom(
+              backgroundColor: const Color(0xFF10B981),
+            ),
+            icon: const Icon(Icons.check_circle_outline_rounded, size: 18),
+            label: const Text('Publish Exam Now'),
+            onPressed: () {
+              Navigator.pop(ctx);
+              _saveQuiz();
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
   Future<void> _saveQuiz() async {
     if (!_formKey.currentState!.validate()) return;
 
@@ -799,6 +910,17 @@ class _QuizBuilderScreenState extends ConsumerState<QuizBuilderScreen> {
       }
 
       final timeLimit = int.tryParse(_timeLimitController.text.trim()) ?? 30;
+      final totalPoints = int.tryParse(_totalPointsController.text.trim()) ??
+          (_questions.isNotEmpty ? _questions.length * 10 : 100);
+
+      if (timeLimit <= 0) {
+        setState(() => _error = 'Please assign an exam time limit greater than 0 minutes.');
+        return;
+      }
+      if (totalPoints <= 0) {
+        setState(() => _error = 'Please assign total exam points greater than 0.');
+        return;
+      }
 
       String effectiveDesc = _descriptionController.text.trim();
       if (_attachedPdfFile != null && _attachedPdfFile!.bytes != null) {
@@ -819,7 +941,7 @@ class _QuizBuilderScreenState extends ConsumerState<QuizBuilderScreen> {
         }
       }
 
-      // 4. Create Quiz with targeted grade and class
+      // 4. Create Quiz with targeted grade, section, timer, and total points
       if (_savedQuizId == null) {
         final quizPayload = {
           'teacher_id': user.id,
@@ -830,7 +952,7 @@ class _QuizBuilderScreenState extends ConsumerState<QuizBuilderScreen> {
           'title': _titleController.text.trim(),
           'description': effectiveDesc,
           'time_limit_minutes': timeLimit,
-          'total_points': _questions.length,
+          'total_points': totalPoints,
           'is_published': false,
         };
 
@@ -852,14 +974,33 @@ class _QuizBuilderScreenState extends ConsumerState<QuizBuilderScreen> {
               .single();
         }
         _savedQuizId = quiz['id'] as String;
+      } else {
+        // Update timer and points if already saved
+        await client.from('quizzes').update({
+          'time_limit_minutes': timeLimit,
+          'total_points': totalPoints,
+        }).eq('id', _savedQuizId!);
       }
 
-      // 5. Insert Questions
+      // 5. Insert Questions with points
       if (!_questionsSaved && _savedQuizId != null) {
+        final pointsPerQ = (_questions.isNotEmpty && totalPoints > 0)
+            ? (totalPoints / _questions.length).round().clamp(1, totalPoints)
+            : 1;
+
         await client
             .from('questions')
             .insert(
-              _questions.map((q) => {...q, 'quiz_id': _savedQuizId}).toList(),
+              _questions.asMap().entries.map((entry) {
+                final idx = entry.key;
+                final q = entry.value;
+                return {
+                  ...q,
+                  'quiz_id': _savedQuizId,
+                  'points': q['points'] ?? pointsPerQ,
+                  'order': idx + 1,
+                };
+              }).toList(),
             );
         _questionsSaved = true;
       }
@@ -1049,7 +1190,7 @@ class _QuizBuilderScreenState extends ConsumerState<QuizBuilderScreen> {
                         ),
                         const SizedBox(height: 16),
 
-                        // Quick Input Row: Exam Time & Subject
+                        // Quick Input Row: Exam Time, Points & Subject
                         Row(
                           children: [
                             Expanded(
@@ -1065,16 +1206,39 @@ class _QuizBuilderScreenState extends ConsumerState<QuizBuilderScreen> {
                                   keyboardType: TextInputType.number,
                                   style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
                                   decoration: const InputDecoration(
-                                    labelText: 'Exam Time (Minutes)',
+                                    labelText: 'Time (Min)',
                                     labelStyle: TextStyle(color: Colors.white70, fontSize: 12),
                                     prefixIcon: Icon(Icons.timer_outlined, color: Colors.white, size: 20),
                                     border: InputBorder.none,
-                                    contentPadding: EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                                    contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 12),
                                   ),
                                 ),
                               ),
                             ),
-                            const SizedBox(width: 10),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              flex: 3,
+                              child: Container(
+                                decoration: BoxDecoration(
+                                  color: Colors.white.withValues(alpha: 0.12),
+                                  borderRadius: BorderRadius.circular(14),
+                                  border: Border.all(color: Colors.white.withValues(alpha: 0.25)),
+                                ),
+                                child: TextFormField(
+                                  controller: _totalPointsController,
+                                  keyboardType: TextInputType.number,
+                                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                                  decoration: const InputDecoration(
+                                    labelText: 'Total Points',
+                                    labelStyle: TextStyle(color: Colors.white70, fontSize: 12),
+                                    prefixIcon: Icon(Icons.grade_outlined, color: Colors.white, size: 20),
+                                    border: InputBorder.none,
+                                    contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 12),
+                                  ),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
                             Expanded(
                               flex: 4,
                               child: Container(
@@ -1091,7 +1255,7 @@ class _QuizBuilderScreenState extends ConsumerState<QuizBuilderScreen> {
                                     labelStyle: TextStyle(color: Colors.white70, fontSize: 12),
                                     prefixIcon: Icon(Icons.menu_book_outlined, color: Colors.white, size: 20),
                                     border: InputBorder.none,
-                                    contentPadding: EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                                    contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 12),
                                   ),
                                 ),
                               ),
@@ -1308,6 +1472,7 @@ class _QuizBuilderScreenState extends ConsumerState<QuizBuilderScreen> {
                               Row(
                                 children: [
                                   Expanded(
+                                    flex: 3,
                                     child: TextFormField(
                                       controller: _subjectController,
                                       decoration: const InputDecoration(
@@ -1321,13 +1486,27 @@ class _QuizBuilderScreenState extends ConsumerState<QuizBuilderScreen> {
                                           : null,
                                     ),
                                   ),
-                                  const SizedBox(width: 12),
+                                  const SizedBox(width: 8),
                                   Expanded(
+                                    flex: 2,
                                     child: TextFormField(
                                       controller: _timeLimitController,
                                       decoration: const InputDecoration(
-                                        labelText: 'Time limit (min)',
+                                        labelText: 'Time (min)',
                                         prefixIcon: Icon(Icons.timer_outlined),
+                                      ),
+                                      keyboardType: TextInputType.number,
+                                      readOnly: _questionsSaved,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                    flex: 2,
+                                    child: TextFormField(
+                                      controller: _totalPointsController,
+                                      decoration: const InputDecoration(
+                                        labelText: 'Points',
+                                        prefixIcon: Icon(Icons.grade_outlined),
                                       ),
                                       keyboardType: TextInputType.number,
                                       readOnly: _questionsSaved,
@@ -1964,7 +2143,7 @@ class _QuizBuilderScreenState extends ConsumerState<QuizBuilderScreen> {
                             borderRadius: BorderRadius.circular(14),
                           ),
                         ),
-                        onPressed: _isSaving ? null : _saveQuiz,
+                        onPressed: _isSaving ? null : _confirmAndPublishDialog,
                         icon: _isSaving
                             ? const SizedBox(
                                 height: 20,

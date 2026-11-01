@@ -319,6 +319,9 @@ class _TeacherDashboardScreenState
         final allowDirector = user.allowDirectorNotifications;
 
         filteredAnnouncements = fetched.where((ann) {
+          // Authors can always view announcements they posted
+          if (ann.authorId == user.id) return true;
+
           final r = ann.authorRole.toLowerCase();
           // Filter out Admin notices if muted by user
           if (r.contains('admin')) {
@@ -1433,7 +1436,9 @@ class _TeacherDashboardScreenState
                             ),
                             icon: const Icon(Icons.person_add_alt_1_rounded, size: 18),
                             label: Text('Register for ${currentUser.attendanceClass ?? '9A'}'),
-                            onPressed: () => context.push('/teacher/students'),
+                            onPressed: () => context.push(
+                              '/admin/register-user?role=student&class=${Uri.encodeComponent(currentUser.attendanceClass ?? "")}',
+                            ),
                           ),
                         ),
                         const SizedBox(width: 10),

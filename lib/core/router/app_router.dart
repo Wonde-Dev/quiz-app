@@ -131,14 +131,15 @@ final routerProvider = Provider<GoRouter>((ref) {
       // Other regular faculty teachers focus strictly on academic activities (quizzes, resources, evaluation).
       if (user.role == AppRoles.teacher) {
         if (!user.isAttendanceTeacher &&
-            (location == '/teacher/students' ||
-             location == '/teacher/reset-passwords' ||
-             location == '/admin/register-user' ||
-             location == '/admin/approvals')) {
+            (location.startsWith('/teacher/students') ||
+             location.startsWith('/teacher/reset-passwords') ||
+             location.startsWith('/admin/register-user') ||
+             location.startsWith('/admin/approvals'))) {
           return '/teacher/dashboard';
         }
         if (user.isAttendanceTeacher &&
-            (location == '/admin/approvals' || location == '/admin/register-user')) {
+            (location.startsWith('/admin/approvals') ||
+             location.startsWith('/admin/register-user'))) {
           return null;
         }
       }

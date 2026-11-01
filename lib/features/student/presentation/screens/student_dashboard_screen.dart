@@ -156,6 +156,7 @@ class _StudentQuizListState extends ConsumerState<_StudentQuizList> {
       final allowDirector = currentUser?.allowDirectorNotifications ?? (studentProfile?['allow_director_notifications'] as bool? ?? true);
 
       announcements = fetched.where((ann) {
+        if (currentUser != null && ann.authorId == currentUser.id) return true;
         final r = ann.authorRole.toLowerCase();
         if (r.contains('admin')) {
           if (!allowAdmin) return false;

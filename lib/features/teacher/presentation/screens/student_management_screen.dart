@@ -2148,7 +2148,7 @@ class _StudentManagementScreenState
                                             size: 22,
                                           ),
                                         ),
-                                      if (_isAdmin)
+                                      if (_isAdmin || (_isAttendanceTeacher && role == AppRoles.student))
                                         IconButton(
                                           tooltip: 'Edit / Update $displayName',
                                           onPressed: _isResetting || _deletingId == id
@@ -2160,7 +2160,7 @@ class _StudentManagementScreenState
                                             size: 20,
                                           ),
                                         ),
-                                      if (_isAdmin || role == AppRoles.student)
+                                      if (_isAdmin || (_isAttendanceTeacher && role == AppRoles.student))
                                         IconButton(
                                           tooltip: 'Delete account $displayName',
                                           onPressed: _isResetting ||

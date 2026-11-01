@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:quiz_app/core/constants/app_roles.dart';
 import 'package:quiz_app/core/utils/validators.dart';
 import 'package:quiz_app/features/auth/presentation/providers/auth_provider.dart';
 import 'package:quiz_app/shared/widgets/dashboard_shell.dart';
@@ -861,56 +862,114 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                         ],
                       ),
                       const SizedBox(height: 16),
-                      Container(
-                        decoration: BoxDecoration(
-                          color: isDark ? const Color(0xFF1E293B) : const Color(0xFFF8FAFC),
-                          borderRadius: BorderRadius.circular(16),
-                          border: Border.all(
-                            color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0),
+                      if (user.role == AppRoles.admin || AppRoles.isDirector(user.role)) ...[
+                        Container(
+                          padding: const EdgeInsets.all(16),
+                          decoration: BoxDecoration(
+                            color: (user.role == AppRoles.admin
+                                    ? const Color(0xFFDC2626)
+                                    : const Color(0xFF6366F1))
+                                .withValues(alpha: 0.08),
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(
+                              color: (user.role == AppRoles.admin
+                                      ? const Color(0xFFDC2626)
+                                      : const Color(0xFF6366F1))
+                                  .withValues(alpha: 0.25),
+                            ),
+                          ),
+                          child: Row(
+                            children: [
+                              Icon(
+                                user.role == AppRoles.admin
+                                    ? Icons.shield_rounded
+                                    : Icons.admin_panel_settings_rounded,
+                                color: user.role == AppRoles.admin
+                                    ? const Color(0xFFDC2626)
+                                    : const Color(0xFF6366F1),
+                                size: 28,
+                              ),
+                              const SizedBox(width: 14),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      user.role == AppRoles.admin
+                                          ? 'Super Administrator Supervisory Mode'
+                                          : 'School Director Supervisory Mode',
+                                      style: const TextStyle(
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 14,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 4),
+                                    const Text(
+                                      'Executive administrators have full supervisory visibility over all campus notices and published announcements. Administrative accounts cannot mute institutional notifications.',
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        height: 1.4,
+                                        color: Color(0xFF64748B),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
                           ),
                         ),
-                        child: Column(
-                          children: [
-                            SwitchListTile(
-                              title: const Text(
-                                'Super Admin Announcements',
-                                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
-                              ),
-                              subtitle: const Text(
-                                'Allow system notices, emergency alerts, and directives from the Super Administrator',
-                                style: TextStyle(fontSize: 12),
-                              ),
-                              secondary: const Icon(Icons.shield_rounded, color: Color(0xFFDC2626)),
-                              value: user.allowAdminNotifications,
-                              onChanged: (val) {
-                                ref.read(authStateProvider.notifier).updateNotificationPreferences(
-                                  allowAdmin: val,
-                                  allowDirector: user.allowDirectorNotifications,
-                                );
-                              },
+                      ] else ...[
+                        Container(
+                          decoration: BoxDecoration(
+                            color: isDark ? const Color(0xFF1E293B) : const Color(0xFFF8FAFC),
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(
+                              color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0),
                             ),
-                            const Divider(height: 1),
-                            SwitchListTile(
-                              title: const Text(
-                                'School Director Announcements',
-                                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                          ),
+                          child: Column(
+                            children: [
+                              SwitchListTile(
+                                title: const Text(
+                                  'Super Admin Announcements',
+                                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                                ),
+                                subtitle: const Text(
+                                  'Allow system notices, emergency alerts, and directives from the Super Administrator',
+                                  style: TextStyle(fontSize: 12),
+                                ),
+                                secondary: const Icon(Icons.shield_rounded, color: Color(0xFFDC2626)),
+                                value: user.allowAdminNotifications,
+                                onChanged: (val) {
+                                  ref.read(authStateProvider.notifier).updateNotificationPreferences(
+                                    allowAdmin: val,
+                                    allowDirector: user.allowDirectorNotifications,
+                                  );
+                                },
                               ),
-                              subtitle: const Text(
-                                'Allow academic notices, faculty meetings, and campus bulletins from the School Director',
-                                style: TextStyle(fontSize: 12),
+                              const Divider(height: 1),
+                              SwitchListTile(
+                                title: const Text(
+                                  'School Director Announcements',
+                                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                                ),
+                                subtitle: const Text(
+                                  'Allow academic notices, faculty meetings, and campus bulletins from the School Director',
+                                  style: TextStyle(fontSize: 12),
+                                ),
+                                secondary: const Icon(Icons.campaign_rounded, color: Color(0xFF6366F1)),
+                                value: user.allowDirectorNotifications,
+                                onChanged: (val) {
+                                  ref.read(authStateProvider.notifier).updateNotificationPreferences(
+                                    allowAdmin: user.allowAdminNotifications,
+                                    allowDirector: val,
+                                  );
+                                },
                               ),
-                              secondary: const Icon(Icons.campaign_rounded, color: Color(0xFF6366F1)),
-                              value: user.allowDirectorNotifications,
-                              onChanged: (val) {
-                                ref.read(authStateProvider.notifier).updateNotificationPreferences(
-                                  allowAdmin: user.allowAdminNotifications,
-                                  allowDirector: val,
-                                );
-                              },
-                            ),
-                          ],
+                            ],
+                          ),
                         ),
-                      ),
+                      ],
                       const Divider(height: 48),
 
                       // Sign Out Section

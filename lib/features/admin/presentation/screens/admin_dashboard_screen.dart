@@ -1459,7 +1459,7 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen>
                 loading: _loading,
                 icon: Icons.co_present_rounded,
                 color: const Color(0xFF10B981),
-                onTap: _showDirectorOptionsDialog,
+                onTap: () => context.push('/admin/teachers'),
               ),
             ),
             const SizedBox(width: 10),
