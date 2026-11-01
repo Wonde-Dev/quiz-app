@@ -835,3 +835,4 @@ grant execute on function public.admin_update_user(uuid, text, text, uuid, uuid,
 notify pgrst, 'reload schema';
 
 commit;
+
