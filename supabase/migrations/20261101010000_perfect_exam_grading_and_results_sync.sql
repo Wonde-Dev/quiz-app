@@ -175,3 +175,4 @@ grant all on public.answers to authenticated;
 notify pgrst, 'reload schema';
 
 commit;
+

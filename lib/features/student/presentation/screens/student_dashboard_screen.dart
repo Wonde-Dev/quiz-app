@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:quiz_app/core/services/announcement_service.dart';
 import 'package:quiz_app/features/auth/presentation/providers/auth_provider.dart';
+import 'package:quiz_app/shared/models/school_announcement.dart';
 import 'package:quiz_app/shared/widgets/dashboard_welcome_banner.dart';
 import 'package:quiz_app/shared/widgets/dashboard_shell.dart';
 
@@ -37,6 +39,7 @@ class _StudentQuizListState extends ConsumerState<_StudentQuizList> {
       List<Map<String, dynamic>> grades,
       List<Map<String, dynamic>> enrolledSections,
       Map<String, dynamic>? studentProfile,
+      List<SchoolAnnouncement> announcements,
     })
   >
   _dashboard;
@@ -53,6 +56,7 @@ class _StudentQuizListState extends ConsumerState<_StudentQuizList> {
       List<Map<String, dynamic>> grades,
       List<Map<String, dynamic>> enrolledSections,
       Map<String, dynamic>? studentProfile,
+      List<SchoolAnnouncement> announcements,
     })
   >
   _loadDashboard() async {
@@ -141,11 +145,40 @@ class _StudentQuizListState extends ConsumerState<_StudentQuizList> {
       }
     }
 
+    // 5. School Announcements with notification preference filtering
+    List<SchoolAnnouncement> announcements = [];
+    try {
+      final fetched = await AnnouncementService().fetchAnnouncements(
+        schoolId: (studentProfile?['school_id'] as String?) ?? AnnouncementService.ciroSchoolId,
+      );
+      final currentUser = ref.read(authStateProvider).user;
+      final allowAdmin = currentUser?.allowAdminNotifications ?? (studentProfile?['allow_admin_notifications'] as bool? ?? true);
+      final allowDirector = currentUser?.allowDirectorNotifications ?? (studentProfile?['allow_director_notifications'] as bool? ?? true);
+
+      announcements = fetched.where((ann) {
+        final r = ann.authorRole.toLowerCase();
+        if (r.contains('admin')) {
+          if (!allowAdmin) return false;
+        }
+        if (r.contains('director') || r.contains('subadmin')) {
+          if (!allowDirector) return false;
+        }
+        final target = ann.targetAudience.toLowerCase();
+        if (target != 'all' && !target.contains('student')) {
+          return false;
+        }
+        return true;
+      }).toList();
+    } catch (e) {
+      debugPrint('Student announcements load note: $e');
+    }
+
     return (
       quizzes: quizzes,
       grades: grades,
       enrolledSections: enrolledSections,
       studentProfile: studentProfile,
+      announcements: announcements,
     );
   }
 
@@ -171,6 +204,7 @@ class _StudentQuizListState extends ConsumerState<_StudentQuizList> {
           List<Map<String, dynamic>> grades,
           List<Map<String, dynamic>> enrolledSections,
           Map<String, dynamic>? studentProfile,
+          List<SchoolAnnouncement> announcements,
         })
       >(
         future: _dashboard,
@@ -420,6 +454,255 @@ class _StudentQuizListState extends ConsumerState<_StudentQuizList> {
                     onPressed: () => context.push('/resources'),
                     child: const Text('View PDFs'),
                   ),
+                ),
+              ),
+              const SizedBox(height: 16),
+
+              // Official School Announcements & Notifications
+              Container(
+                padding: const EdgeInsets.all(18),
+                decoration: BoxDecoration(
+                  color: theme.brightness == Brightness.dark ? const Color(0xFF1E293B) : Colors.white,
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(
+                    color: theme.brightness == Brightness.dark ? const Color(0xFF334155) : const Color(0xFFE2E8F0),
+                    width: 1.2,
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: theme.brightness == Brightness.dark
+                          ? Colors.black.withValues(alpha: 0.2)
+                          : const Color(0xFF0F172A).withValues(alpha: 0.04),
+                      blurRadius: 14,
+                      offset: const Offset(0, 4),
+                    ),
+                  ],
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF6366F1).withValues(alpha: 0.12),
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: const Icon(Icons.campaign_rounded, color: Color(0xFF6366F1), size: 20),
+                        ),
+                        const SizedBox(width: 10),
+                        const Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Official School Notices',
+                                style: TextStyle(fontWeight: FontWeight.w800, fontSize: 14),
+                              ),
+                              Text(
+                                'Direct from Super Admin & School Directorate',
+                                style: TextStyle(fontSize: 11, color: Color(0xFF64748B)),
+                              ),
+                            ],
+                          ),
+                        ),
+                        IconButton(
+                          tooltip: 'Notification Preferences',
+                          icon: const Icon(Icons.tune_rounded, size: 20, color: Color(0xFF6366F1)),
+                          onPressed: () => context.push('/profile'),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 10),
+                    // Notification preference status indicator
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+                      decoration: BoxDecoration(
+                        color: theme.brightness == Brightness.dark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(
+                          color: theme.brightness == Brightness.dark ? const Color(0xFF334155) : const Color(0xFFE2E8F0),
+                        ),
+                      ),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Row(
+                            children: [
+                              Icon(
+                                user?.allowAdminNotifications == true
+                                    ? Icons.check_circle_rounded
+                                    : Icons.do_not_disturb_on_rounded,
+                                size: 13,
+                                color: user?.allowAdminNotifications == true
+                                    ? const Color(0xFF10B981)
+                                    : Colors.orange,
+                              ),
+                              const SizedBox(width: 4),
+                              Text(
+                                user?.allowAdminNotifications == true ? 'Admin: On' : 'Admin: Muted',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w600,
+                                  color: user?.allowAdminNotifications == true
+                                      ? const Color(0xFF10B981)
+                                      : Colors.orange,
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              Icon(
+                                user?.allowDirectorNotifications == true
+                                    ? Icons.check_circle_rounded
+                                    : Icons.do_not_disturb_on_rounded,
+                                size: 13,
+                                color: user?.allowDirectorNotifications == true
+                                    ? const Color(0xFF10B981)
+                                    : Colors.orange,
+                              ),
+                              const SizedBox(width: 4),
+                              Text(
+                                user?.allowDirectorNotifications == true ? 'Director: On' : 'Director: Muted',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w600,
+                                  color: user?.allowDirectorNotifications == true
+                                      ? const Color(0xFF10B981)
+                                      : Colors.orange,
+                                ),
+                              ),
+                            ],
+                          ),
+                          InkWell(
+                            onTap: () => context.push('/profile'),
+                            child: const Text(
+                              'Settings',
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: Color(0xFF6366F1),
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    if (result.announcements.isEmpty)
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(14),
+                        decoration: BoxDecoration(
+                          color: theme.brightness == Brightness.dark ? const Color(0xFF0F172A) : const Color(0xFFF1F5F9),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Text(
+                          (user?.allowAdminNotifications == false && user?.allowDirectorNotifications == false)
+                              ? 'Admin & Director announcements are muted in your settings.'
+                              : 'No school announcements posted for students currently.',
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(fontSize: 12, color: Color(0xFF64748B)),
+                        ),
+                      )
+                    else
+                      ...result.announcements.map((ann) {
+                        final isAdminNotice = ann.authorRole.toLowerCase().contains('admin');
+                        final isDirectorNotice = ann.authorRole.toLowerCase().contains('director') || ann.authorRole.toLowerCase().contains('subadmin');
+                        final badgeColor = isAdminNotice
+                            ? const Color(0xFF6366F1)
+                            : isDirectorNotice
+                                ? const Color(0xFF059669)
+                                : const Color(0xFF0284C7);
+                        final badgeLabel = isAdminNotice
+                            ? 'Super Admin'
+                            : isDirectorNotice
+                                ? 'School Directorate'
+                                : ann.authorRole;
+
+                        return Container(
+                          margin: const EdgeInsets.only(bottom: 10),
+                          padding: const EdgeInsets.all(14),
+                          decoration: BoxDecoration(
+                            color: theme.brightness == Brightness.dark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
+                            borderRadius: BorderRadius.circular(14),
+                            border: Border.all(
+                              color: theme.brightness == Brightness.dark ? const Color(0xFF334155) : const Color(0xFFE2E8F0),
+                            ),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                    decoration: BoxDecoration(
+                                      color: badgeColor.withValues(alpha: 0.15),
+                                      borderRadius: BorderRadius.circular(8),
+                                      border: Border.all(color: badgeColor.withValues(alpha: 0.3)),
+                                    ),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Icon(
+                                          isAdminNotice
+                                              ? Icons.security_rounded
+                                              : isDirectorNotice
+                                                  ? Icons.account_balance_rounded
+                                                  : Icons.person_rounded,
+                                          size: 12,
+                                          color: badgeColor,
+                                        ),
+                                        const SizedBox(width: 4),
+                                        Text(
+                                          'From: $badgeLabel (${ann.authorName})',
+                                          style: TextStyle(
+                                            fontSize: 11,
+                                            fontWeight: FontWeight.bold,
+                                            color: badgeColor,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  const Spacer(),
+                                  if (ann.isPinned)
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                      decoration: BoxDecoration(
+                                        color: Colors.amber.withValues(alpha: 0.15),
+                                        borderRadius: BorderRadius.circular(6),
+                                      ),
+                                      child: const Text(
+                                        'PINNED',
+                                        style: TextStyle(
+                                          color: Colors.amber,
+                                          fontSize: 10,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                    ),
+                                ],
+                              ),
+                              const SizedBox(height: 8),
+                              Text(
+                                ann.title,
+                                style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                ann.content,
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  height: 1.4,
+                                  color: theme.brightness == Brightness.dark ? const Color(0xFFCBD5E1) : const Color(0xFF475569),
+                                ),
+                              ),
+                            ],
+                          ),
+                        );
+                      }),
+                  ],
                 ),
               ),
               const SizedBox(height: 24),

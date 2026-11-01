@@ -58,12 +58,12 @@ class AuthService {
       }
     } catch (_) {}
 
-    // Priority 2: Direct public.users table lookup by username
+    // Priority 2: Direct public.users table lookup by username or username prefix
     try {
       final row = await _supabase
           .from('users')
           .select('email')
-          .ilike('username', input)
+          .or('username.ilike.$input,username.ilike.$input@%')
           .limit(1)
           .maybeSingle();
       final lookedUp = row?['email'] as String?;
@@ -270,12 +270,14 @@ class AuthService {
     String? email,
     String? phoneNumber,
     String? avatarPath,
+    String? username,
   }) async {
     final body = <String, String>{};
     if (fullName != null) body['fullName'] = fullName.trim();
     if (email != null) body['email'] = email.trim().toLowerCase();
     if (phoneNumber != null) body['phoneNumber'] = phoneNumber.trim();
     if (avatarPath != null) body['avatarPath'] = avatarPath;
+    if (username != null) body['username'] = username.trim();
 
     bool updatedViaFn = false;
     try {
@@ -297,6 +299,7 @@ class AuthService {
         if (avatarPath != null) rpcParams['p_avatar_url'] = avatarPath;
         if (email != null) rpcParams['p_email'] = email.trim().toLowerCase();
         if (phoneNumber != null) rpcParams['p_phone_number'] = phoneNumber.trim();
+        if (username != null) rpcParams['p_username'] = username.trim();
         try {
           await _supabase.rpc(
             'update_own_profile',
@@ -322,6 +325,7 @@ class AuthService {
           if (avatarPath != null) updateMap['avatar_url'] = avatarPath;
           if (email != null) updateMap['email'] = email.trim().toLowerCase();
           if (phoneNumber != null) updateMap['phone_number'] = phoneNumber.trim();
+          if (username != null) updateMap['username'] = username.trim();
           if (updateMap.isNotEmpty) {
             try {
               await _supabase.from('users').update(updateMap).eq('id', uid);
@@ -418,10 +422,31 @@ class AuthService {
     return lower;
   }
 
+  /// Resolves the canonical website redirect URL for password resets,
+  /// avoiding dead localhost:3000 redirects.
+  static String get resetPasswordRedirectUrl {
+    if (kIsWeb) {
+      final origin = Uri.base.origin;
+      if (origin.isNotEmpty &&
+          !origin.contains('localhost:3000') &&
+          !origin.contains('127.0.0.1:3000')) {
+        return '$origin/reset-password';
+      }
+    }
+    const envUrl = String.fromEnvironment('SITE_URL', defaultValue: '');
+    if (envUrl.isNotEmpty) {
+      return '$envUrl/reset-password';
+    }
+    return 'https://ciro-high-school.web.app/reset-password';
+  }
+
   Future<String> sendPasswordReset(String emailOrUsername) async {
     final targetEmail = await resolveEmail(emailOrUsername);
     try {
-      await _supabase.auth.resetPasswordForEmail(targetEmail);
+      await _supabase.auth.resetPasswordForEmail(
+        targetEmail,
+        redirectTo: resetPasswordRedirectUrl,
+      );
     } catch (e) {
       debugPrint('resetPasswordForEmail note: $e, falling back to signInWithOtp');
       await _supabase.auth.signInWithOtp(
@@ -571,9 +596,12 @@ class AuthService {
         .eq('id', uid);
   }
 
-  /// Reset password via Supabase OTP.
+  /// Reset password via Supabase email recovery link.
   Future<void> resetPassword(String email) async {
-    await _supabase.auth.resetPasswordForEmail(email);
+    await _supabase.auth.resetPasswordForEmail(
+      email,
+      redirectTo: resetPasswordRedirectUrl,
+    );
   }
 
   /// Update user password (requires current session).
@@ -581,6 +609,14 @@ class AuthService {
     await _supabase.auth.updateUser(UserAttributes(password: newPassword));
     final uid = _supabase.auth.currentUser?.id;
     if (uid != null) {
+      try {
+        await _supabase.from('users').update({
+          'must_change_password': false,
+          'failed_login_attempts': 0,
+          'is_locked': false,
+          'locked_at': null,
+        }).eq('id', uid);
+      } catch (_) {}
       try {
         await unlockUserAccount(uid);
       } catch (_) {}

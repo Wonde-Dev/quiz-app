@@ -169,3 +169,23 @@ String defaultRolePassword({
   final letter = roleLetter(role ?? usernameOrFullName);
   return '$baseName$order@$letter.edu';
 }
+
+/// Returns the institutional username suffix for a role (e.g. '@Teacher.edu')
+String roleSuffix(String role) {
+  final roleName = switch (role.toLowerCase()) {
+    'admin' => 'Admin',
+    'subadmin' || 'director' => 'Director',
+    'teacher' => 'Teacher',
+    _ => 'Student',
+  };
+  return '@$roleName.edu';
+}
+
+/// Extracts and cleans the username prefix before '@'
+String cleanUsernamePrefix(String username) {
+  String prefix = username.trim();
+  if (prefix.contains('@')) {
+    prefix = prefix.split('@').first.trim();
+  }
+  return prefix;
+}

@@ -82,6 +82,9 @@ class CourseResourceService {
     required String teacherName,
     String? schoolId,
     String fileType = 'pdf',
+    String? thumbnailUrl,
+    Uint8List? thumbnailBytes,
+    String? thumbnailFileName,
   }) async {
     final cleanFileName = fileName.replaceAll(RegExp(r'[^a-zA-Z0-9._-]'), '_');
     final storagePath = 'teachers/$teacherId/${DateTime.now().millisecondsSinceEpoch}_$cleanFileName';
@@ -112,6 +115,30 @@ class CourseResourceService {
       }
     }
 
+    String? finalThumbnailUrl = thumbnailUrl?.trim();
+    if (thumbnailBytes != null && thumbnailBytes.isNotEmpty) {
+      final cleanThumbName = (thumbnailFileName ?? 'thumb.png').replaceAll(RegExp(r'[^a-zA-Z0-9._-]'), '_');
+      final thumbPath = 'teachers/$teacherId/thumb_${DateTime.now().millisecondsSinceEpoch}_$cleanThumbName';
+      try {
+        await _supabase.storage.from('course-materials').uploadBinary(
+              thumbPath,
+              thumbnailBytes,
+              fileOptions: const FileOptions(contentType: 'image/jpeg', upsert: true),
+            );
+        finalThumbnailUrl = _supabase.storage.from('course-materials').getPublicUrl(thumbPath);
+      } catch (e) {
+        try {
+          final fallbackThumbPath = 'thumbs/$thumbPath';
+          await _supabase.storage.from('profile-photos').uploadBinary(
+                fallbackThumbPath,
+                thumbnailBytes,
+                fileOptions: const FileOptions(contentType: 'image/jpeg', upsert: true),
+              );
+          finalThumbnailUrl = _supabase.storage.from('profile-photos').getPublicUrl(fallbackThumbPath);
+        } catch (_) {}
+      }
+    }
+
     final id = DateTime.now().microsecondsSinceEpoch.toString();
     final resourceMap = {
       'id': id,
@@ -121,6 +148,7 @@ class CourseResourceService {
       'file_url': fileUrl,
       'file_type': fileType,
       'file_size': fileBytes.length,
+      if (finalThumbnailUrl != null && finalThumbnailUrl.isNotEmpty) 'thumbnail_url': finalThumbnailUrl,
       'school_id': schoolId,
       'teacher_id': teacherId,
       'teacher_name': teacherName,

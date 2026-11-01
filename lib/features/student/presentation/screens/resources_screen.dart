@@ -107,6 +107,9 @@ class _ResourcesScreenState extends ConsumerState<ResourcesScreen> {
     String selectedGrade = 'Grade 9';
     String selectedSection = 'Section A';
     String fileType = 'worksheet';
+    Uint8List? pickedThumbnailBytes;
+    String? pickedThumbnailName;
+    final thumbUrlController = TextEditingController();
 
     final shouldUpload = await showDialog<bool>(
       context: context,
@@ -195,6 +198,63 @@ class _ResourcesScreenState extends ConsumerState<ResourcesScreen> {
                   ],
                   onChanged: (v) => setDialogState(() => fileType = v ?? 'worksheet'),
                 ),
+                const SizedBox(height: 14),
+
+                // Cover / Thumbnail section
+                const Text(
+                  'Resource Thumbnail / Cover Preview',
+                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF64748B)),
+                ),
+                const SizedBox(height: 6),
+                if (pickedThumbnailBytes != null) ...[
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(10),
+                    child: Image.memory(
+                      pickedThumbnailBytes!,
+                      height: 110,
+                      width: double.infinity,
+                      fit: BoxFit.cover,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                ],
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        style: OutlinedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(vertical: 10),
+                        ),
+                        onPressed: () async {
+                          final img = await FilePicker.pickFiles(
+                            type: FileType.image,
+                            withData: true,
+                          );
+                          if (img != null && img.files.isNotEmpty) {
+                            setDialogState(() {
+                              pickedThumbnailBytes = img.files.first.bytes;
+                              pickedThumbnailName = img.files.first.name;
+                            });
+                          }
+                        },
+                        icon: const Icon(Icons.image_search_rounded, size: 18),
+                        label: Text(
+                          pickedThumbnailBytes != null ? 'Change Cover' : 'Pick Thumbnail',
+                          style: const TextStyle(fontSize: 12),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                TextFormField(
+                  controller: thumbUrlController,
+                  decoration: const InputDecoration(
+                    labelText: 'Or Cover Image URL',
+                    hintText: 'https://...',
+                    prefixIcon: Icon(Icons.link_rounded),
+                  ),
+                ),
               ],
             ),
           ),
@@ -218,10 +278,11 @@ class _ResourcesScreenState extends ConsumerState<ResourcesScreen> {
     try {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Uploading worksheet PDF...')),
+          const SnackBar(content: Text('Uploading worksheet PDF with thumbnail...')),
         );
       }
 
+      final enteredUrl = thumbUrlController.text.trim();
       await _resourceService.uploadResource(
         fileBytes: file.bytes!,
         fileName: file.name,
@@ -233,6 +294,9 @@ class _ResourcesScreenState extends ConsumerState<ResourcesScreen> {
         teacherName: user.fullName?.isNotEmpty == true ? user.fullName! : user.username,
         schoolId: user.schoolId,
         fileType: fileType,
+        thumbnailUrl: enteredUrl.isNotEmpty ? enteredUrl : null,
+        thumbnailBytes: pickedThumbnailBytes,
+        thumbnailFileName: pickedThumbnailName,
       );
 
       if (mounted) {
@@ -1160,8 +1224,8 @@ class _ResourceCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // If Video and Thumbnail is available, show video banner with play button
-          if (isVideo && thumbnail != null && thumbnail.isNotEmpty)
+          // If Thumbnail is available, show banner preview
+          if (thumbnail != null && thumbnail.isNotEmpty)
             InkWell(
               onTap: () => _openResource(context),
               child: Stack(
@@ -1174,28 +1238,33 @@ class _ResourceCard extends StatelessWidget {
                     fit: BoxFit.cover,
                     errorBuilder: (_, _, _) => Container(
                       height: 120,
-                      color: const Color(0xFF1E293B),
-                      child: const Center(
-                        child: Icon(Icons.smart_display_rounded, size: 48, color: Colors.white54),
+                      color: isDark ? const Color(0xFF1E293B) : const Color(0xFFE2E8F0),
+                      child: Center(
+                        child: Icon(
+                          isVideo ? Icons.smart_display_rounded : Icons.menu_book_rounded,
+                          size: 48,
+                          color: isDark ? Colors.white54 : const Color(0xFF64748B),
+                        ),
                       ),
                     ),
                   ),
-                  Container(
-                    width: 52,
-                    height: 52,
-                    decoration: BoxDecoration(
-                      color: Colors.red.withValues(alpha: 0.9),
-                      shape: BoxShape.circle,
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withValues(alpha: 0.4),
-                          blurRadius: 12,
-                          offset: const Offset(0, 4),
-                        ),
-                      ],
+                  if (isVideo)
+                    Container(
+                      width: 52,
+                      height: 52,
+                      decoration: BoxDecoration(
+                        color: Colors.red.withValues(alpha: 0.9),
+                        shape: BoxShape.circle,
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withValues(alpha: 0.4),
+                            blurRadius: 12,
+                            offset: const Offset(0, 4),
+                          ),
+                        ],
+                      ),
+                      child: const Icon(Icons.play_arrow_rounded, color: Colors.white, size: 34),
                     ),
-                    child: const Icon(Icons.play_arrow_rounded, color: Colors.white, size: 34),
-                  ),
                   Positioned(
                     top: 10,
                     right: 10,
@@ -1205,14 +1274,18 @@ class _ResourceCard extends StatelessWidget {
                         color: Colors.black.withValues(alpha: 0.75),
                         borderRadius: BorderRadius.circular(8),
                       ),
-                      child: const Row(
+                      child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          Icon(Icons.ondemand_video_rounded, color: Colors.white, size: 12),
-                          SizedBox(width: 4),
+                          Icon(
+                            isVideo ? Icons.ondemand_video_rounded : Icons.picture_as_pdf_rounded,
+                            color: Colors.white,
+                            size: 12,
+                          ),
+                          const SizedBox(width: 4),
                           Text(
-                            'VIDEO LESSON',
-                            style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.w900),
+                            isVideo ? 'VIDEO LESSON' : resource.fileType.toUpperCase(),
+                            style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.w900),
                           ),
                         ],
                       ),
@@ -1230,7 +1303,7 @@ class _ResourceCard extends StatelessWidget {
                 Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    if (!isVideo || thumbnail == null || thumbnail.isEmpty)
+                    if (thumbnail == null || thumbnail.isEmpty)
                       Container(
                         padding: const EdgeInsets.all(10),
                         margin: const EdgeInsets.only(right: 12),

@@ -117,23 +117,21 @@ class StudentPasswordResetService {
           });
           updatedInAuth = true;
         } catch (rpcErr) {
-          debugPrint('reset_user_password_admin RPC note: $rpcErr');
+          debugPrint('reset_user_password_admin RPC error: $rpcErr');
+          failures.add(PasswordResetFailure(
+            accountId: id,
+            message: rpcErr.toString(),
+          ));
+          continue;
         }
 
-        if (!updatedInAuth) {
-          try {
-            await client
-                .from('users')
-                .update({'must_change_password': true})
-                .eq('id', id);
-          } catch (_) {}
+        if (updatedInAuth) {
+          results.add(PasswordResetResult(
+            accountId: id,
+            username: username,
+            temporaryPassword: newPassword,
+          ));
         }
-
-        results.add(PasswordResetResult(
-          accountId: id,
-          username: username,
-          temporaryPassword: newPassword,
-        ));
       } catch (err) {
         failures.add(PasswordResetFailure(
           accountId: id,

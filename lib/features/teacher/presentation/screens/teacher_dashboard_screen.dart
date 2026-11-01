@@ -3,8 +3,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:quiz_app/core/constants/app_roles.dart';
+import 'package:quiz_app/core/services/announcement_service.dart';
 import 'package:quiz_app/core/services/course_resource_service.dart';
 import 'package:quiz_app/features/auth/presentation/providers/auth_provider.dart';
+import 'package:quiz_app/shared/models/school_announcement.dart';
 import 'package:quiz_app/shared/widgets/animated_press_button.dart';
 import 'package:quiz_app/shared/widgets/dashboard_shell.dart';
 
@@ -26,6 +28,7 @@ class _TeacherDashboardScreenState
   List<Map<String, dynamic>> _gradeStats = [];
   List<Map<String, dynamic>> _sectionStats = [];
   List<Map<String, dynamic>> _myAssignedCourses = [];
+  List<SchoolAnnouncement> _announcements = [];
   bool _loading = true;
   bool _materialsLocked = false;
   bool _togglingLock = false;
@@ -196,22 +199,22 @@ class _TeacherDashboardScreenState
       final rpcRes = results[2];
       final myCoursesList = (results[3] as List).cast<Map<String, dynamic>>();
 
-      // Collect this teacher's assigned grades and sections
+      // Collect this teacher's assigned grades and sections (supports multi-grade/class assignments)
       final assignedGradesSet = <String>{};
       final assignedSectionsSet = <String>{};
 
-      if (user.assignedGrade != null && user.assignedGrade!.trim().isNotEmpty) {
-        assignedGradesSet.add(user.assignedGrade!.trim().toLowerCase());
+      void addParts(Set<String> set, String? raw) {
+        if (raw == null) return;
+        for (final p in raw.split(RegExp(r'[,;]'))) {
+          final trimmed = p.trim().toLowerCase();
+          if (trimmed.isNotEmpty) set.add(trimmed);
+        }
       }
-      if (user.attendanceGrade != null && user.attendanceGrade!.trim().isNotEmpty) {
-        assignedGradesSet.add(user.attendanceGrade!.trim().toLowerCase());
-      }
-      if (user.assignedClass != null && user.assignedClass!.trim().isNotEmpty) {
-        assignedSectionsSet.add(user.assignedClass!.trim().toLowerCase());
-      }
-      if (user.attendanceClass != null && user.attendanceClass!.trim().isNotEmpty) {
-        assignedSectionsSet.add(user.attendanceClass!.trim().toLowerCase());
-      }
+
+      addParts(assignedGradesSet, user.assignedGrade);
+      addParts(assignedGradesSet, user.attendanceGrade);
+      addParts(assignedSectionsSet, user.assignedClass);
+      addParts(assignedSectionsSet, user.attendanceClass);
 
       for (final course in myCoursesList) {
         final secMap = course['sections'] as Map<String, dynamic>?;
@@ -225,7 +228,8 @@ class _TeacherDashboardScreenState
 
       final activeStudents = allStudents.where((s) {
         if (s['is_active'] == false) return false;
-        if (assignedGradesSet.isEmpty && assignedSectionsSet.isEmpty) return true;
+        // Strictly scoped: if teacher has NO assigned grades and sections, they see ZERO students
+        if (assignedGradesSet.isEmpty && assignedSectionsSet.isEmpty) return false;
         final sGrade = (s['assigned_grade'] ?? s['requested_grade'] ?? '').toString().trim().toLowerCase();
         final sClass = (s['assigned_class'] ?? s['requested_class'] ?? '').toString().trim().toLowerCase();
 
@@ -249,7 +253,7 @@ class _TeacherDashboardScreenState
             return assignedGradesSet.any((ag) => name == ag || name.contains(ag) || ag.contains(name));
           }).toList();
         } else {
-          filteredGrades = allG;
+          filteredGrades = [];
         }
 
         if (assignedSectionsSet.isNotEmpty) {
@@ -258,7 +262,38 @@ class _TeacherDashboardScreenState
             return assignedSectionsSet.any((asect) => name == asect || name.contains(asect) || asect.contains(name));
           }).toList();
         } else {
-          filteredSections = allS;
+          filteredSections = [];
+        }
+      }
+
+      // Ensure every assigned grade appears in filteredGrades even if RPC did not list it
+      for (final ag in assignedGradesSet) {
+        if (!filteredGrades.any((g) => (g['grade'] ?? g['name'] ?? '').toString().toLowerCase() == ag)) {
+          final displayGrade = ag.startsWith('grade') ? ag : 'Grade ${ag.replaceAll(RegExp(r'[^0-9]'), '')}';
+          final capitalized = displayGrade.split(' ').map((w) => w.isNotEmpty ? '${w[0].toUpperCase()}${w.substring(1)}' : '').join(' ');
+          final count = activeStudents.where((st) {
+            final sg = (st['assigned_grade'] ?? st['requested_grade'] ?? '').toString().toLowerCase();
+            return sg == ag || sg.contains(ag) || ag.contains(sg);
+          }).length;
+          filteredGrades.add({
+            'grade': capitalized.isNotEmpty ? capitalized : ag,
+            'students': count,
+          });
+        }
+      }
+
+      // Ensure every assigned section appears in filteredSections
+      for (final asct in assignedSectionsSet) {
+        if (!filteredSections.any((s) => (s['section'] ?? s['name'] ?? '').toString().toLowerCase() == asct)) {
+          final cleanSec = asct.toUpperCase().replaceAll('SECTION', '').replaceAll('CLASS', '').trim();
+          final count = activeStudents.where((st) {
+            final sc = (st['assigned_class'] ?? st['requested_class'] ?? '').toString().toLowerCase();
+            return sc == asct || sc.contains(asct) || asct.contains(sc);
+          }).length;
+          filteredSections.add({
+            'section': cleanSec.isNotEmpty ? cleanSec : asct.toUpperCase(),
+            'students': count,
+          });
         }
       }
 
@@ -274,6 +309,35 @@ class _TeacherDashboardScreenState
         submissionCount = (submissions as List).length;
       }
 
+      // Fetch School Announcements & Filter strictly by user notification permissions
+      List<SchoolAnnouncement> filteredAnnouncements = [];
+      try {
+        final fetched = await AnnouncementService().fetchAnnouncements(
+          schoolId: user.schoolId ?? AnnouncementService.ciroSchoolId,
+        );
+        final allowAdmin = user.allowAdminNotifications;
+        final allowDirector = user.allowDirectorNotifications;
+
+        filteredAnnouncements = fetched.where((ann) {
+          final r = ann.authorRole.toLowerCase();
+          // Filter out Admin notices if muted by user
+          if (r.contains('admin')) {
+            if (!allowAdmin) return false;
+          }
+          // Filter out Director notices if muted by user
+          if (r.contains('director') || r.contains('subadmin')) {
+            if (!allowDirector) return false;
+          }
+          final target = ann.targetAudience.toLowerCase();
+          if (target != 'all' && !target.contains('teacher')) {
+            return false;
+          }
+          return true;
+        }).toList();
+      } catch (annErr) {
+        debugPrint('Announcement loading note: $annErr');
+      }
+
       if (!mounted) return;
       setState(() {
         _myQuizzes = List<Map<String, dynamic>>.from(quizzesList);
@@ -283,6 +347,7 @@ class _TeacherDashboardScreenState
         _gradeStats = filteredGrades;
         _sectionStats = filteredSections;
         _myAssignedCourses = myCoursesList;
+        _announcements = filteredAnnouncements;
         _loading = false;
       });
     } catch (e) {
@@ -880,11 +945,11 @@ class _TeacherDashboardScreenState
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
-                              'Students by Section across Grades',
+                              'Your Assigned Teaching Sections & Enrolled Students',
                               style: TextStyle(fontWeight: FontWeight.w800, fontSize: 14),
                             ),
                             Text(
-                              'Faculty view of enrolled students in Section A, B, C per grade level',
+                              'Scoped strictly to your assigned grades and class sections',
                               style: TextStyle(fontSize: 11, color: Color(0xFF64748B)),
                             ),
                           ],
@@ -895,20 +960,40 @@ class _TeacherDashboardScreenState
                   const SizedBox(height: 14),
                   if (_loading)
                     const Center(child: Padding(padding: EdgeInsets.all(16), child: CircularProgressIndicator()))
+                  else if (_gradeStats.isEmpty)
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: isDark ? const Color(0xFF0F172A) : const Color(0xFFF1F5F9),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: const Row(
+                        children: [
+                          Icon(Icons.info_outline_rounded, color: Color(0xFF64748B), size: 20),
+                          SizedBox(width: 10),
+                          Expanded(
+                            child: Text(
+                              'No classes assigned yet. Contact School Directorate or Super Admin to assign your teaching grades and sections.',
+                              style: TextStyle(fontSize: 12, color: Color(0xFF64748B)),
+                            ),
+                          ),
+                        ],
+                      ),
+                    )
                   else
                     Column(
                       children: [
-                        for (final grade in const ['Grade 9', 'Grade 10', 'Grade 11', 'Grade 12'])
+                        for (final gradeItem in _gradeStats)
                           Builder(
                             builder: (context) {
-                              final gradeMatch = _gradeStats.firstWhere(
-                                (g) => g['grade'] == grade,
-                                orElse: () => {'students': 0},
-                              );
-                              final gradeTotal = gradeMatch['students'] ?? 0;
+                              final gradeName = (gradeItem['grade'] ?? gradeItem['name'] ?? 'Assigned Grade').toString();
+                              final gradeTotal = gradeItem['students'] ?? 0;
                               final matchingSections = _sectionStats.where((s) {
-                                final sGrade = s['grade']?.toString() ?? '';
-                                return sGrade == grade || sGrade == grade.replaceAll('Grade ', '');
+                                final sGrade = (s['grade'] ?? '').toString();
+                                return sGrade.isEmpty ||
+                                    sGrade.toLowerCase() == gradeName.toLowerCase() ||
+                                    gradeName.toLowerCase().contains(sGrade.toLowerCase());
                               }).toList();
 
                               return Container(
@@ -928,11 +1013,11 @@ class _TeacherDashboardScreenState
                                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                       children: [
                                         Text(
-                                          grade,
+                                          gradeName,
                                           style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13),
                                         ),
                                         Text(
-                                          '$gradeTotal Students Total',
+                                          '$gradeTotal Students Enrolled',
                                           style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF0284C7)),
                                         ),
                                       ],
@@ -943,18 +1028,17 @@ class _TeacherDashboardScreenState
                                       runSpacing: 6,
                                       children: [
                                         if (matchingSections.isEmpty)
-                                          for (final sec in const ['A', 'B', 'C'])
-                                            Container(
-                                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                              decoration: BoxDecoration(
-                                                color: Colors.grey.withValues(alpha: 0.1),
-                                                borderRadius: BorderRadius.circular(8),
-                                              ),
-                                              child: Text(
-                                                'Class $sec: 0 students',
-                                                style: const TextStyle(fontSize: 11, color: Colors.grey),
-                                              ),
-                                            )
+                                          Container(
+                                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                            decoration: BoxDecoration(
+                                              color: const Color(0xFF0284C7).withValues(alpha: 0.08),
+                                              borderRadius: BorderRadius.circular(8),
+                                            ),
+                                            child: Text(
+                                              'All Class Sections: $gradeTotal students',
+                                              style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Color(0xFF0369A1)),
+                                            ),
+                                          )
                                         else
                                           for (final s in matchingSections)
                                             Container(
@@ -978,6 +1062,259 @@ class _TeacherDashboardScreenState
                           ),
                       ],
                     ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 18),
+
+            // Official School Announcements & Notifications
+            Container(
+              padding: const EdgeInsets.all(18),
+              decoration: BoxDecoration(
+                color: isDark ? const Color(0xFF1E293B) : Colors.white,
+                borderRadius: BorderRadius.circular(22),
+                border: Border.all(
+                  color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0),
+                  width: 1.2,
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: isDark
+                        ? Colors.black.withValues(alpha: 0.2)
+                        : const Color(0xFF0F172A).withValues(alpha: 0.04),
+                    blurRadius: 14,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF8B5CF6).withValues(alpha: 0.12),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: const Icon(Icons.campaign_rounded, color: Color(0xFF8B5CF6), size: 20),
+                      ),
+                      const SizedBox(width: 10),
+                      const Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Official School Notices & Broadcasts',
+                              style: TextStyle(fontWeight: FontWeight.w800, fontSize: 14),
+                            ),
+                            Text(
+                              'Dispatches from Super Admin & School Directorate',
+                              style: TextStyle(fontSize: 11, color: Color(0xFF64748B)),
+                            ),
+                          ],
+                        ),
+                      ),
+                      IconButton(
+                        tooltip: 'Notification Preferences',
+                        icon: const Icon(Icons.tune_rounded, size: 20, color: Color(0xFF8B5CF6)),
+                        onPressed: () => context.push('/profile'),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  // Notification filter status bar
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0),
+                      ),
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Row(
+                          children: [
+                            Icon(
+                              currentUser?.allowAdminNotifications == true
+                                  ? Icons.check_circle_rounded
+                                  : Icons.do_not_disturb_on_rounded,
+                              size: 14,
+                              color: currentUser?.allowAdminNotifications == true
+                                  ? const Color(0xFF10B981)
+                                  : Colors.orange,
+                            ),
+                            const SizedBox(width: 4),
+                            Text(
+                              currentUser?.allowAdminNotifications == true
+                                  ? 'Admin: Allowed'
+                                  : 'Admin: Muted',
+                              style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
+                                color: currentUser?.allowAdminNotifications == true
+                                    ? const Color(0xFF10B981)
+                                    : Colors.orange,
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Icon(
+                              currentUser?.allowDirectorNotifications == true
+                                  ? Icons.check_circle_rounded
+                                  : Icons.do_not_disturb_on_rounded,
+                              size: 14,
+                              color: currentUser?.allowDirectorNotifications == true
+                                  ? const Color(0xFF10B981)
+                                  : Colors.orange,
+                            ),
+                            const SizedBox(width: 4),
+                            Text(
+                              currentUser?.allowDirectorNotifications == true
+                                  ? 'Director: Allowed'
+                                  : 'Director: Muted',
+                              style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
+                                color: currentUser?.allowDirectorNotifications == true
+                                    ? const Color(0xFF10B981)
+                                    : Colors.orange,
+                              ),
+                            ),
+                          ],
+                        ),
+                        InkWell(
+                          onTap: () => context.push('/profile'),
+                          child: const Text(
+                            'Edit in Settings',
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: Color(0xFF8B5CF6),
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  if (_announcements.isEmpty)
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: isDark ? const Color(0xFF0F172A) : const Color(0xFFF1F5F9),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Text(
+                        (currentUser?.allowAdminNotifications == false && currentUser?.allowDirectorNotifications == false)
+                            ? 'All school notifications are currently muted in your Profile Settings.'
+                            : 'No announcements posted for faculty at this time.',
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(fontSize: 12, color: Color(0xFF64748B)),
+                      ),
+                    )
+                  else
+                    ..._announcements.map((ann) {
+                      final isAdminNotice = ann.authorRole.toLowerCase().contains('admin');
+                      final isDirectorNotice = ann.authorRole.toLowerCase().contains('director') || ann.authorRole.toLowerCase().contains('subadmin');
+                      final badgeColor = isAdminNotice
+                          ? const Color(0xFF6366F1)
+                          : isDirectorNotice
+                              ? const Color(0xFF059669)
+                              : const Color(0xFF0284C7);
+                      final badgeLabel = isAdminNotice
+                          ? 'Super Admin'
+                          : isDirectorNotice
+                              ? 'School Directorate'
+                              : ann.authorRole;
+
+                      return Container(
+                        margin: const EdgeInsets.only(bottom: 10),
+                        padding: const EdgeInsets.all(14),
+                        decoration: BoxDecoration(
+                          color: isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(
+                            color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0),
+                          ),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                  decoration: BoxDecoration(
+                                    color: badgeColor.withValues(alpha: 0.15),
+                                    borderRadius: BorderRadius.circular(8),
+                                    border: Border.all(color: badgeColor.withValues(alpha: 0.3)),
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(
+                                        isAdminNotice
+                                            ? Icons.security_rounded
+                                            : isDirectorNotice
+                                                ? Icons.account_balance_rounded
+                                                : Icons.person_rounded,
+                                        size: 12,
+                                        color: badgeColor,
+                                      ),
+                                      const SizedBox(width: 4),
+                                      Text(
+                                        'From: $badgeLabel (${ann.authorName})',
+                                        style: TextStyle(
+                                          fontSize: 11,
+                                          fontWeight: FontWeight.bold,
+                                          color: badgeColor,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                const Spacer(),
+                                if (ann.isPinned)
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                    decoration: BoxDecoration(
+                                      color: Colors.amber.withValues(alpha: 0.15),
+                                      borderRadius: BorderRadius.circular(6),
+                                    ),
+                                    child: const Text(
+                                      'PINNED',
+                                      style: TextStyle(
+                                        color: Colors.amber,
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                  ),
+                              ],
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              ann.title,
+                              style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              ann.content,
+                              style: TextStyle(
+                                fontSize: 12.5,
+                                height: 1.4,
+                                color: isDark ? const Color(0xFFCBD5E1) : const Color(0xFF475569),
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+                    }),
                 ],
               ),
             ),

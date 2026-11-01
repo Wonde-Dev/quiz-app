@@ -3,7 +3,6 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:quiz_app/core/constants/app_roles.dart';
-import 'package:quiz_app/core/utils/role_username.dart';
 import 'package:quiz_app/features/auth/presentation/providers/auth_provider.dart';
 import 'package:quiz_app/core/services/student_password_reset_service.dart';
 import 'package:quiz_app/shared/widgets/dashboard_shell.dart';
@@ -40,7 +39,19 @@ class _ResetPasswordScreenState extends ConsumerState<ResetPasswordScreen> {
     super.dispose();
   }
 
-  bool get _isAdmin => ref.read(authStateProvider).user?.role == AppRoles.admin;
+  bool get _isSuperAdmin {
+    final user = ref.read(authStateProvider).user;
+    return user?.isSuperAdmin == true || user?.role == AppRoles.admin;
+  }
+
+  bool get _isDirector =>
+      AppRoles.isDirector(ref.read(authStateProvider).user?.role);
+
+  bool get _isAttendanceTeacher =>
+      ref.read(authStateProvider).user?.role == AppRoles.teacher &&
+      ref.read(authStateProvider).user?.isAttendanceTeacher == true;
+
+  bool get _isAdmin => _isSuperAdmin;
 
   Future<void> _loadAccounts() async {
     setState(() {
@@ -57,25 +68,75 @@ class _ResetPasswordScreenState extends ConsumerState<ResetPasswordScreen> {
       return;
     }
 
+    if (!_isSuperAdmin && !_isDirector && !_isAttendanceTeacher) {
+      setState(() {
+        _error = 'Access Restricted: Only designated Attendance Teachers (for students), School Directorate (for teachers), and Super Admin have authorization to reset user passwords.';
+        _accounts = [];
+        _filteredAccounts = [];
+        _loading = false;
+      });
+      return;
+    }
+
     try {
       final client = Supabase.instance.client;
       var query = client
           .from('users')
-          .select('id, username, full_name, role, school_id');
+          .select('id, username, full_name, role, school_id, assigned_grade, assigned_class, requested_grade, requested_class');
 
-      if (!_isAdmin) {
-        query = query.eq('role', AppRoles.student);
-        if (currentUser.schoolId != null) {
-          query = query.eq('school_id', currentUser.schoolId!);
+      if (_isSuperAdmin) {
+        if (_selectedRoleFilter != 'all') {
+          query = query.eq('role', _selectedRoleFilter);
         }
-      } else if (_selectedRoleFilter != 'all') {
-        query = query.eq('role', _selectedRoleFilter);
+      } else if (_isDirector) {
+        // Director can reset teachers ONLY
+        query = query.eq('role', AppRoles.teacher);
+      } else if (_isAttendanceTeacher) {
+        // Attendance Teacher can reset students ONLY
+        query = query.eq('role', AppRoles.student);
+      }
+
+      if (currentUser.schoolId != null) {
+        query = query.eq('school_id', currentUser.schoolId!);
       }
 
       final rows = await query.order('full_name');
-      final list = List<Map<String, dynamic>>.from(rows)
+      var list = List<Map<String, dynamic>>.from(rows)
           .where((user) => user['id'] != currentUser.id)
           .toList();
+
+      if (_isAttendanceTeacher) {
+        // Scope strictly to this attendance teacher's assigned grades and classes
+        final assignedGrades = <String>{};
+        final assignedClasses = <String>{};
+        void addParts(Set<String> set, String? raw) {
+          if (raw == null) return;
+          for (final p in raw.split(RegExp(r'[,;]'))) {
+            final t = p.trim().toLowerCase();
+            if (t.isNotEmpty) set.add(t);
+          }
+        }
+        addParts(assignedGrades, currentUser.assignedGrade);
+        addParts(assignedGrades, currentUser.attendanceGrade);
+        addParts(assignedClasses, currentUser.assignedClass);
+        addParts(assignedClasses, currentUser.attendanceClass);
+
+        if (assignedGrades.isEmpty && assignedClasses.isEmpty) {
+          list = [];
+        } else {
+          list = list.where((student) {
+            final sGrade = (student['assigned_grade'] ?? student['requested_grade'] ?? '').toString().trim().toLowerCase();
+            final sClass = (student['assigned_class'] ?? student['requested_class'] ?? '').toString().trim().toLowerCase();
+
+            final gradeMatch = assignedGrades.isEmpty || assignedGrades.any((g) =>
+                sGrade == g || sGrade.contains(g) || g.contains(sGrade));
+            final classMatch = assignedClasses.isEmpty || assignedClasses.any((c) =>
+                sClass == c || sClass.contains(c) || c.contains(sClass));
+
+            return gradeMatch && classMatch;
+          }).toList();
+        }
+      }
 
       if (!mounted) return;
       setState(() {
@@ -122,43 +183,33 @@ class _ResetPasswordScreenState extends ConsumerState<ResetPasswordScreen> {
         final newPassword = result.results.first.temporaryPassword;
         _showCredentialsDialog(account, newPassword);
       } else if (result.failures.isNotEmpty) {
-        // Attempt direct fallback
-        await _fallbackResetPassword(account);
+        final msg = result.failures.first.message;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Password reset denied: $msg'),
+            backgroundColor: Colors.red,
+          ),
+        );
       } else {
-        await _fallbackResetPassword(account);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Unable to reset password for this user.'),
+            backgroundColor: Colors.red,
+          ),
+        );
       }
     } catch (e) {
       if (!mounted) return;
-      // Fallback: update must_change_password directly and show predictable password
-      await _fallbackResetPassword(account);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Password reset error: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
     } finally {
       if (mounted) setState(() => _resettingId = null);
     }
   }
-
-  Future<void> _fallbackResetPassword(Map<String, dynamic> account) async {
-    final accountId = account['id'] as String;
-    final username = account['username'] as String? ?? '';
-    final fullName = account['full_name'] as String? ?? '';
-    final role = account['role'] as String? ?? AppRoles.student;
-    final fallbackPassword = defaultRolePassword(
-      usernameOrFullName: username.isNotEmpty ? username : fullName,
-      role: role,
-    );
-
-    try {
-      await Supabase.instance.client
-          .from('users')
-          .update({'must_change_password': true})
-          .eq('id', accountId);
-    } catch (_) {
-      // Ignore fallback DB update error if network is offline
-    }
-
-    if (!mounted) return;
-    _showCredentialsDialog(account, fallbackPassword);
-  }
-
 
   void _showCredentialsDialog(
     Map<String, dynamic> account,

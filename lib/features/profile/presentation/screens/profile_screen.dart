@@ -17,6 +17,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
   final _formKey = GlobalKey<FormState>();
   final _passwordFormKey = GlobalKey<FormState>();
   final _nameController = TextEditingController();
+  final _usernameController = TextEditingController();
   final _emailController = TextEditingController();
   final _phoneController = TextEditingController();
   final _currentPasswordController = TextEditingController();
@@ -33,6 +34,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
   @override
   void dispose() {
     _nameController.dispose();
+    _usernameController.dispose();
     _emailController.dispose();
     _phoneController.dispose();
     _currentPasswordController.dispose();
@@ -52,6 +54,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
             fullName: _nameController.text.trim(),
             email: _emailController.text.trim(),
             phoneNumber: _phoneController.text.trim(),
+            username: _usernameController.text.trim(),
           );
       if (mounted) setState(() => _saved = true);
     } catch (error) {
@@ -155,6 +158,8 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
       _nameController.text = user.fullName ?? '';
       _emailController.text = user.email;
       _phoneController.text = user.phoneNumber ?? '';
+      final parts = user.username.split('@');
+      _usernameController.text = parts.first;
     }
 
     final displayName = user.fullName?.trim().isNotEmpty == true
@@ -503,23 +508,36 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                             ),
                             const SizedBox(height: 16),
                             TextFormField(
-                              initialValue: user.username,
-                              readOnly: true,
+                              controller: _usernameController,
                               decoration: InputDecoration(
-                                labelText: 'Institutional Username (Permanent)',
-                                helperText:
-                                    'Assigned institutional login identity',
+                                labelText: 'Institutional Username Prefix',
+                                helperText: user.username.contains('@')
+                                    ? 'Change prefix before @${user.username.split('@').last}'
+                                    : 'Change institutional username prefix',
+                                suffixText: user.username.contains('@')
+                                    ? '@${user.username.split('@').last}'
+                                    : '',
+                                suffixStyle: const TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  color: Color(0xFF10B981),
+                                ),
                                 prefixIcon: const Icon(
-                                    Icons.alternate_email_rounded,
-                                    color: Color(0xFF10B981)),
+                                  Icons.alternate_email_rounded,
+                                  color: Color(0xFF10B981),
+                                ),
                                 border: OutlineInputBorder(
                                   borderRadius: BorderRadius.circular(12),
                                 ),
-                                filled: true,
-                                fillColor: isDark
-                                    ? const Color(0xFF1E293B)
-                                    : const Color(0xFFF8FAFC),
                               ),
+                              validator: (val) {
+                                if (val == null || val.trim().length < 2) {
+                                  return 'Username prefix must be at least 2 characters';
+                                }
+                                if (val.contains('@') && !val.trim().endsWith('.edu')) {
+                                  return 'Enter username prefix without @ symbol';
+                                }
+                                return null;
+                              },
                             ),
                             const SizedBox(height: 16),
                             TextFormField(

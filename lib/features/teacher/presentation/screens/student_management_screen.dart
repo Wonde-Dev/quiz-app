@@ -74,18 +74,18 @@ class _StudentManagementScreenState
       final assignedGrades = <String>{};
       final assignedClasses = <String>{};
 
-      if (currentUser?.assignedGrade != null && currentUser!.assignedGrade!.trim().isNotEmpty) {
-        assignedGrades.add(currentUser.assignedGrade!.trim().toLowerCase());
+      void addParts(Set<String> set, String? raw) {
+        if (raw == null) return;
+        for (final p in raw.split(RegExp(r'[,;]'))) {
+          final trimmed = p.trim().toLowerCase();
+          if (trimmed.isNotEmpty) set.add(trimmed);
+        }
       }
-      if (currentUser?.attendanceGrade != null && currentUser!.attendanceGrade!.trim().isNotEmpty) {
-        assignedGrades.add(currentUser.attendanceGrade!.trim().toLowerCase());
-      }
-      if (currentUser?.assignedClass != null && currentUser!.assignedClass!.trim().isNotEmpty) {
-        assignedClasses.add(currentUser.assignedClass!.trim().toLowerCase());
-      }
-      if (currentUser?.attendanceClass != null && currentUser!.attendanceClass!.trim().isNotEmpty) {
-        assignedClasses.add(currentUser.attendanceClass!.trim().toLowerCase());
-      }
+
+      addParts(assignedGrades, currentUser?.assignedGrade);
+      addParts(assignedGrades, currentUser?.attendanceGrade);
+      addParts(assignedClasses, currentUser?.assignedClass);
+      addParts(assignedClasses, currentUser?.attendanceClass);
 
       // Also retrieve courses assigned to this teacher
       try {
@@ -104,6 +104,11 @@ class _StudentManagementScreenState
         }
       } catch (_) {}
 
+      // Strictly scoped: if teacher has no assigned grades and classes, return empty list
+      if (assignedGrades.isEmpty && assignedClasses.isEmpty) {
+        return [];
+      }
+
       var query = client
           .from('users')
           .select(
@@ -120,10 +125,6 @@ class _StudentManagementScreenState
 
       final rows = await query.order('full_name');
       final allStudents = List<Map<String, dynamic>>.from(rows);
-
-      if (assignedGrades.isEmpty && assignedClasses.isEmpty) {
-        return allStudents;
-      }
 
       return allStudents.where((student) {
         final sGrade = (student['assigned_grade'] ?? student['requested_grade'] ?? '').toString().trim().toLowerCase();
@@ -160,6 +161,15 @@ class _StudentManagementScreenState
   }
 
   Future<void> _reset(List<String> studentIds) async {
+    if (!_canManageStudents) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Unauthorized: Only designated Attendance Teachers and Super Admin can reset student credentials.'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
     setState(() {
       _isResetting = true;
       _error = null;
@@ -1698,7 +1708,7 @@ class _StudentManagementScreenState
                 label: const Text('Review Approvals', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
               ),
             ),
-          if (_selectedIds.isNotEmpty) ...[
+          if (_selectedIds.isNotEmpty && _canManageStudents) ...[
             Padding(
               padding: const EdgeInsets.only(right: 8),
               child: FilledButton.tonalIcon(
@@ -1936,7 +1946,7 @@ class _StudentManagementScreenState
                           final username = student['username'] as String? ?? '';
                           final role = (student['role'] as String? ?? 'student')
                               .toLowerCase();
-                          final canReset = _isAdmin || role == AppRoles.student;
+                          final canReset = _isAdmin || (_isAttendanceTeacher && role == AppRoles.student);
                           final isSelected = _selectedIds.contains(id);
 
                           final Color roleColor;

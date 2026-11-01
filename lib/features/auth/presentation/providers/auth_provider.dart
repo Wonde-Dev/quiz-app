@@ -376,6 +376,7 @@ class AuthNotifier extends Notifier<AuthState> {
     required String fullName,
     required String email,
     required String phoneNumber,
+    String? username,
   }) async {
     final existing = state.user;
     if (existing == null) return;
@@ -389,6 +390,7 @@ class AuthNotifier extends Notifier<AuthState> {
         fullName: fullName,
         email: email,
         phoneNumber: phoneNumber,
+        username: username,
       );
       final updatedUser = await _authService.getAppUser(existing.id);
       if (updatedUser == null) {
